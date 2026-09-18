@@ -1391,6 +1391,9 @@ spawn_refuse_if_away_spend_cap() {
 # costs nothing to unwind; rechecked after the task-set lock so two fresh
 # spawns cannot both publish from a stale count.
 spawn_refuse_if_away_spend_cap
+if [ -x "${FM_TEST_SPAWN_AFTER_EARLY_CAP:-}" ]; then
+  "$FM_TEST_SPAWN_AFTER_EARLY_CAP"
+fi
 if [ "$RELAUNCH" -ne 1 ] && [ "$KIND" != secondmate ]; then
   spawn_actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
   if [ "$spawn_actor" = branch ] && fm_lease_away_relocated; then
