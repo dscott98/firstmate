@@ -881,6 +881,153 @@ SH
   pass "session-lock: a same-session confirmation waits for the claim lock and refreshes a re-keyed id"
 }
 
+# If another live session publishes while a confirmation is waiting on the claim
+# lock, the waiter must not overwrite that session's sidecar or report success.
+test_same_session_confirmation_does_not_steal_after_wait() {
+  local dir session_pid holder_pid confirm_pid other_pid
+  dir="$TMP_ROOT/confirm-no-steal"
+  mkdir -p "$dir/state"
+  cat > "$dir/run.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$$" > "$FM_HOME/state/session-pid"
+CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/acquire.out" 2>&1
+acquire_rc=$?
+if [ "$acquire_rc" != 0 ]; then
+  printf '%s\n' "$acquire_rc" > "$FM_HOME/state/acquire.rc"
+  printf '%s\n' 1 > "$FM_HOME/state/confirm.rc"
+  exit 1
+fi
+cp "$FM_HOME/state/.lock-session" "$FM_HOME/state/sidecar-after-acquire"
+printf '%s\n' 0 > "$FM_HOME/state/acquire.rc"
+
+"$FM_CLAUDE" -c '
+  printf "%s\n" "$$" > "$FM_HOME/state/other-pid"
+  while [ ! -e "$FM_HOME/state/stop-other" ] && [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ]; do
+    sleep 0.05
+  done
+' &
+printf '%s\n' "$!" > "$FM_HOME/state/other-bash-pid"
+i=0
+while [ "$i" -lt 400 ] && [ ! -s "$FM_HOME/state/other-pid" ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+[ -s "$FM_HOME/state/other-pid" ] || {
+  printf '%s\n' 2 > "$FM_HOME/state/confirm.rc"
+  exit 2
+}
+
+bash -c '
+  set -u
+  . "$1"
+  fm_lock_try_acquire "$2/.lock.acquire" || exit 1
+  : > "$2/holder-ready"
+  while [ ! -e "$2/release-holder" ] && [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ]; do
+    sleep 0.05
+  done
+  fm_lock_release "$2/.lock.acquire"
+' _ "$FM_WAKE" "$FM_HOME/state" &
+printf '%s\n' "$!" > "$FM_HOME/state/holder-pid"
+
+i=0
+while [ "$i" -lt 400 ] && [ ! -e "$FM_HOME/state/holder-ready" ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+if [ ! -e "$FM_HOME/state/holder-ready" ]; then
+  printf '%s\n' 2 > "$FM_HOME/state/confirm.rc"
+  exit 2
+fi
+
+CLAUDE_CODE_SESSION_ID=S2 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/confirm.out" 2>&1 &
+printf '%s\n' "$!" > "$FM_HOME/state/confirm-pid"
+
+i=0
+while [ "$i" -lt 20 ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+
+cp "$FM_HOME/state/other-pid" "$FM_HOME/state/.lock"
+printf '%s\n' OTHER > "$FM_HOME/state/.lock-session"
+: > "$FM_HOME/state/release-holder"
+wait "$(tr -d '[:space:]' < "$FM_HOME/state/confirm-pid")"
+printf '%s\n' "$?" > "$FM_HOME/state/confirm.rc"
+wait "$(tr -d '[:space:]' < "$FM_HOME/state/holder-pid")" || true
+: > "$FM_HOME/state/stop-other"
+wait "$(tr -d '[:space:]' < "$FM_HOME/state/other-bash-pid")" || true
+SH
+  chmod +x "$dir/run.sh"
+
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" FM_WAKE="$ROOT/bin/fm-wake-lib.sh" \
+    FM_CLAUDE="$NAMED_CLAUDE" \
+    "$NAMED_CLAUDE" "$dir/run.sh" &
+  session_pid=$!
+  BG_FIXTURE_PIDS+=("$session_pid")
+  wait_for_file "$dir/state/acquire.rc" "the initial lock acquisition"
+  expect_code 0 "$(tr -d '[:space:]' < "$dir/state/acquire.rc")" \
+    "the session could not acquire its lock: $(cat "$dir/state/acquire.out")"
+  wait_for_file "$dir/state/other-pid" "the other live harness pid"
+  other_pid=$(tr -d '[:space:]' < "$dir/state/other-pid")
+  BG_FIXTURE_PIDS+=("$other_pid")
+  wait_for_file "$dir/state/holder-pid" "the claim-lock holder pid"
+  holder_pid=$(tr -d '[:space:]' < "$dir/state/holder-pid")
+  BG_FIXTURE_PIDS+=("$holder_pid")
+  wait_for_file "$dir/state/confirm-pid" "the same-session confirmation pid"
+  confirm_pid=$(tr -d '[:space:]' < "$dir/state/confirm-pid")
+  BG_FIXTURE_PIDS+=("$confirm_pid")
+  wait_for_file "$dir/state/confirm.rc" "the contended confirmation result"
+  wait "$session_pid" || true
+  [ "$(tr -d '[:space:]' < "$dir/state/confirm.rc")" != 0 ] \
+    || fail "the waiter reported success after another live session published: $(cat "$dir/state/confirm.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = OTHER ] \
+    || fail "the waiter overwrote the other session's sidecar to $(cat "$dir/state/.lock-session")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$other_pid" ] \
+    || fail "the waiter rewrote lock line 1 off the other live session"
+  grep -q "another live firstmate session holds the lock (pid $other_pid, session OTHER)" "$dir/state/confirm.out" \
+    || fail "the waiter did not refuse the other live owner: $(cat "$dir/state/confirm.out")"
+  pass "session-lock: a waiting confirmation does not steal another session's lock"
+}
+
+# A failed line-1 write after publishing a new id must restore the previous
+# sidecar, not leave the new id beside the unclaimed pid.
+test_failed_lock_write_restores_previous_sidecar() {
+  local dir stale_pid
+  dir="$TMP_ROOT/restore-sidecar"
+  mkdir -p "$dir/state"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
+    "$NAMED_CLAUDE" -c '
+      CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/acquire.out" 2>&1
+      printf "%s\n" "$?" > "$FM_HOME/state/acquire.rc"
+      printf "%s\n" "$$" > "$FM_HOME/state/stale-pid"
+    '
+  expect_code 0 "$(tr -d '[:space:]' < "$dir/state/acquire.rc")" \
+    "the first session could not acquire its lock: $(cat "$dir/state/acquire.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
+    || fail "the first session did not record S1"
+  stale_pid=$(tr -d '[:space:]' < "$dir/state/stale-pid")
+  chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
+    "$NAMED_CLAUDE" -c '
+      CLAUDE_CODE_SESSION_ID=S2 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reclaim.out" 2>&1
+      printf "%s\n" "$?" > "$FM_HOME/state/reclaim.rc"
+    '
+  chmod u+w "$dir/state/.lock" 2>/dev/null || true
+  [ "$(tr -d '[:space:]' < "$dir/state/reclaim.rc")" != 0 ] \
+    || fail "a read-only stale lock was overwritten: $(cat "$dir/state/reclaim.out")"
+  grep -q 'cannot write session lock' "$dir/state/reclaim.out" \
+    || fail "the reclaim did not fail on the lock write: $(cat "$dir/state/reclaim.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
+    || fail "the failed reclaim left sidecar $(cat "$dir/state/.lock-session"), expected the previous id S1"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$stale_pid" ] \
+    || fail "the failed reclaim rewrote lock line 1"
+  pass "session-lock: a failed lock write restores the previous sidecar"
+}
+
 test_version_named_session_is_identified_on_both_platforms
 test_harness_at_namespace_pid1_is_examined
 test_ordinary_paths_are_never_harness_processes
@@ -893,3 +1040,5 @@ test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock
 test_e2e_background_session_keeps_its_lock_across_a_recycled_chain
 test_same_session_confirmation_refreshes_rekeyed_id_under_claim_lock
+test_same_session_confirmation_does_not_steal_after_wait
+test_failed_lock_write_restores_previous_sidecar

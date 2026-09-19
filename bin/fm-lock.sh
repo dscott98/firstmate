@@ -64,15 +64,43 @@ rm -f "$probe" 2>/dev/null || {
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 CLAIM_LOCK="$STATE/.lock.acquire"
 CLAIM_LOCK_HELD=0
-LOCK_SESSION_PUBLISHED_NEW=0
+# 0: nothing to roll back. 1: restore $LOCK_SESSION_PREV. 2: sidecar was absent.
+LOCK_SESSION_ROLLBACK=0
+LOCK_SESSION_PREV="$STATE/.lock-session.prev"
 release_claim_lock() {
   if [ "$CLAIM_LOCK_HELD" -eq 1 ]; then
     fm_lock_release "$CLAIM_LOCK"
     CLAIM_LOCK_HELD=0
   fi
 }
-trap release_claim_lock EXIT
+restore_uncommitted_lock_session() {
+  case "$LOCK_SESSION_ROLLBACK" in
+    1) mv -f "$LOCK_SESSION_PREV" "$LOCK_SESSION" 2>/dev/null || true ;;
+    2) rm -f "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || true ;;
+  esac
+  LOCK_SESSION_ROLLBACK=0
+}
+commit_lock_session() {
+  rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
+  LOCK_SESSION_ROLLBACK=0
+}
+on_lock_exit() {
+  restore_uncommitted_lock_session
+  release_claim_lock
+}
+trap on_lock_exit EXIT
 trap 'exit 1' HUP INT TERM
+
+remember_lock_session() {
+  [ "$LOCK_SESSION_ROLLBACK" -eq 0 ] || return 0
+  if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
+    rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
+    cp -P "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
+    LOCK_SESSION_ROLLBACK=1
+  else
+    LOCK_SESSION_ROLLBACK=2
+  fi
+}
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
 # trusted id backs. Called only while the claim lock is held. A sidecar already
@@ -84,15 +112,16 @@ publish_lock_session() {
     if recorded=$(fm_session_lock_recorded_session_id "$STATE") && [ "$recorded" = "$trusted" ]; then
       return 0
     fi
+    remember_lock_session || return 1
     tmp=$(mktemp "$STATE/.lock-session.XXXXXX" 2>/dev/null) || return 1
     if ! { printf '%s\n' "$trusted" > "$tmp" && mv -f "$tmp" "$LOCK_SESSION"; } 2>/dev/null; then
       rm -f "$tmp" 2>/dev/null
       return 1
     fi
-    LOCK_SESSION_PUBLISHED_NEW=1
     return 0
   fi
   if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
+    remember_lock_session || return 1
     rm -f "$LOCK_SESSION" 2>/dev/null || return 1
   fi
   return 0
@@ -104,28 +133,34 @@ publish_lock_session_or_die() {
   exit 1
 }
 
-remove_newly_published_lock_session() {
-  if [ "$LOCK_SESSION_PUBLISHED_NEW" -eq 1 ]; then
-    rm -f "$LOCK_SESSION" 2>/dev/null || true
-    LOCK_SESSION_PUBLISHED_NEW=0
-  fi
-}
-
 # This session already holds the lock, recorded as pid $1. Line 1 stays exactly
 # as recorded while that pid is alive; only the sidecar is refreshed, under the
 # claim lock, so a /clear re-key inside the same process replaces the old id.
 # A same-session confirmation waits for the claim lock so the sidecar refresh
-# completes. The prior-session-sweep-is-finishing refusal is a takeover rule and
-# does not apply here.
+# completes. After the wait, the lock is re-read and the sidecar is refreshed
+# only when this session still owns it; otherwise the claim lock is released
+# and the caller continues with the ordinary live-owner or reclaim path. The
+# prior-session-sweep-is-finishing refusal is a takeover rule and does not
+# apply here.
 confirm_own_lock() {  # <recorded-pid>
+  local recorded waited=0
   if [ "$CLAIM_LOCK_HELD" -ne 1 ]; then
     fm_lock_acquire_wait "$CLAIM_LOCK"
     CLAIM_LOCK_HELD=1
+    waited=1
   fi
-  publish_lock_session_or_die
-  release_claim_lock
-  echo "lock acquired: harness pid $1"
-  exit 0
+  recorded=$(cat "$LOCK" 2>/dev/null || true)
+  if [ "$recorded" = "$me" ] || fm_session_lock_owned_by_self "$STATE"; then
+    publish_lock_session_or_die
+    commit_lock_session
+    release_claim_lock
+    echo "lock acquired: harness pid $recorded"
+    exit 0
+  fi
+  if [ "$waited" -eq 1 ]; then
+    release_claim_lock
+  fi
+  return 1
 }
 
 refuse_live_owner() {  # <recorded-pid>
@@ -142,6 +177,7 @@ if [ -f "$LOCK" ] && [ ! -L "$LOCK" ]; then
   old=$(cat "$LOCK" 2>/dev/null || true)
   if [ "$old" = "$me" ] || fm_session_lock_owned_by_self "$STATE"; then
     confirm_own_lock "$old"
+    old=$(cat "$LOCK" 2>/dev/null || true)
   fi
   if fm_harness_pid_alive "$old"; then
     refuse_live_owner "$old"
@@ -169,26 +205,26 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   }
   if [ "$old" != "$me" ] && fm_harness_pid_alive "$old"; then
     fm_session_lock_owned_by_self "$STATE" && confirm_own_lock "$old"
-    refuse_live_owner "$old"
+    old=$(cat "$LOCK" 2>/dev/null || true)
+    if [ "$old" != "$me" ] && fm_harness_pid_alive "$old"; then
+      refuse_live_owner "$old"
+    fi
   fi
 fi
 # The sidecar goes first: a fresh pid beside a previous session's id would let
-# that session's resume own this lock. If line 1 then fails to publish, a
-# sidecar newly written here is removed so the failed acquisition stays
-# ancestry-only.
+# that session's resume own this lock. An interrupted or failed line-1 write
+# restores the previous sidecar.
 publish_lock_session_or_die
 if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
-  remove_newly_published_lock_session
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
 fi
+commit_lock_session
 written=$(cat "$LOCK" 2>/dev/null) || {
-  remove_newly_published_lock_session
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1
 }
 if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ]; then
-  remove_newly_published_lock_session
   echo "error: session lock ownership verification failed; operate read-only until resolved" >&2
   exit 1
 fi
