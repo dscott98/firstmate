@@ -1,0 +1,30 @@
+]11;?]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+                                                                                                                        ]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+~/.no-mistakes/worktrees/a1211da81307/01M2VV2ESQ723TGD987VM7517N/.test-pi-tmp/live/project (detached)]8;;
+0.0%/128k (auto)                                                                                             gpt-4o-mini]8;;]0;π - project pi v0.85.1                                                                                                             ]8;;
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                        ]8;;
+ Press ctrl+o to show full startup help and loaded resources.                                                           ]8;;
+                                                                                                                        ]8;;
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ]8;;
+]8;;
+]8;;
+[Context]                                                                                                               ]8;;
+  ~/.no-mistakes/worktrees/a1211da81307/01M2VV2ESQ723TGD987VM7517N/AGENTS.md                                            ]8;;
+]8;;
+[Skills]                                                                                                                ]8;;
+  afk, ahoy, ask-user-authority, bearings, bootstrap-diagnostics, captain-hold-lifecycle, decision-hold-lifecycle,      ]8;;
+diagnostic-reasoning, firstmate-codexapp, firstmate-coding-guidelines, firstmate-orca, fmx-respond, harness-adapters,   ]8;;
+no-mistakes, process-event-sources, project-management, quiet, quota-array-dispatch, secondmate-provisioning, stow,     ]8;;
+stuck-crewmate-recovery, updatefirstmate                                                                                ]8;;
+]8;;
+[Extensions]                                                                                                            ]8;;
+  probe.ts                                                                                                              ]8;;
+]8;;
+]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+                                                                                                                        ]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+~/.no-mistakes/worktrees/a1211da81307/01M2VV2ESQ723TGD987VM7517N/.test-pi-tmp/live/project (detached)]8;;
+0.0%/128k (auto)                                                                                             gpt-4o-mini]8;;

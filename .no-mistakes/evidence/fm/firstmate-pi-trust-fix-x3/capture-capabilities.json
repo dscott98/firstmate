@@ -1,0 +1,12 @@
+{
+  "DISPLAY_available": true,
+  "WAYLAND_DISPLAY_available": true,
+  "capture_tools": {
+    "gnome-screenshot": false,
+    "grim": false,
+    "scrot": false,
+    "chromium": false,
+    "google-chrome": true,
+    "asciinema": false
+  }
+}

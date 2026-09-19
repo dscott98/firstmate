@@ -1,0 +1,16 @@
+]11;?────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+]8;;
+ Trust project folder?                                                                                                  ]8;;
+ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M2VV2ESQ723TGD987VM7517N/.test-pi-tmp/live/project                  ]8;;
+                                                                                                                        ]8;;
+ This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.   ]8;;
+]8;;
+ → Trust                                                                                                                ]8;;
+   Trust parent folder (/home/dscott/.no-mistakes/worktrees/a1211da81307/01M2VV2ESQ723TGD987VM7517N/.test-pi-tmp/live)  ]8;;
+   Trust (this session only)                                                                                            ]8;;
+   Do not trust                                                                                                         ]8;;
+   Do not trust (this session only)                                                                                     ]8;;
+]8;;
+ ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        ]8;;
+]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
