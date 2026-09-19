@@ -156,7 +156,12 @@
 #   name from PATH once, probes that concrete path with --help, and launches the
 #   same path. It adds --tui-mode regular only when that help advertises the flag;
 #   a failed or inconclusive probe omits it so older Pi versions remain launchable.
-#   A missing selected executable refuses before endpoint creation, and pi-signed
+#   Every Pi-family launch also carries Pi's scoped one-run --approve flag, which
+#   trusts project-local resources for that launch only and leaves global trust
+#   defaults untouched. The same help probe must advertise --approve or spawn
+#   refuses before endpoint creation, because an unsupported launch could park
+#   at Pi's folder-trust prompt and be mistaken for productive work. A missing
+#   selected executable also refuses before endpoint creation, and pi-signed
 #   never falls back to pi.
 #   Every Pi launch (including secondmates and relaunches) uses the trust and
 #   agent_start receipt gate owned by bin/fm-pi-start-lib.sh before success.
@@ -298,6 +303,7 @@
 #     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
+#                  (Pi-family launches always add the separately verified --approve)
 #     __PISTART__  incarnation-specific startup extension in the staged launch directory
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
@@ -1756,6 +1762,16 @@ pi_supports_tui_mode() {
   printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
 }
 
+# --approve is the one-run project-local resource approval that prevents the
+# interactive folder-trust prompt without persisting a global trust decision.
+# Unlike the optional TUI-mode cosmetic, it is required: launching a Pi that
+# does not advertise it could report success while the pane is still blocked.
+pi_supports_approve() {
+  local executable=$1 help
+  help=$("$executable" --help 2>&1) || return 1
+  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--approve([[:space:]=,]|$)'
+}
+
 # omp pre-launch model validation. `omp models --json` (omp 18.1.11) prints
 # {"models":[{"provider","id","selector":"<provider>/<id>",...}]} for built-in and
 # auto-discovered providers only; it never lists a provider an extension
@@ -1895,7 +1911,7 @@ launch_template() {
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
-    printf '%s' '__PIBIN____PITUIMODE__'
+    printf '%s' '__PIBIN____PITUIMODE__ --approve'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ -e __PISTART__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -2155,6 +2171,10 @@ pi | pi-signed)
     exit 1
   }
   PI_VERSION=$("$PI_BIN" --version 2>/dev/null) || PI_VERSION=unknown
+  if ! pi_supports_approve "$PI_BIN"; then
+    echo "error: $HARNESS executable '$PI_BIN' does not advertise Pi's required one-run --approve flag; refusing to launch a worker that could remain at a folder-trust prompt" >&2
+    exit 1
+  fi
   PI_TUI_MODE=
   if pi_supports_tui_mode "$PI_BIN"; then
     PI_TUI_MODE=' --tui-mode regular'
