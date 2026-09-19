@@ -199,7 +199,7 @@ fm_harness_pid_alive() {
 fm_session_lock_trusted_session_id() {  # [<ancestry-pids>]
   local id=${CLAUDE_CODE_SESSION_ID:-} claude_pid=${CLAUDE_PID:-} pids=${1:-} pid comm args
   [ -n "$id" ] || return 1
-  case "$id" in *[!A-Za-z0-9._-]*) return 1 ;; esac
+  case "$id" in *$'\n'*|*$'\r'*) return 1 ;; esac
   case "$claude_pid" in ''|*[!0-9]*) return 1 ;; esac
   if [ -z "$pids" ]; then
     pids=$(fm_harness_ancestry_pids) || return 1
@@ -220,12 +220,14 @@ EOF
 
 # Print the session id recorded beside the lock in state dir $1, or return 1.
 # bin/fm-lock.sh is the only writer of state/.lock-session; a missing,
-# symlinked, unreadable, empty, or malformed sidecar is simply no recorded id.
+# symlinked, unreadable, or empty sidecar, or one whose first line contains a
+# newline or carriage return, is simply no recorded id.
 fm_session_lock_recorded_session_id() {  # <state>
   local state=$1 recorded
   [ -f "$state/.lock-session" ] && [ ! -L "$state/.lock-session" ] || return 1
   recorded=$(head -n 1 "$state/.lock-session" 2>/dev/null) || return 1
-  case "$recorded" in ''|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  [ -n "$recorded" ] || return 1
+  case "$recorded" in *$'\n'*|*$'\r'*) return 1 ;; esac
   printf '%s\n' "$recorded"
 }
 

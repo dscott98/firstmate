@@ -358,9 +358,19 @@ test_same_session_id_owns_a_recycled_background_chain() {
   fi
   FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=700 foreign_owner "$fakebin" "$state" >/dev/null \
     || fail "an untrusted id suppressed the foreign-owner verdict"
-  if FM_TEST_SESSION_ID='S1 x' FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
-    fail "a malformed session id was trusted"
+  printf 'S1:x\n' > "$state/.lock-session"
+  FM_TEST_SESSION_ID='S1:x' FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state" \
+    || fail "a trusted id containing a colon did not own the lock"
+  if FM_TEST_SESSION_ID='S1:x' FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null; then
+    fail "a matching id containing a colon was reported as a foreign owner"
   fi
+  printf 'S1\r' > "$state/.lock-session"
+  if FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 owned "$fakebin" "$state"; then
+    fail "a recorded id containing a carriage return was treated as a session id"
+  fi
+  FM_TEST_SESSION_ID=S1 FM_TEST_CLAUDE_PID=710 foreign_owner "$fakebin" "$state" >/dev/null \
+    || fail "a carriage-return sidecar suppressed the foreign-owner verdict"
+  printf 'S1\n' > "$state/.lock-session"
   # 4. No id at all: the legacy ancestry verdict, unchanged.
   if owned "$fakebin" "$state"; then
     fail "with no session id the recycled chain claimed the lock"
