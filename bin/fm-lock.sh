@@ -13,10 +13,10 @@
 #
 # The trusted id itself is recorded beside the lock in state/.lock-session, a
 # sidecar written only here and only under the claim lock: refreshed on every
-# confirmed-own acquisition, including the early already-mine exit, removed
-# when the acquiring session proves no trusted id, and left byte-identical
-# across a same-session confirmation. A same-session confirmation never
-# rewrites line 1 while the recorded pid is alive, because
+# confirmed-own acquisition, including the early already-mine exit that waits
+# for the claim lock, removed when the acquiring session proves no trusted id,
+# and left byte-identical across a same-session confirmation. A same-session
+# confirmation never rewrites line 1 while the recorded pid is alive, because
 # bin/fm-startup-network.sh compares that pid across its deferred sweeps; a dead
 # recorded pid is reclaimed and rewritten to this session's anchor.
 #
@@ -47,11 +47,7 @@ if [ "${1:-}" = "status" ]; then
     echo "lock: unreadable"
     exit 0
   }
-  session=
-  if recorded=$(fm_session_lock_recorded_session_id "$STATE"); then
-    session=" (session $recorded)"
-  fi
-  if fm_harness_pid_alive "$old"; then echo "lock: held by live harness pid $old$session"; else echo "lock: stale (pid $old dead or not a harness)$session"; fi
+  if fm_harness_pid_alive "$old"; then echo "lock: held by live harness pid $old"; else echo "lock: stale (pid $old dead or not a harness)"; fi
   exit 0
 fi
 
@@ -68,6 +64,7 @@ rm -f "$probe" 2>/dev/null || {
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 CLAIM_LOCK="$STATE/.lock.acquire"
 CLAIM_LOCK_HELD=0
+LOCK_SESSION_PUBLISHED_NEW=0
 release_claim_lock() {
   if [ "$CLAIM_LOCK_HELD" -eq 1 ]; then
     fm_lock_release "$CLAIM_LOCK"
@@ -92,6 +89,7 @@ publish_lock_session() {
       rm -f "$tmp" 2>/dev/null
       return 1
     fi
+    LOCK_SESSION_PUBLISHED_NEW=1
     return 0
   fi
   if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
@@ -106,19 +104,26 @@ publish_lock_session_or_die() {
   exit 1
 }
 
+remove_newly_published_lock_session() {
+  if [ "$LOCK_SESSION_PUBLISHED_NEW" -eq 1 ]; then
+    rm -f "$LOCK_SESSION" 2>/dev/null || true
+    LOCK_SESSION_PUBLISHED_NEW=0
+  fi
+}
+
 # This session already holds the lock, recorded as pid $1. Line 1 stays exactly
 # as recorded while that pid is alive; only the sidecar is refreshed, under the
 # claim lock, so a /clear re-key inside the same process replaces the old id.
-# The deferred startup sweep (bin/fm-startup-network.sh) leases the claim lock
-# for its whole bounded run, and a same-session confirmation must neither wait
-# behind that lease nor be refused by it, so the refresh is skipped when the
-# claim lock is not free at once; the next acquisition performs it.
+# A same-session confirmation waits for the claim lock so the sidecar refresh
+# completes. The prior-session-sweep-is-finishing refusal is a takeover rule and
+# does not apply here.
 confirm_own_lock() {  # <recorded-pid>
-  if [ "$CLAIM_LOCK_HELD" -eq 1 ] || fm_lock_try_acquire "$CLAIM_LOCK"; then
+  if [ "$CLAIM_LOCK_HELD" -ne 1 ]; then
+    fm_lock_acquire_wait "$CLAIM_LOCK"
     CLAIM_LOCK_HELD=1
-    publish_lock_session_or_die
-    release_claim_lock
   fi
+  publish_lock_session_or_die
+  release_claim_lock
   echo "lock acquired: harness pid $1"
   exit 0
 }
@@ -167,19 +172,23 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
     refuse_live_owner "$old"
   fi
 fi
-# The sidecar goes first: if line 1 then fails to publish, a fresh id beside a
-# dead or absent pid proves nothing to any reader, whereas a fresh pid beside a
-# previous session's id would let that session's resume own this lock.
+# The sidecar goes first: a fresh pid beside a previous session's id would let
+# that session's resume own this lock. If line 1 then fails to publish, a
+# sidecar newly written here is removed so the failed acquisition stays
+# ancestry-only.
 publish_lock_session_or_die
 if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
+  remove_newly_published_lock_session
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
 fi
 written=$(cat "$LOCK" 2>/dev/null) || {
+  remove_newly_published_lock_session
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1
 }
 if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ]; then
+  remove_newly_published_lock_session
   echo "error: session lock ownership verification failed; operate read-only until resolved" >&2
   exit 1
 fi

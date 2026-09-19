@@ -792,6 +792,95 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain() {
   pass "session-lock e2e: a background session keeps its lock and its supervision across a recycled helper chain"
 }
 
+# A same-session confirmation must refresh a /clear re-key even while another
+# process holds .lock.acquire. The prior-session-sweep-is-finishing refusal is
+# a takeover rule and does not apply here; the confirmation waits, then writes
+# the new id.
+test_same_session_confirmation_refreshes_rekeyed_id_under_claim_lock() {
+  local dir session_pid holder_pid confirm_pid
+  dir="$TMP_ROOT/confirm-under-claim"
+  mkdir -p "$dir/state"
+  cat > "$dir/run.sh" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$$" > "$FM_HOME/state/session-pid"
+CLAUDE_CODE_SESSION_ID=S1 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/acquire.out" 2>&1
+acquire_rc=$?
+if [ "$acquire_rc" != 0 ]; then
+  printf '%s\n' "$acquire_rc" > "$FM_HOME/state/acquire.rc"
+  printf '%s\n' 1 > "$FM_HOME/state/confirm.rc"
+  exit 1
+fi
+cp "$FM_HOME/state/.lock-session" "$FM_HOME/state/sidecar-after-acquire"
+printf '%s\n' 0 > "$FM_HOME/state/acquire.rc"
+
+bash -c '
+  set -u
+  . "$1"
+  fm_lock_try_acquire "$2/.lock.acquire" || exit 1
+  : > "$2/holder-ready"
+  while [ ! -e "$2/release-holder" ] && [ "$SECONDS" -lt "${FM_TEST_STUB_MAX_BLOCK_SECONDS:-120}" ]; do
+    sleep 0.05
+  done
+  fm_lock_release "$2/.lock.acquire"
+' _ "$FM_WAKE" "$FM_HOME/state" &
+printf '%s\n' "$!" > "$FM_HOME/state/holder-pid"
+
+i=0
+while [ "$i" -lt 400 ] && [ ! -e "$FM_HOME/state/holder-ready" ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+if [ ! -e "$FM_HOME/state/holder-ready" ]; then
+  printf '%s\n' 2 > "$FM_HOME/state/confirm.rc"
+  exit 2
+fi
+
+CLAUDE_CODE_SESSION_ID=S2 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/confirm.out" 2>&1 &
+printf '%s\n' "$!" > "$FM_HOME/state/confirm-pid"
+
+i=0
+while [ "$i" -lt 20 ]; do
+  sleep 0.05
+  i=$((i + 1))
+done
+
+: > "$FM_HOME/state/release-holder"
+wait "$(tr -d '[:space:]' < "$FM_HOME/state/confirm-pid")"
+printf '%s\n' "$?" > "$FM_HOME/state/confirm.rc"
+wait "$(tr -d '[:space:]' < "$FM_HOME/state/holder-pid")" || true
+SH
+  chmod +x "$dir/run.sh"
+
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" FM_WAKE="$ROOT/bin/fm-wake-lib.sh" \
+    "$NAMED_CLAUDE" "$dir/run.sh" &
+  session_pid=$!
+  BG_FIXTURE_PIDS+=("$session_pid")
+  wait_for_file "$dir/state/acquire.rc" "the initial lock acquisition"
+  expect_code 0 "$(tr -d '[:space:]' < "$dir/state/acquire.rc")" \
+    "the session could not acquire its lock: $(cat "$dir/state/acquire.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/sidecar-after-acquire")" = S1 ] \
+    || fail "the initial acquire did not record S1"
+  wait_for_file "$dir/state/holder-pid" "the claim-lock holder pid"
+  holder_pid=$(tr -d '[:space:]' < "$dir/state/holder-pid")
+  BG_FIXTURE_PIDS+=("$holder_pid")
+  wait_for_file "$dir/state/confirm-pid" "the same-session confirmation pid"
+  confirm_pid=$(tr -d '[:space:]' < "$dir/state/confirm-pid")
+  BG_FIXTURE_PIDS+=("$confirm_pid")
+  wait_for_file "$dir/state/confirm.rc" "the contended confirmation result"
+  wait "$session_pid" || true
+  expect_code 0 "$(tr -d '[:space:]' < "$dir/state/confirm.rc")" \
+    "the same-session confirmation failed while the claim lock was held: $(cat "$dir/state/confirm.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S2 ] \
+    || fail "the sidecar still names $(cat "$dir/state/.lock-session"), expected the re-keyed id S2"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$(tr -d '[:space:]' < "$dir/state/session-pid")" ] \
+    || fail "the confirmation rewrote lock line 1"
+  grep -q 'lock acquired: harness pid' "$dir/state/confirm.out" \
+    || fail "the confirmation did not report acquisition: $(cat "$dir/state/confirm.out")"
+  pass "session-lock: a same-session confirmation waits for the claim lock and refreshes a re-keyed id"
+}
+
 test_version_named_session_is_identified_on_both_platforms
 test_harness_at_namespace_pid1_is_examined
 test_ordinary_paths_are_never_harness_processes
@@ -803,3 +892,4 @@ test_e2e_version_named_session_claims_the_home
 test_e2e_daemon_parented_session_claims_the_home
 test_e2e_daemon_parented_version_named_session_keeps_its_lock
 test_e2e_background_session_keeps_its_lock_across_a_recycled_chain
+test_same_session_confirmation_refreshes_rekeyed_id_under_claim_lock
