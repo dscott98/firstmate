@@ -1009,6 +1009,7 @@ test_failed_lock_write_restores_previous_sidecar() {
   [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S1 ] \
     || fail "the first session did not record S1"
   stale_pid=$(tr -d '[:space:]' < "$dir/state/stale-pid")
+  cp "$dir/state/.lock" "$dir/state/lock-before-reclaim"
   chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
@@ -1025,6 +1026,8 @@ test_failed_lock_write_restores_previous_sidecar() {
     || fail "the failed reclaim left sidecar $(cat "$dir/state/.lock-session"), expected the previous id S1"
   [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$stale_pid" ] \
     || fail "the failed reclaim rewrote lock line 1"
+  cmp -s "$dir/state/lock-before-reclaim" "$dir/state/.lock" \
+    || fail "the failed reclaim changed lock bytes when line 1 was unwritable"
   pass "session-lock: a failed lock write restores the previous sidecar"
 }
 

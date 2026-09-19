@@ -69,6 +69,7 @@ CLAIM_LOCK_HELD=0
 LOCK_SESSION_PHASE=0
 LOCK_SESSION_KIND=0
 LOCK_SESSION_PREV="$STATE/.lock-session.prev"
+LOCK_LINE_PRE=
 release_claim_lock() {
   if [ "$CLAIM_LOCK_HELD" -eq 1 ]; then
     fm_lock_release "$CLAIM_LOCK"
@@ -95,6 +96,7 @@ commit_lock_session() {
 }
 on_lock_exit() {
   restore_uncommitted_lock_session
+  [ -n "$LOCK_LINE_PRE" ] && rm -f "$LOCK_LINE_PRE"
   release_claim_lock
 }
 trap on_lock_exit EXIT
@@ -228,12 +230,30 @@ fi
 # ancestry-only. After line 1 verifies as this session's anchor, a later
 # signal leaves the published pair in place.
 publish_lock_session_or_die
+if [ -f "$LOCK" ]; then
+  LOCK_LINE_PRE=$(mktemp "$STATE/.lock.pre.XXXXXX") || {
+    echo "error: cannot write session lock; operate read-only until resolved" >&2
+    exit 1
+  }
+  if ! cp "$LOCK" "$LOCK_LINE_PRE" 2>/dev/null; then
+    echo "error: cannot write session lock; operate read-only until resolved" >&2
+    exit 1
+  fi
+fi
 LOCK_SESSION_PHASE=2
 if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
-  if [ "$LOCK_SESSION_KIND" -ne 0 ]; then
-    LOCK_SESSION_PHASE=1
-  else
-    LOCK_SESSION_PHASE=0
+  lock_unchanged=0
+  if [ -n "$LOCK_LINE_PRE" ] && cmp -s "$LOCK_LINE_PRE" "$LOCK"; then
+    lock_unchanged=1
+  elif [ -z "$LOCK_LINE_PRE" ] && [ ! -e "$LOCK" ] && [ ! -L "$LOCK" ]; then
+    lock_unchanged=1
+  fi
+  if [ "$lock_unchanged" -eq 1 ]; then
+    if [ "$LOCK_SESSION_KIND" -ne 0 ]; then
+      LOCK_SESSION_PHASE=1
+    else
+      LOCK_SESSION_PHASE=0
+    fi
   fi
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
