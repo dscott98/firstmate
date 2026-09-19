@@ -137,12 +137,11 @@ fm_harness_ancestry_pids() {
   [ "$printed" -eq 1 ]
 }
 
-# Print the one pid that identifies this session when the session lock is being
-# WRITTEN: the outermost pid of the contiguous run. That is the pid that lives as
-# long as the session - a Claude worker several levels in is reaped when its hook
-# returns, and a lock naming it would look stale moments later while the session
-# is still running. Every non-Claude harness reports a single pid, so this is its
-# innermost match unchanged.
+# Print the outermost pid of this session's contiguous harness run for callers
+# that need that ancestry identity. This is not necessarily the pid written to
+# the session lock: fm_session_lock_anchor_pid owns that choice and uses a
+# trusted Claude session's model-loop pid instead. Every non-Claude harness
+# reports a single pid, so this remains its innermost match unchanged.
 fm_harness_ancestry_pid() {
   local pids
   pids=$(fm_harness_ancestry_pids) || return 1

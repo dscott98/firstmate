@@ -15,7 +15,7 @@
 # sidecar written only here and only under the claim lock: refreshed on every
 # confirmed-own acquisition, including the early already-mine exit that waits
 # for the claim lock, removed when the acquiring session proves no trusted id,
-# and left byte-identical across a same-session confirmation. A same-session
+# and left byte-identical when it already names that id. A same-session
 # confirmation never rewrites line 1 while the recorded pid is alive, because
 # bin/fm-startup-network.sh compares that pid across its deferred sweeps; a dead
 # recorded pid is reclaimed and rewritten to this session's anchor.
