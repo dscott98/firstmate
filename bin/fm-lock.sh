@@ -64,8 +64,10 @@ rm -f "$probe" 2>/dev/null || {
 . "$SCRIPT_DIR/fm-wake-lib.sh"
 CLAIM_LOCK="$STATE/.lock.acquire"
 CLAIM_LOCK_HELD=0
-# 0: nothing to roll back. 1: restore $LOCK_SESSION_PREV. 2: sidecar was absent.
-LOCK_SESSION_ROLLBACK=0
+# PHASE 0: committed/none. 1: sidecar mutated, line 1 not written. 2: line 1 written, not verified.
+# KIND 0: no backup. 1: restore $LOCK_SESSION_PREV. 2: sidecar was absent.
+LOCK_SESSION_PHASE=0
+LOCK_SESSION_KIND=0
 LOCK_SESSION_PREV="$STATE/.lock-session.prev"
 release_claim_lock() {
   if [ "$CLAIM_LOCK_HELD" -eq 1 ]; then
@@ -74,15 +76,22 @@ release_claim_lock() {
   fi
 }
 restore_uncommitted_lock_session() {
-  case "$LOCK_SESSION_ROLLBACK" in
-    1) mv -f "$LOCK_SESSION_PREV" "$LOCK_SESSION" 2>/dev/null || true ;;
+  case "$LOCK_SESSION_PHASE" in
+    1)
+      case "$LOCK_SESSION_KIND" in
+        1) mv -f "$LOCK_SESSION_PREV" "$LOCK_SESSION" 2>/dev/null || true ;;
+        2) rm -f "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || true ;;
+      esac
+      ;;
     2) rm -f "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || true ;;
   esac
-  LOCK_SESSION_ROLLBACK=0
+  LOCK_SESSION_PHASE=0
+  LOCK_SESSION_KIND=0
 }
 commit_lock_session() {
   rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
-  LOCK_SESSION_ROLLBACK=0
+  LOCK_SESSION_PHASE=0
+  LOCK_SESSION_KIND=0
 }
 on_lock_exit() {
   restore_uncommitted_lock_session
@@ -92,14 +101,15 @@ trap on_lock_exit EXIT
 trap 'exit 1' HUP INT TERM
 
 remember_lock_session() {
-  [ "$LOCK_SESSION_ROLLBACK" -eq 0 ] || return 0
+  [ "$LOCK_SESSION_PHASE" -eq 0 ] || return 0
   if [ -e "$LOCK_SESSION" ] || [ -L "$LOCK_SESSION" ]; then
     rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
     cp -P "$LOCK_SESSION" "$LOCK_SESSION_PREV" 2>/dev/null || return 1
-    LOCK_SESSION_ROLLBACK=1
+    LOCK_SESSION_KIND=1
   else
-    LOCK_SESSION_ROLLBACK=2
+    LOCK_SESSION_KIND=2
   fi
+  LOCK_SESSION_PHASE=1
 }
 
 # Record the trusted session id beside the lock, or remove a sidecar that no
@@ -212,14 +222,22 @@ if [ -e "$LOCK" ] || [ -L "$LOCK" ]; then
   fi
 fi
 # The sidecar goes first: a fresh pid beside a previous session's id would let
-# that session's resume own this lock. An interrupted or failed line-1 write
-# restores the previous sidecar.
+# that session's resume own this lock. If the sidecar changes before line 1 is
+# written, a failure restores the previous sidecar. If line 1 is written but
+# not yet verified, a failure removes the sidecar and leaves the lock
+# ancestry-only. After line 1 verifies as this session's anchor, a later
+# signal leaves the published pair in place.
 publish_lock_session_or_die
+LOCK_SESSION_PHASE=2
 if ! { printf '%s\n' "$me" > "$LOCK"; } 2>/dev/null; then
+  if [ "$LOCK_SESSION_KIND" -ne 0 ]; then
+    LOCK_SESSION_PHASE=1
+  else
+    LOCK_SESSION_PHASE=0
+  fi
   echo "error: cannot write session lock; operate read-only until resolved" >&2
   exit 1
 fi
-commit_lock_session
 written=$(cat "$LOCK" 2>/dev/null) || {
   echo "error: cannot verify session lock ownership; operate read-only until resolved" >&2
   exit 1
@@ -228,5 +246,6 @@ if [ ! -f "$LOCK" ] || [ -L "$LOCK" ] || [ "$written" != "$me" ]; then
   echo "error: session lock ownership verification failed; operate read-only until resolved" >&2
   exit 1
 fi
+commit_lock_session
 release_claim_lock
 echo "lock acquired: harness pid $me"

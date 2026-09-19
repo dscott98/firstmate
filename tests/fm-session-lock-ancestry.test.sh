@@ -1028,6 +1028,56 @@ test_failed_lock_write_restores_previous_sidecar() {
   pass "session-lock: a failed lock write restores the previous sidecar"
 }
 
+# A failed line-1 write that had no previous sidecar must not leave the new id
+# behind; the lock stays ancestry-only.
+test_failed_lock_write_removes_new_sidecar_when_none_existed() {
+  local dir
+  dir="$TMP_ROOT/restore-absent-sidecar"
+  mkdir -p "$dir/state"
+  printf '1\n' > "$dir/state/.lock"
+  chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
+    "$NAMED_CLAUDE" -c '
+      CLAUDE_CODE_SESSION_ID=S2 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reclaim.out" 2>&1
+      printf "%s\n" "$?" > "$FM_HOME/state/reclaim.rc"
+    '
+  chmod u+w "$dir/state/.lock" 2>/dev/null || true
+  [ "$(tr -d '[:space:]' < "$dir/state/reclaim.rc")" != 0 ] \
+    || fail "a read-only stale lock was overwritten: $(cat "$dir/state/reclaim.out")"
+  grep -q 'cannot write session lock' "$dir/state/reclaim.out" \
+    || fail "the reclaim did not fail on the lock write: $(cat "$dir/state/reclaim.out")"
+  [ ! -e "$dir/state/.lock-session" ] \
+    || fail "the failed reclaim left sidecar $(cat "$dir/state/.lock-session"), expected none"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = 1 ] \
+    || fail "the failed reclaim rewrote lock line 1"
+  pass "session-lock: a failed lock write removes a newly created sidecar"
+}
+
+# A completed reclaim must keep the new id beside the new pid after the writer
+# exits, so a late signal cannot unwind a verified publication.
+test_verified_reclaim_keeps_new_sidecar() {
+  local dir
+  dir="$TMP_ROOT/verified-reclaim"
+  mkdir -p "$dir/state"
+  printf '1\n' > "$dir/state/.lock"
+  printf 'S1\n' > "$dir/state/.lock-session"
+  env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+    FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
+    "$NAMED_CLAUDE" -c '
+      CLAUDE_CODE_SESSION_ID=S2 CLAUDE_PID=$$ "$FM_LOCK" > "$FM_HOME/state/reclaim.out" 2>&1
+      printf "%s\n" "$?" > "$FM_HOME/state/reclaim.rc"
+      printf "%s\n" "$$" > "$FM_HOME/state/new-pid"
+    '
+  expect_code 0 "$(tr -d '[:space:]' < "$dir/state/reclaim.rc")" \
+    "the reclaim failed: $(cat "$dir/state/reclaim.out")"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock-session")" = S2 ] \
+    || fail "the verified reclaim left sidecar $(cat "$dir/state/.lock-session"), expected S2"
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$(tr -d '[:space:]' < "$dir/state/new-pid")" ] \
+    || fail "the verified reclaim did not record the new anchor pid"
+  pass "session-lock: a verified reclaim keeps the new sidecar beside the new pid"
+}
+
 test_version_named_session_is_identified_on_both_platforms
 test_harness_at_namespace_pid1_is_examined
 test_ordinary_paths_are_never_harness_processes
@@ -1042,3 +1092,5 @@ test_e2e_background_session_keeps_its_lock_across_a_recycled_chain
 test_same_session_confirmation_refreshes_rekeyed_id_under_claim_lock
 test_same_session_confirmation_does_not_steal_after_wait
 test_failed_lock_write_restores_previous_sidecar
+test_failed_lock_write_removes_new_sidecar_when_none_existed
+test_verified_reclaim_keeps_new_sidecar
