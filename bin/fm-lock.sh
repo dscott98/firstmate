@@ -90,9 +90,9 @@ restore_uncommitted_lock_session() {
   LOCK_SESSION_KIND=0
 }
 commit_lock_session() {
-  rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
   LOCK_SESSION_PHASE=0
   LOCK_SESSION_KIND=0
+  rm -f "$LOCK_SESSION_PREV" 2>/dev/null || true
 }
 on_lock_exit() {
   restore_uncommitted_lock_session
