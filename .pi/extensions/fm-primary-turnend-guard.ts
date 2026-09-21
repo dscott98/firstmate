@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -21,6 +21,8 @@ const fmHome = process.env.FM_HOME || process.env.FM_ROOT_OVERRIDE || root;
 const state = process.env.FM_STATE_OVERRIDE || `${fmHome}/state`;
 const marker = `${state}/.pi-turnend-extension-loaded`;
 const extensionVersion = `sha256:${createHash("sha256").update(readFileSync(extensionFile)).digest("hex")}`;
+const openRouterSolProvider = "openrouter";
+const openRouterSolModel = "openai/gpt-5.6-sol";
 
 function parentPid(pid: string): string {
   const result = spawnSync("ps", ["-o", "ppid=", "-p", pid], { encoding: "utf8" });
@@ -57,6 +59,64 @@ function lockOwnership(): LockOwnership {
 function markLoaded(): void {
   if (!existsSync(state) || lockOwnership() === "other") return;
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
+}
+
+function isTopLevelPrimary(): boolean {
+  if (process.env.FM_TASK_ID) return false;
+  try {
+    lstatSync(`${fmHome}/.fm-secondmate-home`);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+function hasQuotaPlanSupervisionPin(): boolean {
+  const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
+  try {
+    const line = readFileSync(`${config}/supervision-branch-model`, "utf8").split("\n")[0].trim();
+    return /^openai-codex\/[^\s]+$/.test(line);
+  } catch {
+    return false;
+  }
+}
+
+function registerOpenRouterSolCommand(pi: ExtensionAPI): void {
+  pi.registerCommand?.("fm-openrouter-sol", {
+    description: "Switch this Firstmate primary session to OpenRouter GPT-5.6 Sol",
+    handler: async (args, ctx) => {
+      if (args.trim()) {
+        ctx.ui.notify("Usage: /fm-openrouter-sol (no arguments)", "error");
+        return;
+      }
+      if (!isTopLevelPrimary()) {
+        ctx.ui.notify("Provider switch unavailable: only the top-level Firstmate primary may switch", "error");
+        return;
+      }
+      if (lockOwnership() !== "owned") {
+        ctx.ui.notify("Provider switch unavailable: this session does not own the Firstmate primary lock", "error");
+        return;
+      }
+      if (!hasQuotaPlanSupervisionPin()) {
+        ctx.ui.notify("Provider switch unavailable: pin supervision to an independent openai-codex model with /supervision-model first", "error");
+        return;
+      }
+      const model = ctx.modelRegistry.find(openRouterSolProvider, openRouterSolModel);
+      if (!model) {
+        ctx.ui.notify(`Provider switch failed: ${openRouterSolProvider}/${openRouterSolModel} is not available`, "error");
+        return;
+      }
+      if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+        ctx.ui.notify("Provider switch failed: OpenRouter authentication is not configured", "error");
+        return;
+      }
+      if (!(await pi.setModel(model))) {
+        ctx.ui.notify("Provider switch failed: Pi could not authenticate the OpenRouter model", "error");
+        return;
+      }
+      ctx.ui.notify(`Primary session switched to ${openRouterSolProvider}/${openRouterSolModel}`, "info");
+    },
+  });
 }
 
 // Pi's session_start reasons are startup | reload | new | resume | fork, and a
@@ -511,6 +571,7 @@ function runCdCheck(command: string): Promise<{ code: number; stderr: string }> 
 export default function (pi: ExtensionAPI) {
   let sessionstartGeneration: SessionstartGeneration | null = null;
   let sessionstartExitListenerRegistered = false;
+  registerOpenRouterSolCommand(pi);
   const cleanupSessionstartOnProcessExit = (): void => {
     const generation = sessionstartGeneration;
     if (!generation) return;
