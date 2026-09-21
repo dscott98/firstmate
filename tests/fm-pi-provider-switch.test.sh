@@ -14,7 +14,7 @@ export FM_PI_PROVIDER_SWITCH_TMP="$TMP_ROOT"
 
 node --input-type=module <<'NODE'
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 
@@ -24,6 +24,8 @@ assert.ok(root && fixture, "provider-switch fixture paths are set");
 
 const home = join(fixture, "home");
 const state = join(home, "state");
+const config = join(home, "config");
+mkdirSync(config, { recursive: true });
 const piConfig = join(fixture, "pi-config");
 mkdirSync(state, { recursive: true });
 mkdirSync(piConfig, { recursive: true });
@@ -77,6 +79,9 @@ const child = spawn("pi", [
     ...process.env,
     FM_HOME: home,
     FM_ROOT_OVERRIDE: root,
+    FM_CONFIG_OVERRIDE: config,
+    FM_STATE_OVERRIDE: state,
+    FM_TASK_ID: "",
     PI_CODING_AGENT_DIR: piConfig,
     PI_TELEMETRY: "false",
   },
@@ -134,6 +139,42 @@ try {
   assert.equal(initial.data.model.provider, "fixture");
   assert.equal(initial.data.model.id, "starting");
 
+  async function expectRefusal(message) {
+    const start = events.length;
+    await send("prompt", { message: "/fm-openrouter-sol" });
+    const notice = await waitFor(
+      (event) => events.indexOf(event) >= start && event.type === "extension_ui_request" &&
+        event.method === "notify" && event.message === message,
+      "provider-switch refusal",
+    );
+    assert.equal(notice.notifyType, "error");
+    const unchanged = await send("get_state");
+    assert.equal(unchanged.data.model.provider, "fixture");
+    assert.equal(unchanged.data.model.id, "starting");
+  }
+
+  const pinFile = join(config, "supervision-branch-model");
+  const pinError = "Provider switch unavailable: pin supervision to an independent openai-codex model with /supervision-model first";
+  await expectRefusal(pinError);
+  assert.equal(existsSync(pinFile), false);
+  for (const pin of ["", "openai-codex/", "broken", "openrouter/openai/gpt-5.6-sol", "openai/gpt-5.6-sol"]) {
+    writeFileSync(pinFile, pin);
+    await expectRefusal(pinError);
+    assert.equal(readFileSync(pinFile, "utf8"), pin);
+  }
+  const quotaPin = "openai-codex/gpt-5.6-sol\n";
+  writeFileSync(pinFile, quotaPin);
+  const marker = join(home, ".fm-secondmate-home");
+  const identityError = "Provider switch unavailable: only the top-level Firstmate primary may switch";
+  for (const identity of ["mate-local\n", "mate-remote\n", "", "invalid marker"]) {
+    writeFileSync(marker, identity);
+    await expectRefusal(identityError);
+    rmSync(marker);
+  }
+  symlinkSync(join(home, "missing-marker"), marker);
+  await expectRefusal(identityError);
+  rmSync(marker);
+
   await send("prompt", { message: "/fm-openrouter-sol" });
   const successNotice = await waitFor(
     (event) => event.type === "extension_ui_request" &&
@@ -173,8 +214,9 @@ try {
   const afterOwnershipFailure = await send("get_state");
   assert.equal(afterOwnershipFailure.data.model.provider, "openrouter");
   assert.equal(afterOwnershipFailure.data.model.id, "openai/gpt-5.6-sol");
+  assert.equal(readFileSync(pinFile, "utf8"), quotaPin);
   assert.equal(existsSync(join(piConfig, "settings.json")), false);
-  console.log("ok - real Pi provider-switch command changes only the locked primary session and fails closed on invalid input or lock loss");
+  console.log("ok - real Pi provider-switch command changes only the locked primary session and rejects unsafe supervision pins, secondmate identities, invalid input, and lock loss");
 } finally {
   child.kill("SIGTERM");
   await new Promise((resolve) => child.once("exit", resolve));
