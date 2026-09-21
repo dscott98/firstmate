@@ -24,8 +24,8 @@
 #      its agent left running.
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 
 RESTART="$ROOT/bin/fm-secondmate-restart.sh"
 
@@ -44,6 +44,7 @@ trap 'rm -rf -- "$TMP_ROOT"' EXIT
 make_stub() {  # <case-dir>
   local fb="$1/fakebin"
   mkdir -p "$fb"
+  fm_test_fake_pi_start "$fb"
   cat > "$fb/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -66,7 +67,10 @@ case "${1:-}" in
         ". '"*"'")
           staged=${payload#". '"}
           staged=${staged%"'"}
-          [ ! -f "$staged" ] || payload=$(cat "$staged")
+          if [ -f "$staged" ]; then
+            "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
+            payload=$(cat "$staged")
+          fi
           ;;
       esac
       printf '%s\n' "$payload" >> "$D/literal"

@@ -91,6 +91,13 @@ fm_test_fake_gh_axi() {
 
 # --- fake tmux / ssh / sleep ------------------------------------------------
 
+# Install the shared Pi event driver for stubs that consume staged launches.
+fm_test_fake_pi_start() {
+  local fakebin=$1
+  printf '#!/usr/bin/env bash\nexec %q %q "$@"\n' "$(command -v node)" "$ROOT/tests/fixtures/pi-start.mjs" > "$fakebin/fm-test-pi-start"
+  chmod +x "$fakebin/fm-test-pi-start"
+}
+
 # fm_test_fake_tmux_spawn <fakebin>
 # Spawn-world tmux: pane_current_path from FM_FAKE_PANE_PATH, session named
 # firstmate, window ops succeed, send-keys succeed. When FM_FAKE_LAUNCH_LOG is
@@ -104,8 +111,7 @@ fm_test_fake_gh_axi() {
 # suites that do not set FM_FAKE_LAUNCH_LOG keep a silent send-keys.
 fm_test_fake_tmux_spawn() {
   local fakebin=$1
-  printf '#!/usr/bin/env bash\nexec %q %q "$@"\n' "$(command -v node)" "$ROOT/tests/fixtures/pi-start.mjs" > "$fakebin/fm-test-pi-start"
-  chmod +x "$fakebin/fm-test-pi-start"
+  fm_test_fake_pi_start "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -122,6 +128,16 @@ case "${1:-}" in
     ;;
   has-session|new-session|new-window|kill-window|set-window-option) exit 0 ;;
   send-keys)
+    # Startup events are independent of optional launch logging.
+    for payload in "$@"; do
+      case "$payload" in
+        ". '"*"'")
+          staged=${payload#". '"}
+          staged=${staged%"'"}
+          "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
+          ;;
+      esac
+    done
     if [ -n "${FM_FAKE_LAUNCH_LOG:-}" ]; then
       prev=
       for a in "$@"; do
@@ -135,7 +151,6 @@ case "${1:-}" in
               staged=${a#". '"}
               staged=${staged%"'"}
               if [ -f "$staged" ]; then
-                "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
                 a=$(cat "$staged")
               elif [ "${#a}" -gt 1024 ]; then
                 a=${a:0:1024}
