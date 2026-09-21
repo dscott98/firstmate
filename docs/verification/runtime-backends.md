@@ -6,6 +6,46 @@ This record contains reusable version-scoped evidence for active runtime guarant
 The backend guides own current setup, safety boundaries, and limitations.
 Exact task chronology, branch names, temporary homes, local paths, process ids, thread ids, and delivery transcripts remain in private reports or PR evidence.
 
+## Pi folder trust and launch readiness
+
+Verified on 2026-09-21 on Linux with Pi 0.85.1 and tmux 3.6.
+The executable gate is owned by `bin/fm-pi-start-lib.sh`, with spawn integration in `bin/fm-spawn.sh`.
+The guard uses installed Pi with an isolated agent configuration and a local provider, so it spends no model tokens and requires no credentials.
+It exercises ship and scout spawn, per-folder trust persistence, supplied-brief processing, remembered paths, stopped-endpoint relaunch, secondmate charter processing, and refusal when no agent run starts.
+The local provider inside Pi receives the complete long brief through a staged launch exceeding 1024 bytes, and unsafe writable, symlinked, and file-valued launch paths refuse while preserving existing files.
+Pi-signed was not installed on this host; the same guard tests it whenever available and reports absence explicitly.
+
+```sh
+FM_BACKEND=tmux bin/fm-test-run.sh tests/fm-pi-start-live-e2e.test.sh
+```
+
+Observed output:
+
+```text
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 fresh spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 remembered spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 ship spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 secondmate proved charter processing with folder-only trust
+ok - pi 0.85.1 refused unsafe writable launch path and preserved existing files
+ok - pi 0.85.1 refused unsafe symlink launch path and preserved existing files
+ok - pi 0.85.1 refused unsafe file launch path and preserved existing files
+ok - pi 0.85.1 refuses launch without agent_start
+skip: pi-signed not installed
+```
+
+The portable regression uses real terminal processes without Pi:
+
+```sh
+FM_BACKEND=tmux bin/fm-test-run.sh tests/fm-pi-start.test.sh
+```
+
+It separates structural progress from UI appearance, rejects parent and session-only choices, bounds Enter to one selection, and rejects old-incarnation evidence or a dismissed dialog without processing.
+The shared provider surface was inspected for tmux, Herdr, Zellij, Orca, and cmux: tmux, Herdr, and Zellij have viewport-only reads; Orca and cmux refuse at spawn preflight because their adapters lack that verified capability.
+This record's live launch evidence is for tmux; it does not claim a new live Herdr, Zellij, Orca, or cmux run.
+
 ## Harness detection precedence
 
 Firstmate's own harness comes from two kinds of evidence, and `bin/fm-harness.sh` owns how they combine: an environment marker names its harness, and the nearest harness process in the parent chain proves who owns the process tree.

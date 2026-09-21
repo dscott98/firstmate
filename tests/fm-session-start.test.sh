@@ -31,8 +31,8 @@
 #     compatibility verdict is paid for once per session start
 set -u
 
-# shellcheck source=tests/lib.sh
-. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+# shellcheck source=tests/fixtures.sh
+. "$(dirname "${BASH_SOURCE[0]}")/fixtures.sh"
 # shellcheck source=tests/wake-helpers.sh
 . "$(dirname "${BASH_SOURCE[0]}")/wake-helpers.sh"
 
@@ -326,6 +326,7 @@ SH
 # reproduces real tmux's active-window fallback while inventory omits the mate.
 make_fake_tmux_secondmate_recovery() {
   local fakebin=$1
+  fm_test_fake_pi_start "$fakebin"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -402,7 +403,18 @@ case "${1:-}" in
     printf '%%1\n'
     exit 0
     ;;
-  set-window-option|send-keys) exit 0 ;;
+  send-keys)
+    for payload in "$@"; do
+      case "$payload" in
+        ". '"*"'")
+          staged=${payload#". '"}
+          staged=${staged%"'"}
+          "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
+          ;;
+      esac
+    done
+    exit 0 ;;
+  set-window-option) exit 0 ;;
 esac
 exit 0
 SH
@@ -411,6 +423,7 @@ SH
 
 make_fake_herdr_secondmate_recovery() {
   local fakebin=$1
+  fm_test_fake_pi_start "$fakebin"
   # The recovery kill now requires the shared named-session lock and an exact
   # focus snapshot. Keep a focused sibling tab so this test's husk close is
   # provably non-workspace-emptying and never needs to signal a fake shell pid.
@@ -477,7 +490,17 @@ case "${1:-} ${2:-}" in
   "pane close")
     [ "${3:-}" = p-old ] && : > "$killed"
     ;;
-  "pane run"|"pane send-text"|"pane send-keys"|"tab close")
+  "pane send-text")
+    payload=${4:-}
+    case "$payload" in
+      ". '"*"'")
+        staged=${payload#". '"}
+        staged=${staged%"'"}
+        "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
+        ;;
+    esac
+    ;;
+  "pane run"|"pane send-keys"|"tab close")
     ;;
   *)
     exit 1
