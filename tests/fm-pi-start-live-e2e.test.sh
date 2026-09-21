@@ -29,7 +29,7 @@ import {appendFileSync} from 'node:fs';
 export default function(pi) {
   pi.registerProvider('fm-local', {
     baseUrl: 'http://127.0.0.1:1', apiKey: 'fixture', api: 'fm-local',
-    models: [{id: 'echo', name: 'Echo', reasoning: false, input: ['text'],
+    models: [{id: 'echo-' + 'x'.repeat(1200), name: 'Echo', reasoning: false, input: ['text'],
       cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0},
       contextWindow: 200000, maxTokens: 1000}],
     streamSimple(model, context) {
@@ -62,12 +62,29 @@ cleanup() {
   # These are only ids allocated by this fixture, never fleet task ids.
   for id in "${ids[@]+${ids[@]}}"; do
     rm -rf "/tmp/fm-$id"
-    for dir in /tmp/fm-"$id"+*; do [ ! -d "$dir" ] || rm -rf "$dir"; done
+    for dir in /tmp/fm-"$id"+*; do
+      if [ -e "$dir" ] || [ -L "$dir" ]; then rm -rf "$dir"; fi
+    done
   done
   fm_test_cleanup
 }
 ids=()
 trap cleanup EXIT
+model=$(node -e 'process.stdout.write("echo-" + "x".repeat(1200))')
+request_count() { if [ -f "$LAB/agent/requests" ]; then wc -l < "$LAB/agent/requests"; else echo 0; fi; }
+assert_brief_received() {
+  local expected=$1 before=$2
+  for _ in $(seq 1 100); do
+    if jq -e -s --rawfile expected "$expected" --argjson before "$before" '
+      length > $before and
+      (.[-1] | map(select(.role == "user")) | last | .content |
+        if type == "string" then . else map(select(.type == "text") | .text) | join("") end)
+        == ($expected | sub("\n+$"; ""))
+    ' "$LAB/agent/requests" >/dev/null 2>&1; then return 0; fi
+    sleep 0.1
+  done
+  fail "$harness $version did not deliver the complete brief to its provider"
+}
 checked=0
 for harness in pi pi-signed; do
   executable=$(command -v "$harness" || true)
@@ -81,35 +98,45 @@ for harness in pi pi-signed; do
   "$REAL_TMUX" -S "$LAB/socket" set-option -g default-command '/bin/bash --noprofile --norc'
   # Only this isolated store is reset to prove a fresh trust decision per binary.
   rm -f "$LAB/agent/trust.json" "$LAB/agent/requests"
-  for mode in fresh remembered; do
+  for mode in fresh remembered ship; do
     id="pi-start-live-$$-$harness-$mode"
     ids+=("$id")
-    fm_test_spawn_brief "$LAB/home" "$id" "Reply PI_START_SENTINEL_$id; use no tools."
+    kind_args=(--scout)
+    if [ "$mode" = ship ]; then
+      kind_args=(--mode no-mistakes --yolo off)
+      rm -f "$LAB/agent/trust.json"
+    fi
+    brief="Reply PI_START_SENTINEL_$id; use no tools. $(node -e 'process.stdout.write("payload ".repeat(600))') END_$id"
+    fm_test_spawn_brief "$LAB/home" "$id" "$brief"
+    before=$(request_count)
     if ! PATH="$LAB/bin:$PATH" FM_ROOT_OVERRIDE='' FM_HOME="$LAB/home" FM_SPAWN_NO_GUARD=1 \
-      "$ROOT/bin/fm-spawn.sh" "$id" "$LAB/project" --scout --harness "$harness" \
-      --backend tmux --model fm-local/echo > "$LAB/spawn.out" 2>&1; then
+      "$ROOT/bin/fm-spawn.sh" "$id" "$LAB/project" "${kind_args[@]}" --harness "$harness" \
+      --backend tmux --model "fm-local/$model" > "$LAB/spawn.out" 2>&1; then
       cat "$LAB/spawn.out" >&2
       target=$(sed -n 's/^window=//p' "$LAB/home/state/$id.meta")
       "$REAL_TMUX" -S "$LAB/socket" capture-pane -p -t "$target" -S -0 >&2 || true
       fail "$harness $version $mode spawn did not prove brief processing"
     fi
     target=$(sed -n 's/^window=//p' "$LAB/home/state/$id.meta")
-    for _ in $(seq 1 100); do
-      grep -Fq "PI_START_SENTINEL_$id" "$LAB/agent/requests" 2>/dev/null && break
-      sleep 0.1
-    done
-    grep -Fq "PI_START_SENTINEL_$id" "$LAB/agent/requests" || fail "$harness $version did not process the supplied brief"
+    "$ROOT/bin/fm-operational-input.sh" encode launch-brief < "$LAB/home/data/$id/launch-brief.md" > "$LAB/expected"
+    assert_brief_received "$LAB/expected" "$before"
+    gen=$(sed -n 's/^spawn_gen=//p' "$LAB/home/state/$id.meta")
+    for launch_dir in /tmp/fm-"$id"+*; do [ -d "$launch_dir" ] && break; done
+    [ "$(wc -c < "$launch_dir/launch.$gen.sh")" -gt 1024 ] || fail 'staged launch fixture is not long enough'
+    pass "$harness $version staged launch over 1024 bytes delivered the complete long brief"
     jq -e --arg wt "$LAB/wt" 'keys == [$wt] and .[$wt] == true' "$LAB/agent/trust.json" >/dev/null \
       || fail "$harness $version trusted more than the task folder"
     "$REAL_TMUX" -S "$LAB/socket" send-keys -t "$target" -l /quit
     "$REAL_TMUX" -S "$LAB/socket" send-keys -t "$target" Enter
     # Relaunch from the recorded, stopped endpoint, keeping its trusted folder.
     sleep 1
+    before=$(request_count)
     if ! PATH="$LAB/bin:$PATH" FM_ROOT_OVERRIDE='' FM_HOME="$LAB/home" FM_SPAWN_NO_GUARD=1 \
       "$ROOT/bin/fm-spawn.sh" "$id" --relaunch > "$LAB/relaunch.out" 2>&1; then
       cat "$LAB/relaunch.out" >&2
       fail "$harness $version relaunch failed"
     fi
+    assert_brief_received "$LAB/expected" "$before"
     "$REAL_TMUX" -S "$LAB/socket" kill-window -t "$target"
     pass "$harness $version $mode spawn and relaunch proved brief processing with folder-only trust"
   done
@@ -125,7 +152,7 @@ for harness in pi pi-signed; do
   if ! PATH="$LAB/bin:$PATH" FM_ROOT_OVERRIDE='' FM_HOME="$LAB/home" FM_SPAWN_NO_GUARD=1 \
     FM_SKIP_SECONDMATE_SYNC=1 FM_SKIP_SECONDMATE_INHERIT=1 \
     "$ROOT/bin/fm-spawn.sh" "$id" "$sm" --secondmate --harness "$harness" \
-    --backend tmux --model fm-local/echo > "$LAB/secondmate.out" 2>&1; then
+    --backend tmux --model "fm-local/$model" > "$LAB/secondmate.out" 2>&1; then
     cat "$LAB/secondmate.out" >&2
     fail "$harness $version secondmate failed startup proof"
   fi
@@ -137,6 +164,41 @@ for harness in pi pi-signed; do
   jq -e --arg wt "$LAB/wt" --arg sm "$sm" 'keys == ([$wt,$sm] | sort) and .[$sm] == true' "$LAB/agent/trust.json" >/dev/null \
     || fail "$harness $version secondmate trust escaped its folder"
   pass "$harness $version secondmate proved charter processing with folder-only trust"
+
+  # Exercise the real spawn's staging guards in this private live backend.
+  # Every protected path and byte below belongs to this fixture alone.
+  home_token=$(node -e 'process.stdout.write(require("node:crypto").createHash("sha256").update(process.argv[1]).digest("hex"))' "$LAB/home")
+  for unsafe in writable symlink file; do
+    id="pi-start-live-$$-$harness-$unsafe"
+    ids+=("$id")
+    fm_test_spawn_brief "$LAB/home" "$id" 'This unsafe launch must not run.'
+    launch_dir="/tmp/fm-$id+$home_token"
+    protected="$LAB/protected-$harness-$unsafe"
+    mkdir "$protected"
+    printf 'existing launch must survive\n' > "$protected/launch.sh"
+    cp "$protected/launch.sh" "$LAB/unchanged"
+    case "$unsafe" in
+      writable) mkdir -m 0770 "$launch_dir"; cp "$protected/launch.sh" "$launch_dir/launch.sh" ;;
+      symlink) ln -s "$protected" "$launch_dir" ;;
+      file) cp "$protected/launch.sh" "$launch_dir" ;;
+    esac
+    before=$(request_count)
+    rc=0
+    PATH="$LAB/bin:$PATH" FM_ROOT_OVERRIDE='' FM_HOME="$LAB/home" FM_SPAWN_NO_GUARD=1 \
+      "$ROOT/bin/fm-spawn.sh" "$id" "$LAB/project" --scout --harness "$harness" \
+      --backend tmux --model "fm-local/$model" > "$LAB/unsafe.out" 2>&1 || rc=$?
+    expect_code 1 "$rc" "$harness $version unsafe $unsafe path must refuse"
+    assert_contains "$(cat "$LAB/unsafe.out")" "task launch directory $launch_dir already exists" 'wrong refusal boundary'
+    [ "$(request_count)" -eq "$before" ] || fail 'unsafe launch reached the provider'
+    cmp "$protected/launch.sh" "$LAB/unchanged" || fail 'protected target was changed'
+    case "$unsafe" in
+      writable) cmp "$launch_dir/launch.sh" "$LAB/unchanged" || fail 'existing launch was overwritten' ;;
+      symlink) [ -L "$launch_dir" ] || fail 'launch symlink was replaced' ;;
+      file) cmp "$launch_dir" "$LAB/unchanged" || fail 'existing namespace file was overwritten' ;;
+    esac
+    rm -rf "$launch_dir"
+    pass "$harness $version refused unsafe $unsafe launch path and preserved existing files"
+  done
 
   id="pi-start-live-$$-$harness-refusal"
   ids+=("$id")
