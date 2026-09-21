@@ -1,0 +1,34 @@
+Real Pi; 120x40 PTY; session-only --approve; no tools or credentials.
+. /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/launch.sh
+bash-5.3$ . /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/launch.sh
+]11;?]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+                                                                                                                        ]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+/home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/project (det...]8;;
+0.0%/0 (auto)                                                                                                    unknown]8;;]0;π - project pi v0.85.1                                                                                                             ]8;;
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more                                        ]8;;
+ Press ctrl+o to show full startup help and loaded resources.                                                           ]8;;
+                                                                                                                        ]8;;
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.                                  ]8;;
+]8;;
+]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+                                                                                                                        ]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+/home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/project (det...]8;;
+0.0%/0 (auto)                                                                                                    unknown]8;; Warning: No models available. Use /login to log into a provider via OAuth or API key. See:                             ]8;;
+   /home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md                               ]8;;
+   /home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md                                  ]8;;
+]8;;
+ Error: No API key found for the selected model.                                                                        ]8;;
+                                                                                                                        ]8;;
+ Use /login to log into a provider via OAuth or API key. See:                                                           ]8;;
+   /home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md                               ]8;;
+   /home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md                                  ]8;;
+]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+                                                                                                                        ]8;;
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────]8;;
+/home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/project (det...]8;;
+0.0%/0 (auto)                                                                                                    unknown]8;;

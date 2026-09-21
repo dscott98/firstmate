@@ -1,0 +1,10 @@
+ok - allowlist=absent preserves the operational floor and filters only when opted in
+ok - allowlist=missing-config preserves the operational floor and filters only when opted in
+ok - allowlist=enabled preserves the operational floor and filters only when opted in
+ok - allowlist=empty preserves the operational floor and filters only when opted in
+ok - invalid allowlist names refuse before launch or task publication
+ok - inaccessible config with present allowlist refuses before launch or task publication
+ok - inaccessible config with absent allowlist refuses before launch or task publication
+ok - inaccessible ancestor with present allowlist refuses before launch or task publication
+ok - inaccessible ancestor with absent allowlist refuses before launch or task publication
+not ok - secondmate with an allowlist should spawn: error: secondmate home cannot be inside the firstmate repo: /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/fm-spawn-dispatch-profile.qqz2Ew/env-secondmate/secondmate-home: expected exit 0, got 1

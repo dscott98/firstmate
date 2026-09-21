@@ -1,0 +1,8 @@
+{
+  "pi_version": "0.85.1",
+  "staged_command_bytes": 6618,
+  "pty_rows": 40,
+  "pty_columns": 120,
+  "matching_live_processes": [],
+  "scope": "Direct shell-to-Pi staged-command transport; not a complete fm-spawn lifecycle"
+}

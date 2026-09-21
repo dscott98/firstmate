@@ -1,0 +1,12 @@
+{
+  "session_start": true,
+  "instruction_bytes": 6444,
+  "begin": true,
+  "end": true,
+  "pi_version": "0.85.1",
+  "pty_rows": 40,
+  "pty_columns": 120,
+  "scope": "Real Pi session_start observer after a short sourced launch; 6444-character initial argument; not a complete Firstmate worker lifecycle",
+  "session_trust": "Explicit --approve for transport isolation",
+  "provider_result": "No API key found for the selected model"
+}

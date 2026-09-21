@@ -1,0 +1,20 @@
+Real Pi launched through a short sourced script in a 120x40 PTY. No provider credentials or tools supplied.
+. /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/launch.sh
+bash-5.3$ . /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/launch.sh
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Trust project folder?                                                                                                  
+ /home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live/project       
+                                                                                                                        
+ This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.   
+
+ → Trust                                                                                                                
+   Trust parent folder                                                                                                  
+ (/home/dscott/.no-mistakes/worktrees/0619146594c6/01M31498FDY4HJ8SRMR4MQXPT1/.test-launch-validation/live)             
+   Trust (this session only)                                                                                            
+   Do not trust                                                                                                         
+   Do not trust (this session only)                                                                                     
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel                                                                        
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
