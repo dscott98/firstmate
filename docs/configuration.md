@@ -239,6 +239,37 @@ The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-gui
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the firstmate-specific local test policy and entry points.
 Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](fm-test-portable-shards.md); [herdr-backend.md](herdr-backend.md#destructive-lab-safety) owns the real-Herdr lane's isolation boundary, and [runtime-backends.md](verification/runtime-backends.md#herdr) owns active evidence.
 
+## Validation model routing (machine-global no-mistakes config)
+
+Per-purpose model routing for no-mistakes pipeline agents lives in no-mistakes' machine-global config (`~/.no-mistakes/config.yaml`), never in this repository.
+The tracked `.no-mistakes.yaml` cannot pin models: no-mistakes honors credential and model profiles only from the global config, so no pushed branch can select them either.
+No-mistakes v1.75.2 supports exactly two routing surfaces, both global-only, and its `global-config` reference owns the full schema.
+`agent_config.<harness>.{model,effort}` sets the profile every non-review step runs with: test, document, lint, rebase, PR, and CI diagnosis, including their fix agents.
+`review_agents.<reviewer|fixer>.{agent,model,effort}` pins the review loop's two roles to an explicit harness and profile, so review and difficult review fixes keep strong reasoning while routine steps run an economical profile.
+The cost posture that fits a flat already-paid plan keeps the strong default model on the review loop and moves the routine steps onto the plan's economical tier:
+
+```yaml
+agent_config:
+  codex:
+    model: gpt-5-codex-mini    # routine test/document/lint/rebase/PR/CI rounds
+    effort: medium
+review_agents:
+  reviewer:
+    agent: codex
+    model: gpt-6-astra         # keep review on the strong default model
+    effort: high
+  fixer:
+    agent: codex
+    model: gpt-6-astra         # difficult fixes keep strong reasoning
+    effort: high
+```
+
+Set the reviewer and fixer model explicitly: an empty role model inherits `agent_config` for that harness, which this recipe points at the economical tier.
+Model names follow the plan's current catalog; confirm them with `quota-axi models` before pinning.
+Across this machine's recorded pipeline runs the review loop and the non-review steps each account for roughly half of input tokens, so this split routes the routine half onto the economical profile without touching review strength.
+The supported boundary: no per-step agent or model exists for the non-review steps, so test, lint, and CI repair rounds cannot be split from the routine default and stay on the global profile.
+Changing these profiles affects every repository validated through this machine's daemon, not only firstmate, and applies to pipeline runs started after the change.
+
 ## Captain Preferences (data/captain.md / data/captain-shared.md)
 
 Domain-local preferences for one captain's fleet live locally in each home's `data/captain.md`; it is gitignored and printed in the session-start context digest after `data/projects.md` and optional `data/secondmates.md`.
