@@ -7,11 +7,12 @@
 # after a crash.
 #
 # ENTRY (the posture record). `/afk [words]` is two steps so the captain hears
-# the mandate back before it binds: `propose` compiles the words and clauses
-# into a proposal and prints the read-back (bin/fm-afk-contract.sh owns the
-# clause fields, the never-set, the refusal wording, and the record schema); `confirm` promotes it
-# into state/.afk-contract and prints the entry announcement (hold-for-return
-# only: no phone channel exists). The record is the posture in every harness.
+# the mandate back before it binds: `propose` records the captain's away words
+# verbatim into a proposal and prints the read-back (bin/fm-afk-contract.sh owns
+# the record schema; the words are the whole mandate and no script parses them);
+# `confirm` promotes it into state/.afk-contract and prints the entry
+# announcement (hold-for-return only: no phone channel exists). The record is
+# the posture in every harness.
 # On Pi and pi-signed the entry ENDS there: the away daemon is no longer launched
 # on Pi, the ordinary supervision session keeps running in both postures, and
 # `start` refuses on those harnesses. Every other harness still runs the daemon
@@ -24,7 +25,7 @@
 # bin/fm-afk-start.sh execs the supervise daemon in the FOREGROUND of whatever
 # terminal it is already in. Harnesses with a native in-pane tracked-background
 # tool (claude, grok) run it there directly and it is fine. A harness with NO
-# native background mechanism (pi) has to manufacture a terminal, and doing that
+# native background mechanism (codex) has to manufacture a terminal, and doing that
 # by SPLITTING the captain's active pane visibly shrinks it - the regression this
 # script fixes. Instead this creates a non-visible tracked terminal (a herdr tab/
 # workspace with --no-focus, or a detached tmux session) that never touches the
@@ -38,16 +39,9 @@
 #
 # Usage:
 #   fm-afk-launch.sh propose [--words-file <path> | --words <text>]
-#                            [--action <verb> --object <text> --when <text> [--stop <text>]]...
 #                            [--expected-return <UTC ISO 8601>] [--spend <n>]
-#                            [--grant <task-id>]...
-#                              Record the captain's away words and mandate
-#                              clause fields into a proposal and print the
-#                              read-back. Exit 3 when a clause was refused (its
-#                              missing part is named in the read-back); the
-#                              proposal still records it as refused.
-#                              Repeatable --grant records captain-named task
-#                              ids that may merge-when-green while away.
+#                              Record the captain's away words verbatim into a
+#                              proposal and print the read-back.
 #   fm-afk-launch.sh confirm   Promote the required proposal and print the entry
 #                              announcement. On Pi this is the whole entry.
 #   fm-afk-launch.sh start     Capture the captain pane, then (unless the daemon
