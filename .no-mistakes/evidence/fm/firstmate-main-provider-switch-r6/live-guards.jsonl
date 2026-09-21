@@ -1,0 +1,3 @@
+{"case": "worker", "event": {"type": "extension_ui_request", "id": "4e90ec63-09f9-4ce7-83c7-4403ff6ed4c9", "method": "notify", "message": "Provider switch unavailable: only the top-level Firstmate primary may switch", "notifyType": "error"}}
+{"case": "missing-pin", "event": {"type": "extension_ui_request", "id": "82ed2d56-6c74-4535-a9ea-9846833c4d1f", "method": "notify", "message": "Provider switch unavailable: pin supervision to an independent openai-codex model with /supervision-model first", "notifyType": "error"}}
+{"case": "missing-auth", "event": {"type": "extension_ui_request", "id": "aa830cb2-da66-413b-9f8f-f4275959fdf5", "method": "notify", "message": "Provider switch failed: OpenRouter authentication is not configured", "notifyType": "error"}}
