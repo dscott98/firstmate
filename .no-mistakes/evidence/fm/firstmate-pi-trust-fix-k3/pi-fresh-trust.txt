@@ -1,0 +1,35 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Trust project folder?
+ /home/dscott/.no-mistakes/worktrees/0619146594c6/01M317WX753M91Z0H7F37QTEZ7/.pi-gate-manual/project
+
+ This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.
+
+ → Trust
+   Trust parent folder (/home/dscott/.no-mistakes/worktrees/0619146594c6/01M317WX753M91Z0H7F37QTEZ7/.pi-gate-manual)
+   Trust (this session only)
+   Do not trust
+   Do not trust (this session only)
+
+ ↑↓ navigate  enter select  escape/ctrl+c cancel
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,10 @@
+ok - fresh
+ok - remembered
+ok - stalled
+ok - cleared-without-processing
+ok - parent-selected
+ok - session-selected
+ok - partial
+ok - history-only
+ok - unsupported viewport providers refuse
+ok - agent_start receipt is durable, idempotent and incarnation bound

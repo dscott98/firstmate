@@ -1,0 +1,45 @@
+bash-5.3$ cd '/tmp/fm-pi-start-live.ikaUNC/wt'
+bash-5.3$ export GOTMPDIR=/tmp/fm-pi-start-live-1043026-pi-writable/gotmp
+bash-5.3$ export COMPACT_ADVISER_DISABLE=1
+bash-5.3$ export FM_TASK_ID=pi-start-live-1043026-pi-writable
+bash-5.3$
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

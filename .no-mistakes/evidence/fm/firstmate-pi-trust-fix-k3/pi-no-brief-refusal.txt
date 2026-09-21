@@ -1,0 +1,1 @@
+error: pi 0.85.1 did not confirm agent_start; per-folder Trust selections=1; inspect validation
