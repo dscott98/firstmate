@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -61,6 +61,26 @@ function markLoaded(): void {
   writeFileSync(marker, `${extensionVersion}\n${process.pid}\n`);
 }
 
+function isTopLevelPrimary(): boolean {
+  if (process.env.FM_TASK_ID) return false;
+  try {
+    lstatSync(`${fmHome}/.fm-secondmate-home`);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+}
+
+function hasQuotaPlanSupervisionPin(): boolean {
+  const config = process.env.FM_CONFIG_OVERRIDE || `${fmHome}/config`;
+  try {
+    const line = readFileSync(`${config}/supervision-branch-model`, "utf8").split("\n")[0].trim();
+    return /^openai-codex\/[^\s]+$/.test(line);
+  } catch {
+    return false;
+  }
+}
+
 function registerOpenRouterSolCommand(pi: ExtensionAPI): void {
   pi.registerCommand?.("fm-openrouter-sol", {
     description: "Switch this Firstmate primary session to OpenRouter GPT-5.6 Sol",
@@ -69,8 +89,16 @@ function registerOpenRouterSolCommand(pi: ExtensionAPI): void {
         ctx.ui.notify("Usage: /fm-openrouter-sol (no arguments)", "error");
         return;
       }
+      if (!isTopLevelPrimary()) {
+        ctx.ui.notify("Provider switch unavailable: only the top-level Firstmate primary may switch", "error");
+        return;
+      }
       if (lockOwnership() !== "owned") {
         ctx.ui.notify("Provider switch unavailable: this session does not own the Firstmate primary lock", "error");
+        return;
+      }
+      if (!hasQuotaPlanSupervisionPin()) {
+        ctx.ui.notify("Provider switch unavailable: pin supervision to an independent openai-codex model with /supervision-model first", "error");
         return;
       }
       const model = ctx.modelRegistry.find(openRouterSolProvider, openRouterSolModel);
