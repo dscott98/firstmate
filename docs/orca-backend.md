@@ -4,6 +4,8 @@ Orca is an experimental macOS backend in which the Orca app owns both the task w
 The crewmate harness remains the agent process launched inside that endpoint.
 Firstmate agents load [`firstmate-orca`](../.agents/skills/firstmate-orca/SKILL.md) before operating or recovering this backend.
 
+Pi, Pi-signed, and Kimi launches refuse on this backend because it lacks the verified viewport capture their folder-trust gates require; [`bin/fm-backend.sh`](../bin/fm-backend.sh) owns that capability boundary.
+
 ## Setup
 
 Pick Orca when you already use the Orca macOS app and want Orca-managed worktrees and terminals instead of Treehouse plus a session multiplexer.
