@@ -252,6 +252,9 @@ fm_dod_block() {  # <mode> <task-id>
 # Definition of done
 Delivery contract: mode=direct-PR
 This task ships **direct-PR**: you raise the PR yourself, without the no-mistakes pipeline.
+If this mode was selected under the conditional no-mistakes-prod-only policy, product behavior, security, complex changes, Firstmate safety-critical shared code, and any product-facing, mixed, or uncertain work require full no-mistakes validation before delivery.
+Those requirements take precedence over every lighter-path category: documentation-only changes, internal-only tooling, automation, contributor or operator process, and release or submission work.
+If that conditional policy requires full validation for this task, stop before pushing and report the classification conflict to firstmate for a corrected delivery contract; do not change modes yourself.
 The task is complete only when committed on your branch.
 When it is implemented and committed, push your branch and open a PR with \`gh-axi\` that is ready for review, not a draft.
 Before you report done, read the PR back from the forge and confirm it is not a draft (\`gh pr view <url> --json isDraft\` must print false); if it is a draft, mark it ready with \`gh-axi pr ready\`.

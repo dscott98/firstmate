@@ -383,6 +383,12 @@ STUB
     "promoted no-mistakes worker did not receive the fleet-wide ban wording"
 
   payload="$TMP_ROOT/promote-dod/payload-promote-dod-direct-pr"
+  assert_grep "If this mode was selected under the conditional no-mistakes-prod-only policy, product behavior, security, complex changes, Firstmate safety-critical shared code, and any product-facing, mixed, or uncertain work require full no-mistakes validation before delivery." "$payload" \
+    "generated direct-PR delivery contract omitted the conditional full-validation requirements"
+  assert_grep "Those requirements take precedence over every lighter-path category: documentation-only changes, internal-only tooling, automation, contributor or operator process, and release or submission work." "$payload" \
+    "generated direct-PR delivery contract omitted precedence over a lighter-path category"
+  assert_grep "If that conditional policy requires full validation for this task, stop before pushing and report the classification conflict to firstmate for a corrected delivery contract; do not change modes yourself." "$payload" \
+    "generated direct-PR delivery contract omitted the stop and reclassification instruction"
   assert_grep "supersede the scout delivery rules and report-based Definition of done" "$payload" \
     "promoted worker retained the scout delivery contract"
   assert_grep "status protocol; the instruction inbox and its acknowledgement; the escalation rules, including ask-user; and every safety rule" "$payload" \
