@@ -38,5 +38,4 @@ Read the durable outcome store with the fm_branch_outcomes tool when the captain
 The turn-end guard extension lives at `__FM_PI_TURNEND_EXT__`.
 The watcher extension lives at `__FM_PI_EXT__`.
 Both are tracked, project-local `.pi/extensions/*.ts` files that Pi auto-discovers once the project is trusted; `bin/fm-session-start.sh` reports when the running Pi session has not loaded both required extensions.
-The turn-end extension also provides `/fm-openrouter-sol`, a fixed top-level-primary-lock-gated command that uses Pi's current-session model API without changing worker launches or new-session defaults.
-It refuses until supervision has an independent `openai-codex/<model-id>` pin selected with `/supervision-model`; the command never writes that pin.
+For `/fm-openrouter-sol` prerequisites and scope, see [configuration.md](../configuration.md#pi-main-session-provider-switch).

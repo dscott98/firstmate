@@ -96,6 +96,16 @@ Cancelling the model picker cancels the whole command and changes neither choice
 Cancelling only the effort picker keeps the standing effort choice and still applies the model pick made in the same run, and the command's one closing message reports both choices as they will actually take effect.
 Both choices are local to each Firstmate home and are not part of secondmate inherited configuration, the same as the Calm preference; a secondmate home pins its own supervision model and effort with its own `/supervision-model`.
 
+## Pi main-session provider switch
+
+When quota is low, invoke `/fm-openrouter-sol` with no arguments to switch the current main Pi conversation to `openrouter/openai/gpt-5.6-sol`.
+This is a manual command supplied by the tracked turn-end guard extension, not an automatic quota monitor.
+Before invoking it, configure OpenRouter authentication in Pi and use `/supervision-model` to select an independent `openai-codex/<model-id>` supervision pin, as described above.
+The command refuses a missing, unreadable, malformed, or non-`openai-codex` pin so supervision cannot follow main onto OpenRouter during this switch; keep that pin while main uses OpenRouter.
+It also refuses secondmate homes, sessions with `FM_TASK_ID` set, sessions that do not own the primary lock, unavailable target models, and missing or unsuccessful OpenRouter authentication.
+It uses Pi's current-session model API and leaves worker routing, the supervision pin, and configured new-session defaults unchanged.
+The credential-free regression is described in [runtime backend verification](verification/runtime-backends.md#pi-primary-provider-switch).
+
 ## Backlog backend (.tasks.toml / config/backlog-backend)
 
 The tracked `.tasks.toml` pins the default `tasks-axi` markdown backend to `data/backlog.md`, with `done_keep = 10` and an archive at `data/done-archive.md`.

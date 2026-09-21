@@ -2178,20 +2178,33 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 
 ## Pi primary provider switch
 
-Verified on 2026-09-21 with Pi 0.85.1 and the installed OpenRouter model catalog.
-The credential-free guard uses Pi's real RPC runtime with an isolated model configuration and never sends a provider request.
-It loads the tracked primary extension, starts on a fixture model, invokes `/fm-openrouter-sol`, and verifies the active session becomes `openrouter/openai/gpt-5.6-sol`.
-It also checks refusal for absent or unsafe supervision pins and secondmate identities, alongside extra arguments and loss of the Firstmate primary lock, while preserving the supervision pin and creating no startup `settings.json`.
+The current credential-free regression loads both tracked primary and supervision extensions in Pi's real RPC runtime with isolated settings and fixture credentials.
+It builds a supervision conversation before switching main, invokes `/fm-openrouter-sol`, and checks the active main model through RPC.
+A subsequent supervision wake sends exactly one request to a loopback quota-provider endpoint that rejects it without inference; the test checks the request's model and route, unchanged branch-session path, and quota-provider selections recorded in that session.
+A fresh Pi worker process must still select the quota model, and the existing `settings.json`, secondmate harness setting, and supervision pin must remain byte-for-byte unchanged.
+The regression also covers unsafe supervision pins, secondmate home markers including a dangling symlink, extra arguments, and loss of the primary lock.
+It uses no production credentials or external inference and does not establish production authentication or completion success.
+
+Refresh with:
 
 ```sh
 bin/fm-test-run.sh tests/fm-pi-provider-switch.test.sh
+```
+
+Expected success output from the current regression:
+
+```text
+ok - real Pi provider-switch command changes only the locked primary session, preserves supervision and fresh-worker quota models and defaults, and rejects unsafe switches
+```
+
+The recorded strict typecheck on 2026-09-21 against Pi 0.85.1 used:
+
+```sh
 FM_PI_PACKAGE_DIR=/home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent bash tests/fm-pi-primary-types.test.sh
 ```
 
 ```text
-ok - real Pi provider-switch command changes only the locked primary session and rejects unsafe supervision pins, secondmate identities, invalid input, and lock loss
 ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.85.1
 ```
 
-The command is implemented through Pi's documented `ExtensionAPI.setModel` surface, whose session history behavior restores the choice for that session without changing configured defaults for new sessions.
-Secondmates also load the extension but are excluded by their home identity marker and task identity; worker provider routing remains unchanged.
+[Configuration](../configuration.md#pi-main-session-provider-switch) owns the command's operator contract.
