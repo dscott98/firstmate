@@ -95,9 +95,9 @@
 # borderless, that row is the bare candidate it stood for, and the envelope's
 # staleness probe resumes past the zone.
 #
-# THE ASYMMETRY that bounds it: `empty` is the one verdict that authorizes
-# fm-send to type into a pane, so this rule may move a verdict only toward
-# REFUSING, never toward `empty`. A false refusal costs one undelivered
+# THE SAFETY BOUNDARY: `empty` is the one verdict that authorizes
+# fm-send to type into a pane. Ignoring proven footer furniture can recover
+# `empty`, but ambiguous rows must still refuse. A false refusal costs one undelivered
 # message; a false `empty` overwrites a visible draft or types into a working
 # agent. So the zone counts only when EVERY row in it is demonstrably furniture
 # (_fm_composer_row_is_composer_furniture): one unclaimed activity row
@@ -1347,9 +1347,9 @@ _fm_composer_row_is_composer_furniture() {  # <trimmed-row> <proof-glyph>
 #
 # The zone is furniture only if EVERY row in it is: one non-furniture row makes
 # the whole run unclaimed activity, the envelope above it stale, and this
-# function return 1. That is the asymmetry this rule is held to - it may only
-# ever move a verdict toward refusing, never toward `empty`, because `empty` is
-# the one verdict that authorizes fm-send to type into the pane. Returns 1 too
+# function return 1, preserving the safety boundary in this file's header.
+# Ignoring furniture still leaves the selected composer to be classified.
+# Returns 1 too
 # when no envelope is glyph-proven, when a blank row sits directly beneath it,
 # or when the run holds no bare candidate at all (nothing to demote).
 _fm_composer_locate_footer_zone() {  # <plain>
