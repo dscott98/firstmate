@@ -246,7 +246,7 @@ The tracked `.no-mistakes.yaml` cannot pin models: no-mistakes honors credential
 No-mistakes v1.75.2 supports exactly two routing surfaces, both global-only, and its `global-config` reference owns the full schema.
 `agent_config.<harness>.{model,effort}` sets the profile every non-review step runs with: test, document, lint, rebase, PR, and CI diagnosis, including their fix agents.
 `review_agents.<reviewer|fixer>.{agent,model,effort}` pins the review loop's two roles to an explicit harness and profile, so review and difficult review fixes keep strong reasoning while routine steps run an economical profile.
-The cost posture that fits a flat already-paid plan keeps the strong default model on the review loop and moves the routine steps onto the plan's economical tier:
+This example assigns an economical profile to routine steps and stronger profiles to the review loop:
 
 ```yaml
 agent_config:
@@ -266,7 +266,6 @@ review_agents:
 
 Set the reviewer and fixer model explicitly: an empty role model inherits `agent_config` for that harness, which this recipe points at the economical tier.
 Model names follow the plan's current catalog; confirm them with `quota-axi models` before pinning.
-Across this machine's recorded pipeline runs the review loop and the non-review steps each account for roughly half of input tokens, so this split routes the routine half onto the economical profile without touching review strength.
 The supported boundary: no per-step agent or model exists for the non-review steps, so test, lint, and CI repair rounds cannot be split from the routine default and stay on the global profile.
 Changing these profiles affects every repository validated through this machine's daemon, not only firstmate, and applies to pipeline runs started after the change.
 
