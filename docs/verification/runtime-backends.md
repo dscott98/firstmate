@@ -2215,3 +2215,23 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 6. `bin/fm-control.sh <id> exit` stopped the agent and `bin/fm-teardown.sh` returned the worktree and closed the item.
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
+
+## Pi primary provider switch
+
+Verified on 2026-09-21 with Pi 0.85.1 and the installed OpenRouter model catalog.
+The credential-free guard uses Pi's real RPC runtime with an isolated model configuration and never sends a provider request.
+It loads the tracked primary extension, starts on a fixture model, invokes `/fm-openrouter-sol`, and verifies the active session becomes `openrouter/openai/gpt-5.6-sol`.
+It also verifies that extra arguments and loss of the Firstmate primary lock fail closed with visible error notifications, while no startup `settings.json` is created.
+
+```sh
+bin/fm-test-run.sh tests/fm-pi-provider-switch.test.sh
+FM_PI_PACKAGE_DIR=/home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent bash tests/fm-pi-primary-types.test.sh
+```
+
+```text
+ok - real Pi provider-switch command changes only the locked primary session and fails closed on invalid input or lock loss
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.85.1
+```
+
+The command is implemented through Pi's documented `ExtensionAPI.setModel` surface, whose session history behavior restores the choice for that session without changing configured defaults for new sessions.
+Workers do not load the primary extension, so this capability does not alter worker provider routing.
