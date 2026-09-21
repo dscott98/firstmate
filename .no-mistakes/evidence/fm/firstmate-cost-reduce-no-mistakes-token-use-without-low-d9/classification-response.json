@@ -1,0 +1,38 @@
+{
+  "message": "Captain, all eight briefs were scaffolded and their delivery modes verified.",
+  "yolo": "off",
+  "cases": {
+    "copy": {
+      "mode": "direct-PR",
+      "reason": "Documentation-only spelling correction with no executable changes."
+    },
+    "contributor": {
+      "mode": "direct-PR",
+      "reason": "Contributor process clarification without software or security policy changes."
+    },
+    "release": {
+      "mode": "direct-PR",
+      "reason": "Documentation-only release date correction without code or credential changes."
+    },
+    "security": {
+      "mode": "no-mistakes",
+      "reason": "Credential rotation and authorization changes require full validation despite being internal."
+    },
+    "complex": {
+      "mode": "no-mistakes",
+      "reason": "Complex concurrent scheduling and rollback require full validation despite being internal."
+    },
+    "product": {
+      "mode": "no-mistakes",
+      "reason": "Changes user-visible product behavior."
+    },
+    "safety": {
+      "mode": "no-mistakes",
+      "reason": "Changes Firstmate safety-critical shared teardown code."
+    },
+    "uncertain": {
+      "mode": "no-mistakes",
+      "reason": "Unknown callers and product effects make the work uncertain, requiring full validation."
+    }
+  }
+}

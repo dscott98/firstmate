@@ -1,0 +1,42 @@
+[
+  {
+    "case": "copy",
+    "agent_decision": "direct-PR",
+    "emitted_delivery_contract": "Delivery contract: mode=direct-PR"
+  },
+  {
+    "case": "contributor",
+    "agent_decision": "direct-PR",
+    "emitted_delivery_contract": "Delivery contract: mode=direct-PR"
+  },
+  {
+    "case": "release",
+    "agent_decision": "direct-PR",
+    "emitted_delivery_contract": "Delivery contract: mode=direct-PR"
+  },
+  {
+    "case": "security",
+    "agent_decision": "no-mistakes",
+    "emitted_delivery_contract": "Delivery contract: mode=no-mistakes"
+  },
+  {
+    "case": "complex",
+    "agent_decision": "no-mistakes",
+    "emitted_delivery_contract": "Delivery contract: mode=no-mistakes"
+  },
+  {
+    "case": "product",
+    "agent_decision": "no-mistakes",
+    "emitted_delivery_contract": "Delivery contract: mode=no-mistakes"
+  },
+  {
+    "case": "safety",
+    "agent_decision": "no-mistakes",
+    "emitted_delivery_contract": "Delivery contract: mode=no-mistakes"
+  },
+  {
+    "case": "uncertain",
+    "agent_decision": "no-mistakes",
+    "emitted_delivery_contract": "Delivery contract: mode=no-mistakes"
+  }
+]

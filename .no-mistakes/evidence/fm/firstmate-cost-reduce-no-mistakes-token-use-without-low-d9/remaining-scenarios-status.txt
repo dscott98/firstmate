@@ -1,0 +1,22 @@
+$ no-mistakes axi status --run 01M331EJMJA3C4T5NBCW0K170S
+run:
+  id: "01M331EJMJA3C4T5NBCW0K170S"
+  branch: fm/firstmate-cost-reduce-no-mistakes-token-use-without-low-d9
+  status: running
+  head: bb8d1f34
+  head_sha: bb8d1f34ed4941fd5469bb73ea82a26c291be99c
+  findings: 1 awaiting
+  steps[9]{step,status,findings,duration_ms}:
+    intent,completed,0,12
+    rebase,completed,0,845
+    review,completed,0,227547
+    test,fixing,1,491269
+    document,pending,0,0
+    lint,pending,0,0
+    push,pending,0,0
+    pr,pending,0,0
+    ci,pending,0,0
+  active_steps[1]{step,status,active_for,round_active_for,last_activity,agent_pid,round}:
+    test,fixing,16m52s,1m6s,"5s ago: log: The live status shows validation is still running, and the available review logs do not identify the models used. Neither remaining proof can be completed here without crossing the explicit phase boundary. I’ll return them as untested with ...","3738908",fix 2
+
+exit_code=0

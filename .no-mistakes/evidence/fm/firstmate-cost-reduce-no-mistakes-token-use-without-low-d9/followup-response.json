@@ -1,0 +1,6 @@
+{
+  "task_decision": "Keep the correction in the existing task with its original worker; do not create a follow-up task.",
+  "branch_decision": "Have that worker commit the correction on the existing PR branch. No pipeline abort or custody recovery is needed.",
+  "validation_timing": "Validate once after the correction is committed, against the final branch head.",
+  "reason": "Captain, this is a small correction within the approved requirement, the PR remains unmerged, and no pipeline owns the branch. This is the operational decision only; no worker contact or execution is authorized by this evaluation."
+}

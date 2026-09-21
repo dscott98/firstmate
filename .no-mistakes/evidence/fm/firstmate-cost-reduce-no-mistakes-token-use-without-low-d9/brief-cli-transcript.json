@@ -1,0 +1,30 @@
+[
+  {
+    "command": "bin/fm-brief.sh validate-direct-pr example --mode direct-PR",
+    "exit": 0,
+    "stdout": "scaffolded: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M331EJMJA3C4T5NBCW0K170S/.test-phase-tmp/live-home/data/validate-direct-pr/brief.md (ship, mode=direct-PR; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "brief_created": true
+  },
+  {
+    "command": "bin/fm-brief.sh validate-no-mistakes example --mode no-mistakes",
+    "exit": 0,
+    "stdout": "scaffolded: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M331EJMJA3C4T5NBCW0K170S/.test-phase-tmp/live-home/data/validate-no-mistakes/brief.md (ship, mode=no-mistakes; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "brief_created": true
+  },
+  {
+    "command": "bin/fm-brief.sh validate-local-only example --mode local-only",
+    "exit": 0,
+    "stdout": "scaffolded: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M331EJMJA3C4T5NBCW0K170S/.test-phase-tmp/live-home/data/validate-local-only/brief.md (ship, mode=local-only; replace {TASK} and {FIRSTMATE_SPEC})\n",
+    "stderr": "",
+    "brief_created": true
+  },
+  {
+    "command": "bin/fm-brief.sh validate-no-mistakes-prod-only example --mode no-mistakes-prod-only",
+    "exit": 1,
+    "stdout": "",
+    "stderr": "error: no-mistakes-prod-only is a registry policy, not a task mode; classify this task's surface and resolve it to no-mistakes or direct-PR at intake\n",
+    "brief_created": false
+  }
+]

@@ -1,0 +1,10 @@
+This is a bounded live development evaluation of Firstmate intake. Read AGENTS.md section 7. Do not start supervision, delegate, push, register projects, use Herdr, or run any no-mistakes pipeline. All writes must stay under .test-live-cost in the current worktree. For each independent request below, resolve delivery for an already registered no-mistakes-prod-only project with yolo off. Exercise the real bin/fm-brief.sh interface to scaffold the resolved mode using FM_HOME set to the absolute current-worktree/.test-live-cost/home. Use case IDs listed below and repo name sample. Return a JSON object containing each case ID, chosen mode and reason. Do not edit source.
+Cases:
+copy: Correct a spelling error in a README paragraph; no executable changes.
+contributor: Clarify contributor meeting instructions, without changing software or security policy.
+release: Correct the date in internal release notes, no code or credentials.
+security: Internal release automation rotates publishing credentials and alters authorization checks. It has no customer-facing UI.
+complex: Replace internal automation's serial scheduler with concurrent dependency scheduling and rollback across multiple jobs. No direct customer interface.
+product: Fix a user-visible total calculation.
+safety: Change Firstmate shared task teardown's landed-work guard.
+uncertain: Update scripts whose caller and product effects are unknown.
