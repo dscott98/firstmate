@@ -104,6 +104,8 @@ fm_test_fake_gh_axi() {
 # suites that do not set FM_FAKE_LAUNCH_LOG keep a silent send-keys.
 fm_test_fake_tmux_spawn() {
   local fakebin=$1
+  printf '#!/usr/bin/env bash\nexec %q %q "$@"\n' "$(command -v node)" "$ROOT/tests/fixtures/pi-start.mjs" > "$fakebin/fm-test-pi-start"
+  chmod +x "$fakebin/fm-test-pi-start"
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -133,6 +135,7 @@ case "${1:-}" in
               staged=${a#". '"}
               staged=${staged%"'"}
               if [ -f "$staged" ]; then
+                "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
                 a=$(cat "$staged")
               elif [ "${#a}" -gt 1024 ]; then
                 a=${a:0:1024}
