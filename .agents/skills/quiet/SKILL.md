@@ -28,7 +28,7 @@ The daemon procedure below applies only to the other supported harnesses.
 
 1. **Enter the lifecycle through `bin/fm-afk-launch.sh`, exactly as `/afk`
    does, with `FM_AFK_MODE=quiet` set first.**
-   Follow [the AFK entry procedure](../afk/SKILL.md#entering-afk-words), including the confirmed record prerequisite and the per-harness daemon path, with one addition: export `FM_AFK_MODE=quiet` in the shell that invokes `bin/fm-afk-launch.sh start` (or `start-native`), so `state/.afk`'s first line reads `quiet` instead of `away`.
+   Follow [the AFK entry procedure](../afk/SKILL.md#entering-afk-words), with one addition: export `FM_AFK_MODE=quiet` in the shell that invokes `bin/fm-afk-launch.sh start` (or `start-native`), so `state/.afk`'s first line reads `quiet` instead of `away`.
    Leaving `FM_AFK_MODE` unset on a bare refresh of an already-running quiet
    daemon is also correct and does nothing wrong: `fm_afk_flag_write`
    preserves the on-disk mode when no explicit mode is given, so a plain
