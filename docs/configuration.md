@@ -219,6 +219,10 @@ A Secondmate on a remote route is covered the same way: the primary resolves and
 The presence flag is session-scoped enablement, so it transfers at launch and is left unchanged by live convergence into a running home.
 See [`trace-context.md`](trace-context.md) for carrier semantics, supported routes, the manual fleet-restart requirement, the session boundary, and safety limits; `bin/fm-trace-context-lib.sh`'s header owns the exact mechanics, and [`verification/trace-context.md`](verification/trace-context.md) records repeatable evidence.
 
+## Fleet activity ledger (config/fleet-ledger)
+
+See [`fleet-ledger.md`](fleet-ledger.md) for the opt-in setup, record contract, and limits.
+
 ## Turn-end pane-churn absorb (config/turnend-churn-absorb)
 
 The optional local, gitignored `config/turnend-churn-absorb` presence flag opts this home into a default-off third form of positive work evidence in watcher triage.
@@ -248,6 +252,36 @@ The [`firstmate-coding-guidelines` skill](../.agents/skills/firstmate-coding-gui
 `commands.test` executes code, so no-mistakes honors it only from the default-branch copy of `.no-mistakes.yaml`; a pushed branch cannot change what the gate runs.
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for the firstmate-specific local test policy and entry points.
 Portable shard evidence and coverage rules are in [fm-test-portable-shards.md](fm-test-portable-shards.md); [herdr-backend.md](herdr-backend.md#destructive-lab-safety) owns the real-Herdr lane's isolation boundary, and [runtime-backends.md](verification/runtime-backends.md#herdr) owns active evidence.
+
+## Validation model routing (machine-global no-mistakes config)
+
+Per-purpose model routing for no-mistakes pipeline agents lives in no-mistakes' machine-global config (`~/.no-mistakes/config.yaml`), never in this repository.
+The tracked `.no-mistakes.yaml` cannot pin models: no-mistakes honors credential and model profiles only from the global config, so no pushed branch can select them either.
+No-mistakes v1.75.2 supports exactly two routing surfaces, both global-only, and its `global-config` reference owns the full schema.
+`agent_config.<harness>.{model,effort}` sets the profile every non-review step runs with: test, document, lint, rebase, PR, and CI diagnosis, including their fix agents.
+`review_agents.<reviewer|fixer>.{agent,model,effort}` pins the review loop's two roles to an explicit harness and profile, so review and review fixes keep strong reasoning while routine steps run an economical profile.
+This example assigns an economical profile to routine steps and stronger profiles to the review loop:
+
+```yaml
+agent_config:
+  codex:
+    model: gpt-5-codex-mini    # routine test/document/lint/rebase/PR/CI rounds
+    effort: medium
+review_agents:
+  reviewer:
+    agent: codex
+    model: gpt-6-astra         # keep review on the strong default model
+    effort: high
+  fixer:
+    agent: codex
+    model: gpt-6-astra         # review fixes keep strong reasoning
+    effort: high
+```
+
+Set the reviewer and fixer model explicitly: an empty role model inherits `agent_config` for that harness, which this recipe points at the economical tier.
+Model names follow the plan's current catalog; confirm them with `quota-axi models` before pinning.
+The supported boundary, which the captain approved as the policy itself: no per-step agent or model exists for the non-review steps, so test, lint, and CI repair rounds cannot be split from the routine default - strong models serve review and review fixes, and economical models serve all other validation work and fixes.
+Changing these profiles affects every repository validated through this machine's daemon, not only firstmate, and applies to pipeline runs started after the change.
 
 ## Captain Preferences (data/captain.md / data/captain-shared.md)
 
@@ -344,6 +378,8 @@ muse also needs a worker-reachable credential before spawning, and the portable 
 gemini is likewise refused for secondmates because it has no primary supervision protocol; [its adapter reference](../.agents/skills/harness-adapters/references/harness/gemini.md) owns the credential precondition, canonical-launch wiring, and raw-launch limitations.
 rovo is likewise verified for crewmate and scout launches ONLY, refused for a secondmate for the same reason - no turn-end hook and no primary supervision protocol; [`docs/verification/rovo.md`](verification/rovo.md) owns that evidence, including the OAuth token's silent background refresh from a stored refresh token and both tmux and herdr pane liveness (herdr placement is verified live, with a Herdr-side agent-detection gap left open for recovery classification).
 agy is likewise verified for crewmate and scout launches ONLY, refused for a secondmate for the same reason - no hook surface and no primary supervision protocol; [`docs/verification/agy.md`](verification/agy.md) owns that evidence, including the spawn-time worktree trust pre-registration through `bin/fm-agy-trust.sh` and Herdr's native agy pane recognition.
+devin is verified for crewmate and scout launches only; a secondmate is refused because Devin has no verified primary supervision protocol.
+Its private worker config disables Claude Code imports (including the captain's hooks) and Devin commit attribution without editing user or project config; [`fm-devin-config.sh`](../bin/fm-devin-config.sh) owns these enforced settings and [Devin verification](verification/devin.md) owns the live evidence and observed model availability.
 New harnesses get verified through a supervised trial task before joining the set.
 The verified adapter evidence - each harness's busy-state source, interrupt and exit behavior, skill-invocation syntax, and per-harness quirks - lives in the skill tree rooted at [`.agents/skills/harness-adapters/SKILL.md`](../.agents/skills/harness-adapters/SKILL.md).
 The executable interrupt and exit mechanics live in [`bin/fm-control-lib.sh`](../bin/fm-control-lib.sh), and [`docs/agent-control.md`](agent-control.md) owns their lifecycle-control architecture.
@@ -503,7 +539,7 @@ A known percentage below the floor makes the tool resolve among `default` profil
 A profile `provider` optionally names the quota-axi provider family whose rows apply to that profile; when present, profile and rule-floor provider IDs must match the strict whole-string pattern `^[a-z0-9]+(-[a-z0-9]+)*\z`.
 Bootstrap validates resolver-only `approval`, `floor`, and present `provider` values only while typed resolution is active; without the key those inert fields and the pre-existing verified-harness baseline preserve bootstrap behavior.
 Typed resolution additively recognizes `gemini` because AGENTS.md section 4 verifies it for crewmate and scout dispatch.
-The opted-in resolver has authoritative single-provider mappings for `claude`, `codex`, `grok`, `kimi`, `cursor`, `agy`, and `muse`; every other verified harness must declare `provider` explicitly, including multi-provider `pi`, `pi-signed`, `omp`, and `opencode` and unmapped `gemini` and `rovo`.
+The opted-in resolver has authoritative single-provider mappings for `claude`, `codex`, `grok`, `kimi`, `cursor`, `agy`, and `muse`; every other verified harness must declare `provider` explicitly, including multi-provider `pi`, `pi-signed`, `omp`, and `opencode` and unmapped `gemini`, `rovo`, and `devin`.
 Its single-provider table is separate from the frozen legacy mapping used by `fm-quota-choose.sh`, so additions cannot alter no-key routing.
 The resolver returns an actionable configuration error before any request when such a profile omits it.
 A profile `floor` contains only `scope` and `min_percent`, always uses that profile's provider and matched account, and makes that one candidate ineligible below `min_percent` on the named scope.
@@ -796,10 +832,15 @@ Firstmate's bounded registration retains the obligation's public-safe request bi
 `bin/fm-public-followup.sh` is firstmate's side: it registers a commitment, reconciles typed terminal work results into it, posts the final reply through `bin/fm-x-reply.sh --followup`, and explicitly rechains or retires the retained loop.
 Run `bin/fm-public-followup.sh --help` for the exact subcommands and flags.
 
-Registration is what creates this home's private transport under `state/public-followup/` (mode 0700): `registry/` for the bounded private binding of each open public loop (the record survives delivery, stamped `state=delivered`, and is removed only by `retire`), `events/` for typed terminal results awaiting reconciliation, `consumed/` for the accepted-event ledger, `rejected/` for refusals kept with a one-line reason, `retired/` for the mode-0600 reason-and-time receipt written before removal, and `surfaced` for the poll's last-surfaced signature.
+Registration is what creates this home's private transport under `state/public-followup/` (mode 0700): `registry/` for the bounded private binding of each open public loop (the record survives delivery, stamped `state=delivered`, and is removed only by `retire`), `events/` for typed terminal results awaiting reconciliation, `consumed/` for the accepted-event ledger, `rejected/` for refusals kept with a one-line reason, `rejection-wakes/` for each refusal's not-yet-raised wake, `retired/` for the mode-0600 reason-and-time receipt written before removal, and `surfaced` for the poll's last-surfaced signature.
 A work home that reports across a machine boundary also gets `outbox/`, described below.
 The home that owns the commitment also owns the outward post, because only it holds the relay consent, the request context, and the opaque thread binding.
 Work routed elsewhere reports a typed terminal result with `bin/fm-public-followup-emit.sh` and never looks for the thread; when writing directly into the owning home, that emitter refuses a home with no registration for the named obligation.
+`bin/fm-public-followup.sh brief` pre-fills every deliverable value the binding determines, such as `report_path=data/<work-id>/report.md`, and states the accepted format of every value it cannot know.
+The emitter validates deliverable values and known required keys before publishing, including the relative `report_path` format, and names correctable mistakes at the work home.
+A direct emit reads the obligation from `tasks-axi`; a staged emit cannot read that remote record, so `brief` supplies its required keys in the printed command.
+If those flags are omitted from a staged command, it still checks values but cannot detect missing keys until the owning home's `consume` rejects the event and queues a rejection wake.
+The [emitter header](../bin/fm-public-followup-emit.sh) and its `--help` own the exact flags and outcome-dependent validation rules.
 When that work lives in a REMOTE secondmate home, delivery clears its bound legacy link after validating the public receipt, while retirement clears the link before closing the loop, and both clears run over that route's SSH transport.
 Readable remote state that proves no link exists succeeds without a write, while a present link is cleared only when its Relay request identity matches the registration and the state is writable; an identity mismatch, unreadable or unsafe state, an unavailable write or lock, an older remote copy, or a host that never confirms the clear leaves the loop retained for reconciliation.
 A terminal event's id is derived from its identity tuple, so a duplicate report, a retry, or a replay after restart resolves to the same event and changes nothing.
@@ -818,6 +859,11 @@ A home without that token runs one file test and stops: no `tasks-axi` call, no 
 Ordinary startup, polling, cleanup, and silent read-side subcommands also produce no output; commands that require an active relay report that configuration error after the same gate.
 A relay-enabled home with no registered commitment stops at an O(1) directory presence check, so the empty state costs no CLI call and adds no periodic scan.
 Unreconciled terminal results ride the existing 30-second relay poll rather than a new process or timer: `bin/fm-x-poll.sh` compares the pending-event signature against `surfaced` and wakes firstmate once per new result set.
+A terminal event `tasks-axi` refuses during `consume` is quarantined with a reason naming the specific deliverable, outcome, or missing key where one is identifiable, and the same poll wakes the owning home with a `public-followup rejected <event-id> ...` line carrying that reason.
+The refused event stays pending until that wake is recorded, and a queued wake survives a failed read or write to poll output.
+That makes the wake at-least-once rather than exactly-once: a cleanup that fails after the line was already raised - a wake directory that cannot be written, or a refused event that could not be drained - raises the same refusal again on a later poll.
+A repeat carries the same event id and the same reason as the quarantined rejection, which is how an already-handled refusal is recognized.
+Acknowledge it without re-acting; re-emitting an already accepted corrected result is harmless but redundant because its derived event id is already in the accepted ledger.
 The session-start digest separately prints a "Public commitments" subsection from disk when, and only when, this home is relay-active and still holds an open public loop (a reply still owed, or a delivered loop with nothing owed), so compaction and restart are non-events.
 `bin/fm-teardown.sh` refuses to clean up a task while this home still owes a public reply for exactly that work, unless `--force` carries explicit discard approval.
 `FM_PF_RETRY_BACKOFF_SECS` (default 900) sets the next-attempt time recorded with a retryable delivery error.

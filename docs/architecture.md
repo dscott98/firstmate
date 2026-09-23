@@ -170,6 +170,7 @@ The existing turn-end guard remains the final backstop for every harness-engine 
 Its `--restart` mode signals only the watcher recorded in the current home's `state/.watch.lock`, so restarting one home cannot kill sibling secondmate watchers.
 A pull-based guard (`bin/fm-guard.sh`) warns through supervision tool output if the primary checkout is tangled or if work, process-event sources, registered custom checks, or Relay polling has an unhealthy model-aware supervision verdict; on main it also warns when queued wakes are waiting for main itself to drain.
 The drain script calls that guard after presenting the queue; records remain durable until the exact generation-bound acknowledgement printed by the drain succeeds after handling, and main may keep the queued-wakes warning visible until then.
+Teardown also prunes a torn-down task's own pending rows under the queue lock - stale wakes for its target window, signal wakes for its status and turn-ended files, and its check wakes - so a finished task cannot re-wake the fleet.
 The Pi supervision branch's deliberate queued-wake warning exception is owned by [`pi-supervision-branch.md`](pi-supervision-branch.md#components-and-their-owners), while [`watcher-continuity.md`](watcher-continuity.md#per-actor-acknowledgement) owns the guard's per-actor counting, the advisory main gets for rows a live branch grant holds, and main's retirement of queue rows no actor could ever present or acknowledge.
 It leads with a prominent bordered tangle banner, while `bin/fm-guard.sh` owns the watcher-down banner and reminder policy so repeated guarded commands stay noisy without reprinting the full banner in the same episode.
 On every verified primary harness, tracked hook integration gives the primary session a push-based backstop: when work, a process-event source, a registered custom check, or Relay polling needs supervision and no supervision owner provably holds this home with a fresh beacon, blocking-capable Stop hooks block and nonblocking turn-end integrations force one bounded follow-up.
@@ -302,7 +303,7 @@ The session-start bootstrap step keeps valid dispatch configuration silent unles
 When the file exists, `fm-spawn.sh` refuses crewmate and scout launches without an explicit harness, so `config/crew-harness` is only automatic when no dispatch profile file is active.
 Secondmate launches are exempt because they resolve the secondmate harness and any optional secondmate model or effort tokens instead.
 Unsupported effort values are still recorded in task meta when passed to `fm-spawn.sh`, but the launch template omits any effort flag that the selected harness does not accept.
-That keeps spawn launch compatible across claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, gemini, muse, rovo, omp, and agy while preserving the requested profile for later audit.
+That keeps spawn launch compatible across claude, codex, opencode, pi, pi-signed, grok, kimi, cursor, gemini, muse, rovo, omp, agy, and devin while preserving the requested profile for later audit.
 
 ## Optional secondmates
 
@@ -428,11 +429,12 @@ Relay remains layered on top of the existing check mechanism without changing it
 A promised *final* public reply is a stronger commitment than a milestone follow-up, because forgetting it is publicly visible.
 It is therefore not carried in conversation memory at all: intake turns it into a typed `kind=public-followup` obligation owned by `tasks-axi public-followup`, and every later step reads that obligation from disk.
 The mechanism boundary is deliberately narrow.
-`tasks-axi` owns the obligation state machine and is the only thing that validates a terminal result's source home, work id, generation, schema, outcome, and deliverables.
+`tasks-axi` owns the obligation state machine and the authoritative validation of a terminal result's source home, work id, generation, schema, outcome, and deliverables.
 `state/x-context/` remains the only owner of the private full request context.
 `bin/fm-x-reply.sh` remains the only thing that posts.
 `bin/fm-public-followup.sh` composes those three and adds the activation gate, a private terminal-event inbox, the idempotent delivery sequence, and retained-loop disposition: delivery stamps the registration delivered, `rechain` hands its thread binding to one follow-on obligation, and `retire` is the only close.
 Work routed to another home reports a *typed* terminal result through `bin/fm-public-followup-emit.sh`; firstmate never recovers the source home, work id, outcome, or deliverables by parsing a free-form `done:` sentence, and the child never learns the thread.
+The emitter mirrors `tasks-axi`'s deliverable rules to reject correctable mistakes at their source, while reconciliation still revalidates through `tasks-axi` and queues an at-least-once wake when `tasks-axi` refuses an event.
 When that home is a remote secondmate, no local path reaches the owning home, so the result is staged where the work runs and the owning home pulls it over the same SSH route with `bin/fm-public-followup-collect.sh`.
 Because a terminal event's id is derived from its identity tuple rather than generated, duplicate reports and restart replay converge without coordination.
 Reconciliation rides the existing relay poll and the session-start digest instead of a new watcher, daemon, or timer, and both are gated on the same `.env` activation contract so a home that never opted into the relay executes none of it.
