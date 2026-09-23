@@ -125,6 +125,8 @@ The preference persists for the effective Firstmate home, and toggling it off re
 [Calm's current behavior and supported limits](docs/calm.md) are separate from its [version-scoped maintainer evidence](docs/calm-mode-feasibility.md).
 Pi's `/supervision-model` command pins a cheaper model and a shallower reasoning effort for the supervision branch alone, from the eligible models and thinking levels Pi itself reports, and with no pin the branch normally follows your own conversation's model and effort; see the [configuration schema](docs/configuration.md#pi-supervision-branch-model-and-effort-configsupervision-branch-model-configsupervision-branch-effort).
 
+For a manual main-session provider change when quota is low, see [Pi main-session provider switching](docs/configuration.md#pi-main-session-provider-switch).
+
 ### Talk to it
 
 ```sh

@@ -77,6 +77,8 @@ isolated="$TMP_ROOT/isolated"
 mkdir -p "$isolated/bin"
 cp "$INBOX_BIN" "$isolated/bin/fm-inbox.sh"
 chmod +x "$isolated/bin/fm-inbox.sh"
+cp "$ROOT/bin/fm-wake-lib.sh" "$isolated/bin/fm-wake-lib.sh"
+printf '\nfm_wake_append_locked() { return 1; }\n' >> "$isolated/bin/fm-wake-lib.sh"
 home=$(make_home human-wake-fail)
 set +e
 fail_out=$(FM_HOME="$home" FM_STATE_OVERRIDE="$home/state" \
@@ -544,3 +546,145 @@ run_inbox "$home" drain --ack "$did" >/dev/null || fail "drain --ack failed"
 assert_absent "$home/state/inbox/$did.note" "acked note leaves pending"
 assert_present "$home/state/inbox/handled/$did.note" "acked note is in handled"
 pass "drain --ack still moves the note to handled"
+
+python3 - "$INBOX_BIN" "$TMP_ROOT" <<'PY'
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+inbox_bin, root = sys.argv[1:]
+processes = []
+releases = []
+
+def env_for(name):
+    home = Path(root) / name
+    for folder in ("state", "data", "config"):
+        (home / folder).mkdir(parents=True)
+    env = dict(os.environ, FM_HOME=str(home), FM_STATE_OVERRIDE=str(home / "state"),
+               FM_DATA_OVERRIDE=str(home / "data"), FM_CONFIG_OVERRIDE=str(home / "config"))
+    return home, env
+
+def start(env, *args):
+    proc = subprocess.Popen([inbox_bin, *args], env=env, text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    processes.append(proc)
+    return proc
+
+def result(proc):
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, (proc.returncode, out, err)
+    return out
+
+def wait_file(path):
+    deadline = time.monotonic() + 10
+    while not path.exists():
+        assert time.monotonic() < deadline, f"barrier not reached: {path}"
+        time.sleep(0.02)
+
+def shim(folder, name, body):
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / name
+    path.write_text(f"#!{sys.executable}\n" + body)
+    path.chmod(0o755)
+
+try:
+    home, env = env_for("concurrent-reservation")
+    reached, release = home / "reached", home / "release"
+    releases.append(release)
+    shim(home / "shim", "mv", f'''
+import os, pathlib, sys, time
+if sys.argv[-1].endswith(".note"):
+    pathlib.Path({str(reached)!r}).touch()
+    while not pathlib.Path({str(release)!r}).exists():
+        time.sleep(0.02)
+os.execv({shutil.which("mv")!r}, ["mv", *sys.argv[1:]])
+''')
+    first = start(dict(env, PATH=str(home / "shim") + os.pathsep + env["PATH"]),
+                  "note", "--request-id", "shared", "--json", "original body")
+    wait_file(reached)
+    note_id = (home / "state/inbox/.requests/shared").read_text().strip()
+    retry = start(env, "note", "--request-id", "shared", "--json", "retry body")
+    try:
+        retry.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    ack = start(env, "drain", "--ack", note_id)
+    try:
+        ack.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    release.touch()
+    assert json.loads(result(first))["id"] == note_id
+    assert json.loads(result(retry))["id"] == note_id
+    result(ack)
+    assert not (home / f"state/inbox/{note_id}.note").exists(), "acknowledged note resurrected"
+    handled = home / f"state/inbox/handled/{note_id}.note"
+    assert handled.read_text().endswith("original body\n"), "retry replaced original capture"
+    for args in (("note", "--request-id", "shared", "--json", "retry"),
+                 ("announce", "--json", note_id)):
+        response = json.loads(result(start(env, *args)))
+        assert response["acknowledged"] is True, response
+        assert response["announced"] is True, response
+        assert response["path"] == str(handled), response
+    human = result(start(env, "note", "--request-id", "shared", "retry"))
+    assert "already acknowledged" in human, human
+
+    home, env = env_for("concurrent-receipts")
+    ids = [json.loads(result(start(env, "note", "--json", str(i))))["id"] for i in range(2)]
+    ids.sort(reverse=True)
+    reached, release = home / "reached", home / "release"
+    releases.append(release)
+    shim(home / "shim", "python3", f'''
+import pathlib, sys, time
+original = pathlib.Path.is_file
+paused = False
+def is_file(path):
+    global paused
+    exists = original(path)
+    if not paused and str(path) == {str(home / "state/inbox/.replies" / ids[0])!r}:
+        paused = True
+        pathlib.Path({str(reached)!r}).touch()
+        while not pathlib.Path({str(release)!r}).exists():
+            time.sleep(0.02)
+    return exists
+pathlib.Path.is_file = is_file
+sys.argv = sys.argv[1:]
+exec(compile(sys.stdin.read(), "<receipts>", "exec"))
+''')
+    reader = start(dict(env, PATH=str(home / "shim") + os.pathsep + env["PATH"]), "receipts")
+    wait_file(reached)
+    errors = []
+    finished = threading.Event()
+    def publish():
+        try:
+            for note_id in ids:
+                result(start(env, "reply", note_id, "answer"))
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+    writer = threading.Thread(target=publish)
+    writer.start()
+    finished.wait(timeout=1)
+    release.touch()
+    snapshot = json.loads(result(reader))
+    writer.join(timeout=15)
+    assert not writer.is_alive(), "reply writers did not finish"
+    assert not errors, errors
+    following = json.loads(result(start(env, "receipts", "--after", snapshot["reply_cursor"])))
+    delivered = [r["id"] for page in (snapshot, following) for r in page["replies"]]
+    assert delivered == ids, (delivered, ids, snapshot, following)
+finally:
+    for release in releases:
+        release.touch()
+    for proc in processes:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+PY
+pass "concurrent capture, acknowledgement, and reply cursors preserve durable results"

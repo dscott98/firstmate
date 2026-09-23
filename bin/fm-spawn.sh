@@ -165,6 +165,10 @@
 #   config/claude-permission-mode is not mapped: Devin auto approves read-only
 #   tools, unlike Claude auto. Effort is part of Devin model ids, so the
 #   independent --effort axis is recorded but omitted from argv.
+#   Every Pi launch (including secondmates and relaunches) uses the trust and
+#   agent_start receipt gate owned by bin/fm-pi-start-lib.sh before success.
+#   Backends without verified live viewport capture refuse before allocation.
+#   Raw Pi commands refuse; canonical --harness launches supply the startup hook.
 #   For omp (Oh My Pi), fm-spawn resolves the `omp` executable from PATH once and
 #   refuses when it is absent. Every omp launch clears the foreign harness
 #   markers (omp publishes none of its own), sets the Firstmate-owned
@@ -278,6 +282,7 @@
 #   compact-adviser kill switch COMPACT_ADVISER_DISABLE, which the floor also
 #   pins to 1 with a literal assignment so it survives the cleared environment
 #   even on a host that never had it set.
+#   LAVISH_AXI_HOST is also retained for board-server routing.
 #   An enabled task trace also retains TRACEPARENT. Explicit Firstmate launch
 #   assignments still apply inside the filtered environment. Raw commands must
 #   be POSIX sh compatible under this opt-in; the absent-file path is unchanged.
@@ -300,10 +305,11 @@
 #     __CLAUDEPERMFLAG__ the claude permission flag selected by config/claude-permission-mode
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
+#     __PISTART__  incarnation-specific startup extension in the staged launch directory
 #     __TURNEND__  absolute path to state/<task-id>.turn-ended (for harnesses whose
 #                  turn-end signal rides the launch command, e.g. codex -c notify=[...])
 #     __PIEXT__    absolute path to state/<task-id>.pi-ext.ts (pi turn-end extension,
-#                  written by this script; outside the worktree to avoid pi's trust gate)
+#                  written by this script outside project content)
 #     __PITURNEND__ absolute path to .pi/extensions/fm-primary-turnend-guard.ts in a pi secondmate home
 #     __PIWATCH__   absolute path to .pi/extensions/fm-primary-pi-watch.ts in a pi secondmate home
 #     __OMPBIN__   quoted concrete omp executable path resolved from PATH
@@ -1901,9 +1907,9 @@ launch_template() {
   pi | pi-signed)
     printf '%s' '__PIBIN____PITUIMODE__'
     if [ "$kind" = secondmate ]; then
-      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ -e __PISTART__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
-      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PIEXT__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
+      printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PIEXT__ -e __PISTART__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     fi
     ;;
   # omp (Oh My Pi), a Pi fork. Same one-positional-brief, --model, --thinking,
@@ -2156,10 +2162,21 @@ devin)
   }
   ;;
 pi | pi-signed)
+  if [ "$RAW_LAUNCH" -eq 1 ]; then
+    echo "error: Pi startup verification requires the canonical --harness pi or pi-signed launch" >&2
+    exit 1
+  fi
   PI_BIN=$(resolve_pi_executable "$HARNESS") || {
     echo "error: $HARNESS executable not found on PATH; install it or select a different verified harness" >&2
     exit 1
   }
+  # shellcheck source=bin/fm-pi-start-lib.sh
+  . "$FM_ROOT/bin/fm-pi-start-lib.sh"
+  fm_backend_visible_capture_supported "$BACKEND" || {
+    echo "error: refusing $HARNESS spawn: backend '$BACKEND' has no verified viewport-bounded capture for the Pi trust gate" >&2
+    exit 1
+  }
+  PI_VERSION=$("$PI_BIN" --version 2>/dev/null) || PI_VERSION=unknown
   PI_TUI_MODE=
   if pi_supports_tui_mode "$PI_BIN"; then
     PI_TUI_MODE=' --tui-mode regular'
@@ -4208,9 +4225,8 @@ EOF
     exclude_path '.opencode/plugins/fm-busy-state.js'
     ;;
   pi | pi-signed)
-    # Written OUTSIDE the worktree: pi's project-trust gate fires on any extension
-    # loaded from inside the project (verified live), but an explicit -e path
-    # elsewhere loads without a dialog. Lives in state/, cleaned by teardown.
+    # Keep generated hooks outside project content. Project resources can still
+    # trigger trust; fm-pi-start-lib.sh owns the launch gate. Teardown owns this file.
     cat >"$STATE/$ID.pi-ext.ts" <<EOF
 // Firstmate semantic busy-state events + turn-end notification; written by
 // fm-spawn under the contract owned by bin/fm-busy-lib.sh.
@@ -4852,6 +4868,20 @@ if ! (umask 077 && mkdir "$LAUNCH_DIR") 2>/dev/null; then
     exit 1
   fi
 fi
+case "$HARNESS" in
+pi | pi-signed)
+  PI_START_RECEIPT="$LAUNCH_DIR/pi-start.$SPAWN_GEN.ready"
+  PI_START_EXTENSION="$LAUNCH_DIR/pi-start.$SPAWN_GEN.ts"
+  PI_START_PROMPT="$LAUNCH_DIR/pi-start.$SPAWN_GEN.prompt"
+  if [ -e "$PI_START_RECEIPT" ] || [ -L "$PI_START_RECEIPT" ]; then
+    echo "error: Pi launch receipt already exists: $PI_START_RECEIPT" >&2
+    exit 1
+  fi
+  (umask 077; set -C; "$FM_ROOT/bin/fm-operational-input.sh" encode launch-brief <"$BRIEF_REAL" >"$PI_START_PROMPT") || exit 1
+  (umask 077; set -C; fm_pi_start_extension "$PI_START_RECEIPT" "$PI_START_PROMPT" >"$PI_START_EXTENSION") || exit 1
+  LAUNCH=${LAUNCH//__PISTART__/$(shell_quote "$PI_START_EXTENSION")}
+  ;;
+esac
 LAUNCH_FILE="$LAUNCH_DIR/launch.$SPAWN_GEN.sh"
 LAUNCH_STAGE="$LAUNCH_DIR/.launch.$SPAWN_GEN.tmp"
 if [ -e "$LAUNCH_FILE" ] || [ -L "$LAUNCH_FILE" ]; then
@@ -4872,6 +4902,14 @@ if [ "${HERDR_PROJECTED:-0}" -eq 1 ]; then
   spawn_herdr_presentation_order_lock_release
 fi
 spawn_send_key "$T" Enter
+case "$HARNESS" in
+pi | pi-signed)
+  if ! fm_pi_wait_for_start "$BACKEND" "$T" "$W" "$PI_START_RECEIPT" "$HARNESS ${PI_VERSION:-unknown}"; then
+    printf '%s\n' "$(status_stamp_line "failed: $HARNESS launch did not confirm brief processing; inspect window $T")" >>"$STATE/$ID.status"
+    exit 1
+  fi
+  ;;
+esac
 if [ "$HARNESS" = kimi ]; then
   if ! kimi_wait_for_ready; then
     kimi_spawn_fail "$KIMI_READY_FAILURE_DETAIL"

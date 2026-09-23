@@ -6,6 +6,46 @@ This record contains reusable version-scoped evidence for active runtime guarant
 The backend guides own current setup, safety boundaries, and limitations.
 Exact task chronology, branch names, temporary homes, local paths, process ids, thread ids, and delivery transcripts remain in private reports or PR evidence.
 
+## Pi folder trust and launch readiness
+
+Verified on 2026-09-21 on Linux with Pi 0.85.1 and tmux 3.6.
+The executable gate is owned by `bin/fm-pi-start-lib.sh`, with spawn integration in `bin/fm-spawn.sh`.
+The guard uses installed Pi with an isolated agent configuration and a local provider, so it spends no model tokens and requires no credentials.
+It exercises ship and scout spawn, per-folder trust persistence, supplied-brief processing, remembered paths, stopped-endpoint relaunch, secondmate charter processing, and refusal when no agent run starts.
+The local provider inside Pi receives the complete long brief through a staged launch exceeding 1024 bytes, and unsafe writable, symlinked, and file-valued launch paths refuse while preserving existing files.
+Pi-signed was not installed on this host; the same guard tests it whenever available and reports absence explicitly.
+
+```sh
+FM_BACKEND=tmux bin/fm-test-run.sh tests/fm-pi-start-live-e2e.test.sh
+```
+
+Observed output:
+
+```text
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 fresh spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 remembered spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 staged launch over 1024 bytes delivered the complete long brief
+ok - pi 0.85.1 ship spawn and relaunch proved brief processing with folder-only trust
+ok - pi 0.85.1 secondmate proved charter processing with folder-only trust
+ok - pi 0.85.1 refused unsafe writable launch path and preserved existing files
+ok - pi 0.85.1 refused unsafe symlink launch path and preserved existing files
+ok - pi 0.85.1 refused unsafe file launch path and preserved existing files
+ok - pi 0.85.1 refuses launch without agent_start
+skip: pi-signed not installed
+```
+
+The portable regression uses real terminal processes without Pi:
+
+```sh
+FM_BACKEND=tmux bin/fm-test-run.sh tests/fm-pi-start.test.sh
+```
+
+It separates structural progress from UI appearance, rejects parent and session-only choices, bounds Enter to one selection, and rejects old-incarnation evidence or a dismissed dialog without processing.
+The shared provider surface was inspected for tmux, Herdr, Zellij, Orca, and cmux: tmux, Herdr, and Zellij have viewport-only reads; Orca and cmux refuse at spawn preflight because their adapters lack that verified capability.
+This record's live launch evidence is for tmux; it does not claim a new live Herdr, Zellij, Orca, or cmux run.
+
 ## Harness detection precedence
 
 Firstmate's own harness comes from two kinds of evidence, and `bin/fm-harness.sh` owns how they combine: an environment marker names its harness, and the nearest harness process in the parent chain proves who owns the process tree.
@@ -723,9 +763,8 @@ The same panes accepted `fm_backend_send_text_submit` at the same moment because
 `test_composer_footer_demotion_needs_a_proven_pair` pins the three bounds of the demotion - a blank row ends the footer zone, a separator pair that closed over no agent-glyph row demotes nothing, and Cursor's half-block-bounded `→` composer is untouched - plus the strict posture that an unanchored statusLine row alone never proves an empty composer.
 The footer zone is a property of any envelope a glyph row inside it proves, not of the separator pair specifically, so the same statusLine footer under claude's BORDERED composer (the shape a wide pane renders) is demoted identically; `test_composer_footer_zone_is_shape_independent` carries that box shape, asserts the statusLine is never the extracted composer content, and pins both counterweights - typed text inside that same box under that same footer still reads `pending`, and codex's startup banner, which holds no glyph row and therefore proves nothing, still yields to the live bare row drawn contiguously below it.
 
-The demotion is deliberately ASYMMETRIC: `empty` is the only verdict that authorizes `fm-send` to type into a pane, so the rule may move a verdict toward refusing but never toward `empty`.
-It therefore counts a footer zone only when every row in it is demonstrably furniture - omp's status row, a braille animation row, claude's permission-mode hint row (`⏵⏵ bypass permissions on`), or a row leading with an agent glyph OTHER than the one that proved the envelope, which is what the `→` statusLine is on a `❯` claude pane.
-A run containing unclaimed activity (`Working on request...`, `→ ran npm test (3 failures)`) is not furniture in either row order and keeps invalidating the envelope above it, and a row leading with the SAME glyph the envelope was proven by (`❯ my typed draft`) is a live composer that keeps winning, so a visible draft is never overwritten.
+The footer safety boundary is owned by [`bin/fm-composer-lib.sh`](../../bin/fm-composer-lib.sh).
+The fixtures distinguish recognized footer furniture, which can restore an `empty` verdict, from unclaimed activity and a later same-glyph draft, which must still refuse delivery.
 `test_composer_footer_zone_refuses_rather_than_allows` pins both directions on the bordered-box and separator-pair shapes.
 
 Coverage is the bordered box and the separator pair, the two shapes claude 2.x renders. The opencode left bar is wired into the same rule but is **unexercised**: every left-bar row this repo records leads with plain text, and opencode's own prompt character is `>`, a shell glyph deliberately outside the agent set, so no opencode shape recorded here can prove a left-bar envelope or open a footer zone beneath one.
@@ -2264,3 +2303,36 @@ A throwaway scout was spawned through `bin/fm-spawn.sh --scout --harness omp --m
 6. `bin/fm-control.sh <id> exit` stopped the agent and `bin/fm-teardown.sh` returned the worktree and closed the item.
 
 `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` refreshes the primary evidence; the worker path above is refreshed by repeating the scout dispatch after any omp upgrade.
+
+## Pi primary provider switch
+
+The current credential-free regression loads both tracked primary and supervision extensions in Pi's real RPC runtime with isolated settings and fixture credentials.
+It builds a supervision conversation before switching main, invokes `/fm-openrouter-sol`, and checks the active main model through RPC.
+A subsequent supervision wake sends exactly one request to a loopback quota-provider endpoint that rejects it without inference; the test checks the request's model and route, unchanged branch-session path, and quota-provider selections recorded in that session.
+A fresh Pi worker process must still select the quota model, and the existing `settings.json`, secondmate harness setting, and supervision pin must remain byte-for-byte unchanged.
+The regression also covers unsafe supervision pins, secondmate home markers including a dangling symlink, extra arguments, and loss of the primary lock.
+It uses no production credentials or external inference and does not establish production authentication or completion success.
+
+Refresh with:
+
+```sh
+bin/fm-test-run.sh tests/fm-pi-provider-switch.test.sh
+```
+
+Expected success output from the current regression:
+
+```text
+ok - real Pi provider-switch command changes only the locked primary session, preserves supervision and fresh-worker quota models and defaults, and rejects unsafe switches
+```
+
+The recorded strict typecheck on 2026-09-21 against Pi 0.85.1 used:
+
+```sh
+FM_PI_PACKAGE_DIR=/home/dscott/.local/lib/node_modules/@earendil-works/pi-coding-agent bash tests/fm-pi-primary-types.test.sh
+```
+
+```text
+ok - tracked Pi extensions pass strict no-emit typecheck against Pi 0.85.1
+```
+
+[Configuration](../configuration.md#pi-main-session-provider-switch) owns the command's operator contract.

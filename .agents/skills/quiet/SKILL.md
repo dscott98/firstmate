@@ -23,14 +23,12 @@ exits it.
 
 ## What it does
 
+On Pi and pi-signed, use the attended supervision branch without entering an away posture or launching a daemon; [the AFK skill's per-harness entry](../afk/SKILL.md#entering-afk-words) owns this distinction.
+The daemon procedure below applies only to the other supported harnesses.
+
 1. **Enter the lifecycle through `bin/fm-afk-launch.sh`, exactly as `/afk`
    does, with `FM_AFK_MODE=quiet` set first.**
-   Follow the `afk` skill's "What it does" steps 1-3 verbatim (terminal-
-   backed vs harness-native entry, daemon-already-running refresh, never
-   arming a separate `fm-watch.sh`) with one addition: export
-   `FM_AFK_MODE=quiet` in the shell that invokes `bin/fm-afk-launch.sh start`
-   (or `start-native`), so `state/.afk`'s first line reads `quiet` instead of
-   `away`.
+   Follow [the AFK entry procedure](../afk/SKILL.md#entering-afk-words), with one addition: export `FM_AFK_MODE=quiet` in the shell that invokes `bin/fm-afk-launch.sh start` (or `start-native`), so `state/.afk`'s first line reads `quiet` instead of `away`.
    Leaving `FM_AFK_MODE` unset on a bare refresh of an already-running quiet
    daemon is also correct and does nothing wrong: `fm_afk_flag_write`
    preserves the on-disk mode when no explicit mode is given, so a plain
@@ -49,10 +47,7 @@ point of this mode (AGENTS.md section 8's away-mode stub, quiet branch).
 
 - Only an explicit `/quiet off` (or the captain plainly asking to leave quiet
   mode / resume normal supervision) exits it: run `bin/fm-afk-return.sh`
-  unchanged, exactly the procedure `/afk`'s "How to exit afk" section
-  documents for its own return path (correct-ordered daemon shutdown,
-  durable wake presentation and acknowledgement, escalation/wedge evidence,
-  and the return-catch-up gate).
+  unchanged, following [the AFK return procedure](../afk/SKILL.md#how-to-exit-the-return).
   That script does not read or care about the flag's mode, so it needs no
   quiet-specific variant.
 - A marked daemon escalation, or a message beginning `/quiet` while already

@@ -212,6 +212,13 @@ load_wake_lib() {
   FM_INBOX_WAKE_LIB=1
 }
 
+lock_inbox() {
+  mkdir -p "$INBOX"
+  load_wake_lib || die "the inbox lock needs $FM_ROOT/bin/fm-wake-lib.sh"
+  fm_lock_acquire_wait "$INBOX/.notes.lock" || die "could not lock the inbox"
+  trap 'fm_lock_release "$INBOX/.notes.lock"' EXIT
+}
+
 need_python() {
   command -v python3 >/dev/null 2>&1 || die "python3 is required for machine-readable inbox output"
 }
@@ -370,7 +377,10 @@ finish_note_result() {  # <outcome> <id> <request-id> <json> <strict-exit> <summ
     0) announced=1 ;;
     2) acknowledged=1 ;;
   esac
-  [ -f "$INBOX/handled/$id.note" ] && path="$INBOX/handled/$id.note"
+  if [ -f "$INBOX/handled/$id.note" ]; then
+    path="$INBOX/handled/$id.note"
+    acknowledged=1
+  fi
   if [ "$json" -eq 1 ]; then
     emit_note_json "$outcome" "$id" "$request_id" 1 "$announced" "$path" "$acknowledged"
   else
@@ -380,10 +390,10 @@ finish_note_result() {  # <outcome> <id> <request-id> <json> <strict-exit> <summ
       printf 'queued %s\n' "$id"
     fi
     printf '  %s\n' "$summary"
-    if [ "$announced" -eq 1 ]; then
-      printf '  firstmate will pick this up at its next check.\n'
-    elif [ "$acknowledged" -eq 1 ]; then
+    if [ "$acknowledged" -eq 1 ]; then
       printf '  firstmate has already acknowledged this note.\n'
+    elif [ "$announced" -eq 1 ]; then
+      printf '  firstmate will pick this up at its next check.\n'
     fi
   fi
   if [ "$announced" -eq 1 ] || [ "$acknowledged" -eq 1 ]; then
@@ -422,14 +432,14 @@ publish_from_reservation() {  # <request-id> <source> <body> <extra>
   printf '%s\n' "$id"
 }
 
-queue_note() {
+queue_note() (
   local source=$1 body=$2 extra=${3:-} request_id=${4:-} json=${5:-0}
   local strict=0
   if [ -n "$request_id" ] || [ "$json" -eq 1 ]; then
     strict=1
   fi
   [ -n "${body//[[:space:]]/}" ] || die "refusing to queue an empty note"
-  mkdir -p "$INBOX"
+  lock_inbox
 
   local tmp id summary staging_name reserved
 
@@ -448,11 +458,7 @@ queue_note() {
     write_note_file "$tmp" "$id" "$source" "$body" "$extra" "$request_id"
     if ! claim_request_id "$request_id" "$id"; then
       rm -f "$tmp"
-      id=$(publish_from_reservation "$request_id" "$source" "$body" "$extra") \
-        || die "request id $request_id is reserved but unreadable; retry the same request id"
-      summary=$(note_summary_from_body "$(read_note_body "$(note_path "$id")")")
-      finish_note_result replay "$id" "$request_id" "$json" "$strict" "$summary"
-      return $?
+      die "could not reserve request id $request_id"
     fi
     mv "$tmp" "$INBOX/$id.note"
     summary=$(note_summary_from_body "$body")
@@ -467,7 +473,7 @@ queue_note() {
   mv "$tmp" "$INBOX/$id.note"
   summary=$(note_summary_from_body "$body")
   finish_note_result created "$id" "" "$json" "$strict" "$summary"
-}
+)
 
 cmd_note() {
   local body json=0 request_id=""
@@ -498,8 +504,8 @@ cmd_note() {
   queue_note text "$body" "" "$request_id" "$json"
 }
 
-cmd_announce() {
-  local json=0 id summary path state rc=0
+cmd_announce() (
+  local json=0 id summary path state rc=0 acknowledged=0
   if [ "${1:-}" = "--json" ]; then
     json=1
     shift
@@ -507,7 +513,9 @@ cmd_announce() {
   id=${1:-}
   [ -n "$id" ] || die "usage: fm-inbox.sh announce [--json] <id>"
   valid_note_id "$id" || die "invalid note id"
+  lock_inbox
   path=$(note_path "$id") || die "no such note: $id"
+  [ "$path" != "$INBOX/handled/$id.note" ] || acknowledged=1
   summary=$(note_summary_from_body "$(read_note_body "$path")")
   state=$(note_announce_state "$id" "$path")
   if [ "$state" != true ] && [ "$path" = "$INBOX/handled/$id.note" ]; then
@@ -516,7 +524,7 @@ cmd_announce() {
   case "$state" in
     true)
       if [ "$json" -eq 1 ]; then
-        emit_note_json replay "$id" "" 1 1 "$path"
+        emit_note_json replay "$id" "" 1 1 "$path" "$acknowledged"
       else
         printf 'already-announced %s\n' "$id"
       fi
@@ -556,7 +564,7 @@ cmd_announce() {
     return 3
   fi
   die "note $id is saved at $path but firstmate was NOT woken"
-}
+)
 
 # Claim the next reply sequence. The caller holds REPLY_SEQ_LOCK across the
 # claim AND the record write, so a reply a reader can see implies every lower
@@ -651,7 +659,7 @@ PY
   fi
 }
 
-cmd_receipts() {
+cmd_receipts() (
   local after="" all_pending=0 all_handled=0 all_replies=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -669,6 +677,10 @@ cmd_receipts() {
     esac
   done
   need_python
+  mkdir -p "$INBOX"
+  load_wake_lib || die "the reply snapshot needs $FM_ROOT/bin/fm-wake-lib.sh"
+  fm_lock_acquire_wait "$REPLY_SEQ_LOCK" || die "could not lock the reply snapshot"
+  trap 'fm_lock_release "$REPLY_SEQ_LOCK"' EXIT
   python3 - "$INBOX" "$ANNOUNCED_DIR" "$REPLIES" "$FM_HOME" \
     "$RECEIPTS_PENDING_BOUND" "$RECEIPTS_HANDLED_BOUND" "$RECEIPTS_REPLIES_BOUND" \
     "$all_pending" "$all_handled" "$all_replies" "$after" \
@@ -841,7 +853,7 @@ json.dump({
 }, sys.stdout, separators=(",", ":"))
 sys.stdout.write("\n")
 PY
-}
+)
 
 cmd_ready() {
   [ "$#" -eq 0 ] || die "usage: fm-inbox.sh ready"
@@ -1113,10 +1125,11 @@ cmd_list() {
   [ "$any" -eq 1 ] || printf '(inbox empty)\n'
 }
 
-cmd_drain() {
+cmd_drain() (
   if [ "${1:-}" = "--ack" ]; then
     shift
     [ "$#" -gt 0 ] || die "usage: fm-inbox.sh drain --ack <id>..."
+    lock_inbox
     mkdir -p "$INBOX/handled"
     local id
     for id in "$@"; do
@@ -1131,7 +1144,7 @@ cmd_drain() {
   fi
   cmd_list
   printf '\nAck with: fm-inbox.sh drain --ack <id>...\n'
-}
+)
 
 # ---------------------------------------------------------------- dispatch
 
