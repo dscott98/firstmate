@@ -1,0 +1,26 @@
+commit b31b62f1f3116f29a62df9f8ac224ae923660af5
+Merge: d659acd 52fca51
+Author:     dscott <dscott98@gmail.com>
+AuthorDate: Tue Sep 22 23:09:27 2026 -0700
+Commit:     dscott <dscott98@gmail.com>
+CommitDate: Tue Sep 22 23:09:27 2026 -0700
+
+    Merge upstream main into fork (2026-09-22 sync)
+    
+    Synchronize 41 upstream commits (kunchenguid/firstmate main,
+    1bb72cc5..52fca517) into the fork while preserving the fork
+    customizations: the guarded primary provider switch (/fm-openrouter-sol
+    in the Pi turn-end guard), the Pi brief-processing startup verification
+    (bin/fm-pi-start-lib.sh and its fm-spawn.sh integration), and the inbox
+    concurrency and acknowledgement fixes, plus the smaller fork deltas
+    (composer footer-zone wording, afk-launch/spawn comment corrections,
+    process-event-sources skill consolidation, AGENTS quota-array-dispatch
+    phrase).
+    
+    Conflict policy: upstream's structure wins where it refactored
+    (away-posture enter flow, named-head done gate, watcher and wake
+    changes, Lavish session routing, remote doctor, public follow-ups, AXI
+    floors); each customization is re-applied on top of that structure.
+    
+    Sync method for future syncs: explicit-refspec upstream fetch, merge
+    into sync/upstream-<date>, fork-internal PR into fork main.

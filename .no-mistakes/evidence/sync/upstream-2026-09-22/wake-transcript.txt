@@ -1,0 +1,16 @@
+$ fm-inbox.sh note --request-id wake-proof --json Review fork sync
+{"schema":"fm-inbox-note.v1","outcome":"created","id":"1790147841-q4koSD","request_id":"wake-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/wake-home/state/inbox/1790147841-q4koSD.note"}
+Exit: 0
+$ fm-wake-drain.sh 
+1790147841	1	check	inbox:1790147841-q4koSD	check: captain inbox note 1790147841-q4koSD - Review fork sync
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1554395.1790147841.AK1L7X
+Exit: 0
+$ fm-wake-drain.sh 
+1790147841	1	check	inbox:1790147841-q4koSD	check: captain inbox note 1790147841-q4koSD - Review fork sync
+WAKE_ACK_REQUIRED: after handling completes run bin/fm-wake-drain.sh --ack-through 1 --recovery-generation 1554395.1790147841.AK1L7X
+Exit: 0
+$ fm-wake-drain.sh --ack-through 1 --recovery-generation 1554395.1790147841.AK1L7X
+Exit: 0
+$ fm-wake-drain.sh 
+Exit: 0
+Wake remained replayable until acknowledged, then disappeared.

@@ -1,0 +1,1 @@
+ok - real Pi provider-switch command changes only the locked primary session, preserves supervision and fresh-worker quota models and defaults, and rejects unsafe switches

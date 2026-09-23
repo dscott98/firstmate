@@ -1,0 +1,80 @@
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"created","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":false,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh drain --ack 1790147764-S7kN6X
+acked 1790147764-S7kN6X
+Exit: 0
+$ fm-inbox.sh announce --json 1790147764-S7kN6X
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":null,"saved":true,"announced":true,"acknowledged":true,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/handled/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh note --request-id sync-proof --json Keep fork customizations
+{"schema":"fm-inbox-note.v1","outcome":"replay","id":"1790147764-S7kN6X","request_id":"sync-proof","saved":true,"announced":true,"acknowledged":true,"path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/handled/1790147764-S7kN6X.note"}
+Exit: 0
+$ fm-inbox.sh reply --json 1790147764-S7kN6X Recorded in the fork.
+{"schema":"fm-inbox-reply.v1","outcome":"created","id":"1790147764-S7kN6X","path":"/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/inbox/.replies/1790147764-S7kN6X"}
+Exit: 0
+$ fm-inbox.sh reply --json 1790147764-S7kN6X Duplicate reply
+fm-inbox: reply already recorded for 1790147764-S7kN6X
+Exit: 1
+$ fm-inbox.sh receipts --all-handled --all-replies
+{"schema":"fm-inbox-receipts.v1","home":".test-phase-tmp/manual-home","generated":"2026-09-23T07:16:05Z","pending":[],"handled":[{"id":"1790147764-S7kN6X","at":"2026-09-23T07:16:04Z","source":"text","request_id":"sync-proof","body":"Keep fork customizations","acknowledged":true,"announced":true,"reply":{"id":"1790147764-S7kN6X","at":"2026-09-23T07:16:05Z","body":"Recorded in the fork.","cursor":"000000000001"}}],"replies":[{"id":"1790147764-S7kN6X","at":"2026-09-23T07:16:05Z","body":"Recorded in the fork.","cursor":"000000000001"}],"reply_cursor":"000000000001","omitted":[]}
+Exit: 0
+$ fm-afk-contract.sh enter --words-file /home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/words.txt --spend 2
+Away posture recorded at 2026-09-23T07:16:05Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return. Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: not given. Spend cap: 2 concurrent workers.
+Away posture (recorded):
+  entered: 2026-09-23T07:16:05Z
+  expected return: not given
+  spend cap: 2 concurrent workers
+  reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+  your words (verbatim):
+    Keep work in my fork.
+    Do not contact upstream.
+Exit: 0
+$ fm-afk-contract.sh words
+Keep work in my fork.
+Do not contact upstream.
+Exit: 0
+$ fm-afk-contract.sh enter
+Away posture recorded at 2026-09-23T07:16:05Z: hold-for-return only. No phone channel is configured; anything that needs you waits for your return. Your away instructions are recorded verbatim; the away session will carry them out where it can, and anything it is unsure of, or that needs you, waits for your return. Destructive, irreversible, and security-sensitive actions are never pre-authorizable, whatever the words say. Expected return: not given. Spend cap: 2 concurrent workers.
+Away posture (recorded):
+  entered: 2026-09-23T07:16:05Z
+  expected return: not given
+  spend cap: 2 concurrent workers
+  reach: hold-for-return only. No phone channel is configured; anything that needs you waits for your return.
+  your words (verbatim):
+    Keep work in my fork.
+    Do not contact upstream.
+fm-afk-contract: away posture already recorded at 2026-09-23T07:16:05Z; a refresh leaves it untouched
+Exit: 0
+$ fm-afk-contract.sh words
+Keep work in my fork.
+Do not contact upstream.
+Exit: 0
+$ fm-afk-contract.sh enter --words Replace mandate --spend bad
+fm-afk-contract: --spend must be a positive integer, got 'bad'
+Exit: 2
+$ fm-afk-contract.sh words
+Keep work in my fork.
+Do not contact upstream.
+Exit: 0
+$ fm-afk-contract.sh validate
+Exit: 0
+$ fm-afk-contract.sh archive
+/home/dscott/.no-mistakes/worktrees/b646937677ea/01M36HP2GGTGVN93GPC7ZSM0CP/.test-phase-tmp/manual-home/state/afk-contracts/1790147765.afk-contract
+Exit: 0
+All direct CLI assertions passed.
