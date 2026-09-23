@@ -652,7 +652,7 @@ make_launch_capturing_tmux() {
   local dir=$1 fakebin="$1/fakebin"
   mkdir -p "$fakebin"
   fm_test_fake_tmux_spawn "$fakebin"
-  fm_fake_exit0 "$fakebin" pi
+  fm_fake_pi "$fakebin" pi
   # BASE_PATH deliberately omits the developer's node, which the trust
   # registration below needs, so link the real one in rather than presenting a
   # node-less spawn host no real fleet member looks like.

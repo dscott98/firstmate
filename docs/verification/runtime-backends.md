@@ -171,6 +171,44 @@ zsh
 A persistent parent shell waiting for a child remained reported as the parent process, while a shell that directly execed a simple command changed identity with the process itself.
 Pi and pi-signed 0.82.0 were reverified on 2026-07-27 through real isolated `fm-spawn.sh` launches.
 
+### Pi one-run project-resource approval
+
+The initial Pi 0.87.0 and Herdr 0.9.1 guard run observed the folder-trust dialog, the managed launch's `--approve` argument, unchanged trust stores, and refusal when the approval flag was unavailable.
+Its readiness assertion could accept echoed prompt text, and its saved-parent case launched in the parent directory, so that run did not establish instruction processing or inherited trust.
+The corrected guard requires a model-created marker absent before launch and compares the same child worktree with and without its parent's saved trust decision.
+The corrected guard passed on 2026-09-22 with Pi 0.87.0 and Herdr 0.9.1: the saved `pi-trust-final.log` records the model-created marker, the same child worktree's trust comparison, unchanged trust stores, and approval-support refusal.
+This reconciles existing evidence; no additional live run was performed for the reconciliation.
+
+```sh
+pi --version
+pi --help | grep -- '--approve'
+TMPDIR="$PWD/.test-tmp" FM_PI_TRUST_LIVE_E2E=1 bash tests/fm-pi-trust-live-e2e.test.sh
+bash tests/fm-spawn-dispatch-profile.test.sh
+```
+
+Observed bounded output:
+
+```text
+0.87.0
+  --approve, -a                  Trust project-local files for this run
+ok - bare pi in a fresh untrusted worktree parks on Trust project folder? [herdr 0.9.1, pi 0.87.0]
+# model-created marker: INSTRUCTION_PROCESSED
+ok - the managed launch carries --approve, never renders the dialog, and processes its brief [herdr 0.9.1, pi 0.87.0]
+ok - one-run approval left both the isolated and the operator trust stores untouched
+ok - a saved parent-path trust decision skips the dialog on a bare launch (the per-slot masking) [herdr 0.9.1, pi 0.87.0]
+ok - a pi whose --help omits --approve is refused before endpoint or metadata exists [herdr 0.9.1, pi 0.87.0]
+```
+
+[`fm-spawn.sh`](../../bin/fm-spawn.sh) owns the scoped approval and compatibility contract exercised here.
+The deterministic launch regression covers ordinary workers, scouts, secondmates, relaunches, the shared external-extension shape, and a missing-flag refusal before launch; the opt-in live guard re-proves the vendor-rendered dialog facts against the installed Pi after every upgrade.
+The accepted test-phase reconciliation also registers the previously produced opt-in real-Pi guard evidence for scoped approval across worker, scout, secondmate, and relaunch commands, as confirmed by the author's review response.
+The local saved log directly corroborates the scout and refusal cases; the broader launch-path guard evidence is attributed to that response, not to a new run or to deterministic checks alone.
+The separate real `pi-signed` wrapper scenario is environmentally untestable on this host: no distinct wrapper is on PATH, and the installed `pi` execs the signed launcher.
+Its coverage is the shared Pi-family launch-template portable regression, not a separate live wrapper pass.
+This limitation follows the author's supplied reconciliation of `data/pi-trust-live-verify-q5/report.md`; that private report is absent from this isolated worktree and was not independently reread here.
+The reconciled coverage is six scenarios supported by existing live evidence (with the launch-path provenance qualification above), plus one environmentally untestable wrapper scenario, rather than seven independently observed live passes.
+The guard spends one real model turn (its prevention case submits the launch brief), so it stays opt-in; its trigger, saved-trust, and refusal cases spend no tokens.
+
 ### Agent liveness name sources
 
 The earlier record that every harness is observed under its own `#{pane_current_command}` no longer holds and has been replaced by the per-harness evidence below.
@@ -552,6 +590,7 @@ The composer-classification record below observes the same gate from the other s
 
 `bin/fm-busy-lib.sh`'s launch-prompt backstop (`fm_busy_launch_prompt_parked`) reclassifies a launch whose busy record is still pinned at the fm-spawn seed as `unknown launch-prompt`, rather than `busy fm-spawn`, when the captured pane matches that harness's own recognized trust, sign-in, or first-run dialog.
 Each signature below was live-verified against the real installed binary through `tests/fm-launch-prompt-signals-live-e2e.test.sh` (`FM_LAUNCH_PROMPT_SIGNALS_LIVE=1`), which is what refreshes this record after an upgrade.
+This backstop is detection, not prevention: for the Pi family the launch itself now prevents the routine fresh-worktree dialog through the scoped one-run `--approve` contract in the "Pi one-run project-resource approval" record above, so the Pi signature here covers the unexpected-prompt residue (for example a launch shape that bypasses that contract).
 
 An initial Pi signature sourced only from the installed binary's own UI strings ("Project trust", the internal panel-title component, never the dialog's own rendered heading) was wrong and never matched the real screen.
 This guard's first live run caught that before it shipped, which is the evidence for why this class of check must be driven end to end rather than read off strings or a component name.

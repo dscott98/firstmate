@@ -31,8 +31,10 @@ Keep the instructions as one positional argument.
 Multiple positional arguments become separate queued messages; the spawn template already preserves the one-argument shape.
 
 A project trust dialog can appear in a not-yet-trusted directory containing Pi project resources, including a clean worktree.
-`../../../bin/fm-pi-start-lib.sh` owns automatic per-folder trust selection and startup proof for worker, secondmate, and replacement launches.
-The decision persists per path in `~/.pi/agent/trust.json`, so later spawns in the same pooled slot skip it.
+Managed launches prevent it through the scoped one-run project-resource approval and compatibility contract in `../../../bin/fm-spawn.sh --help`; do not persist folder trust as a routine spawn step.
+`../../../bin/fm-pi-start-lib.sh` additionally owns startup proof - and one-shot per-folder trust selection if a dialog ever renders anyway - for worker, secondmate, and replacement launches.
+A manually answered decision persists per path in `~/.pi/agent/trust.json`, so later spawns in the same pooled slot skip it.
+For a manually launched primary, follow [README setup](../../../../../README.md#install-and-launch).
 
 ## Worker turn-end extension
 

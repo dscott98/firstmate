@@ -21,7 +21,7 @@ For Claude, load `references/harness/claude.md`; its workspace-trust section own
 agy gates every fresh worktree too; the spawn pre-registers it in agy's own store the same way, and a strict post-launch gate answers any dialog that still renders before the spawn reports success.
 Cursor suppresses its dialog with launch-time `--trust`, and Muse suppresses its own with `--yolo`.
 Grok dodges its gate instead of granting trust, because its project picker appears only outside a project and the spawn starts in the isolated git root.
-Pi's automatic trust and startup gate is owned by `../../../bin/fm-pi-start-lib.sh`; `references/harness/pi.md` records its adapter context.
+For Pi-family managed launches, `../../../bin/fm-spawn.sh --help` owns the scoped approval and compatibility contract and `../../../bin/fm-pi-start-lib.sh` owns the startup gate; `references/harness/pi.md` records the adapter context and manual primary setup.
 Codex shows a directory-trust dialog on the first run for a repository root.
 
 Use the tool's exact skill form, or natural language only when no separate command is verified or the form remains uncertain.
