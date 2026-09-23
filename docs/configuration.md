@@ -245,7 +245,7 @@ Per-purpose model routing for no-mistakes pipeline agents lives in no-mistakes' 
 The tracked `.no-mistakes.yaml` cannot pin models: no-mistakes honors credential and model profiles only from the global config, so no pushed branch can select them either.
 No-mistakes v1.75.2 supports exactly two routing surfaces, both global-only, and its `global-config` reference owns the full schema.
 `agent_config.<harness>.{model,effort}` sets the profile every non-review step runs with: test, document, lint, rebase, PR, and CI diagnosis, including their fix agents.
-`review_agents.<reviewer|fixer>.{agent,model,effort}` pins the review loop's two roles to an explicit harness and profile, so review and difficult review fixes keep strong reasoning while routine steps run an economical profile.
+`review_agents.<reviewer|fixer>.{agent,model,effort}` pins the review loop's two roles to an explicit harness and profile, so review and review fixes keep strong reasoning while routine steps run an economical profile.
 This example assigns an economical profile to routine steps and stronger profiles to the review loop:
 
 ```yaml
@@ -260,13 +260,13 @@ review_agents:
     effort: high
   fixer:
     agent: codex
-    model: gpt-6-astra         # difficult fixes keep strong reasoning
+    model: gpt-6-astra         # review fixes keep strong reasoning
     effort: high
 ```
 
 Set the reviewer and fixer model explicitly: an empty role model inherits `agent_config` for that harness, which this recipe points at the economical tier.
 Model names follow the plan's current catalog; confirm them with `quota-axi models` before pinning.
-The supported boundary: no per-step agent or model exists for the non-review steps, so test, lint, and CI repair rounds cannot be split from the routine default and stay on the global profile.
+The supported boundary, which the captain approved as the policy itself: no per-step agent or model exists for the non-review steps, so test, lint, and CI repair rounds cannot be split from the routine default - strong models serve review and review fixes, and economical models serve all other validation work and fixes.
 Changing these profiles affects every repository validated through this machine's daemon, not only firstmate, and applies to pipeline runs started after the change.
 
 ## Captain Preferences (data/captain.md / data/captain-shared.md)
