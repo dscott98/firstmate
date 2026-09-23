@@ -78,9 +78,7 @@ That identity-gated exception preserves the strict container-proof rule for ever
 The shared classifier accepts a shell glyph as an empty agent composer only inside a bordered container.
 A bare shell prompt is `unknown`, so away-mode escalation is never injected into a dead shell.
 
-Busy state is not read from rendered text on this backend.
-A task's busy, idle, unknown, or dead verdict comes from the semantic busy-state contract owned by `bin/fm-busy-lib.sh`; [architecture](architecture.md#busy-state-is-semantic-per-adapter) owns its boundaries.
-The isolated rendered-tail busy fallbacks that remain are harness-scoped, so one adapter's output can never classify another's task.
+A task's busy, idle, unknown, or dead verdict follows the [semantic busy-state contract](architecture.md#busy-state-is-semantic-per-adapter), including its harness-scoped rendered fallbacks and launch-prompt backstop.
 The submit acknowledgement and away-mode supervisor-pane busy guard below still consult rendered output, but only to decide whether input can be delivered, never to decide recorded task state.
 The supervisor guard selects only the detected primary harness's signature rather than a global union of vendor patterns.
 
