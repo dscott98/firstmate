@@ -53,7 +53,7 @@ git merge --no-ff upstream/main
 Use a fresh suffix if that day's sync branch already exists; preserve the existing branch's work.
 Resolve conflicts by incorporating upstream's current structure and preserving the fork's customizations within it, never by accepting one side wholesale.
 Review the fork delta against the previous upstream merge base and the complete resulting diff, including files Git merged without conflicts.
-In particular, preserve the [Pi primary provider switch](docs/configuration.md#pi-main-session-provider-switch), the startup verification owned by `bin/fm-pi-start-lib.sh` and its `bin/fm-spawn.sh` integration, and the inbox concurrency and acknowledgement guarantees owned by `bin/fm-task-inbox-lib.sh`.
+In particular, preserve the [Pi primary provider switch](docs/configuration.md#pi-main-session-provider-switch), the startup verification owned by `bin/fm-pi-start-lib.sh` and its `bin/fm-spawn.sh` integration, and the capture-inbox concurrency and acknowledgement guarantees owned by `bin/fm-inbox.sh`.
 Retain the other fork deltas discovered in that comparison as well; this list is not a substitute for inspecting them.
 Stage the resolved files explicitly and complete the merge commit after reviewing the resolution.
 
