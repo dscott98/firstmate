@@ -1,0 +1,42 @@
+PRE-MERGE: upstream home must refuse fork without ancestry
+
+firstmate: skipped: diverged from origin/main
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+
+HEAD: 9296f9b9d2566797b9a9aecaa5956bb8e471d2cd
+
+MERGED: upstream home fast-forwards to customized fork
+
+firstmate: updated 9296f9b..d31fdfe (instructions changed: AGENTS.md, bin, .agents/skills)
+no watches registered
+reread-firstmate: yes
+restart-secondmates: none
+nudge-secondmates: none
+
+HEAD: d31fdfee5b61197c7da58e73d2dee5d73aac58f1
+
+Installed tree equals pre-merge customized fork tree: cdd7c959bea088fb039fc99a2191fc794db26170
+
+Upstream tip, token-efficiency commit, and folder-trust commit all retained as ancestors.
+
+REPEAT: update is idempotent
+
+firstmate: already current
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+
+HEAD: d31fdfee5b61197c7da58e73d2dee5d73aac58f1
+
+DIRTY: local edits block activation without data loss
+
+firstmate: skipped: dirty working tree
+reread-firstmate: no
+restart-secondmates: none
+nudge-secondmates: none
+
+HEAD: 9296f9b9d2566797b9a9aecaa5956bb8e471d2cd
+
+Dirty HEAD and edited file bytes preserved.
