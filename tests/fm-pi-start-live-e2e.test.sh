@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Real Pi/Pi-signed trust/startup guard. A local provider consumes the brief;
-# no credentials or model requests leave the machine. Only the worktree
-# allocator is replaced, using a real isolated Git worktree and private tmux.
+# Real Pi/Pi-signed startup guard under the scoped one-run --approve contract.
+# A local provider consumes the brief; no credentials or model requests leave
+# the machine. Only the worktree allocator is replaced, using a real isolated
+# Git worktree and private tmux. Managed launches never answer a folder-trust
+# dialog into the store: approval is one-run, so the store must stay empty.
 # Set FM_PI_START_LIVE=1 to require the installed-harness guard, or 0 to skip.
 set -eu
 # shellcheck source=tests/fixtures.sh
@@ -124,11 +126,14 @@ for harness in pi pi-signed; do
     for launch_dir in /tmp/fm-"$id"+*; do [ -d "$launch_dir" ] && break; done
     [ "$(wc -c < "$launch_dir/launch.$gen.sh")" -gt 1024 ] || fail 'staged launch fixture is not long enough'
     pass "$harness $version staged launch over 1024 bytes delivered the complete long brief"
-    jq -e --arg wt "$LAB/wt" 'keys == [$wt] and .[$wt] == true' "$LAB/agent/trust.json" >/dev/null \
-      || fail "$harness $version trusted more than the task folder"
+    # Managed launches carry Pi's scoped one-run --approve (bin/fm-spawn.sh),
+    # so no folder-trust dialog is ever answered into the store: nothing may
+    # persist, in any mode, even though the worktree carries .pi resources.
+    [ ! -f "$LAB/agent/trust.json" ] || jq -e 'keys == []' "$LAB/agent/trust.json" >/dev/null \
+      || fail "$harness $version $mode persisted a trust decision under one-run approval"
     "$REAL_TMUX" -S "$LAB/socket" send-keys -t "$target" -l /quit
     "$REAL_TMUX" -S "$LAB/socket" send-keys -t "$target" Enter
-    # Relaunch from the recorded, stopped endpoint, keeping its trusted folder.
+    # Relaunch from the recorded, stopped endpoint, with no persisted trust.
     sleep 1
     before=$(request_count)
     if ! PATH="$LAB/bin:$PATH" FM_ROOT_OVERRIDE='' FM_HOME="$LAB/home" FM_SPAWN_NO_GUARD=1 \
@@ -138,7 +143,9 @@ for harness in pi pi-signed; do
     fi
     assert_brief_received "$LAB/expected" "$before"
     "$REAL_TMUX" -S "$LAB/socket" kill-window -t "$target"
-    pass "$harness $version $mode spawn and relaunch proved brief processing with folder-only trust"
+    [ ! -f "$LAB/agent/trust.json" ] || jq -e 'keys == []' "$LAB/agent/trust.json" >/dev/null \
+      || fail "$harness $version $mode relaunch persisted a trust decision under one-run approval"
+    pass "$harness $version $mode spawn and relaunch proved brief processing with one-run approval"
   done
   id="pi-start-live-$$-$harness-secondmate"
   ids+=("$id")
@@ -161,9 +168,9 @@ for harness in pi pi-signed; do
     sleep 0.1
   done
   grep -Fq "PI_START_SECOND_SENTINEL_$id" "$LAB/agent/requests" || fail "$harness $version secondmate charter not processed"
-  jq -e --arg wt "$LAB/wt" --arg sm "$sm" 'keys == ([$wt,$sm] | sort) and .[$sm] == true' "$LAB/agent/trust.json" >/dev/null \
-    || fail "$harness $version secondmate trust escaped its folder"
-  pass "$harness $version secondmate proved charter processing with folder-only trust"
+  [ ! -f "$LAB/agent/trust.json" ] || jq -e 'keys == []' "$LAB/agent/trust.json" >/dev/null \
+    || fail "$harness $version secondmate persisted a trust decision under one-run approval"
+  pass "$harness $version secondmate proved charter processing with one-run approval"
 
   # Exercise the real spawn's staging guards in this private live backend.
   # Every protected path and byte below belongs to this fixture alone.

@@ -360,6 +360,24 @@ SH
   done
 }
 
+# fm_fake_pi <fakebin> [<name>]: a Pi-family stub whose --help advertises the
+# one-run --approve capability fm-spawn requires before every Pi launch
+# (bin/fm-spawn.sh's pi_supports_approve). A bare exit-0 stub answers --help
+# with nothing, so a real spawn under test is refused at the capability probe
+# for a reason the case never meant to exercise. Default name: pi.
+fm_fake_pi() {
+  local fakebin=$1 name=${2:-pi}
+  cat > "$fakebin/$name" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = --help ]; then
+  printf '%s\n' 'Pi 0.0.0-fake' 'Options: --help --tui-mode <mode> --approve'
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/$name"
+}
+
 # fm_fake_crash_injector <fakebin>
 # Drops an `fm-crash-inject <pid>` shim that a PATH fake calls to simulate a
 # hard crash of the process under test. It SIGKILLs <pid> and then returns only
