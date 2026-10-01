@@ -92,6 +92,17 @@ SH
 chmod +x "$REMOTE_ROOT/bin/tmux"
 install_remote_herdr_fixture "$REMOTE_ROOT" "$HERDR_STATE" "$HERDR_LOG" \
   "$TMP_ROOT/herdr-send-fail" "$TMP_ROOT/herdr.sock"
+# The parent-side saved-machine save (bin/fm-herdr-machine-lib.sh) consults the
+# LOCAL herdr after a remote launch. A fake here keeps that call off the
+# runner's real Herdr: the list always reports the route host already saved,
+# so the save is a silent no-op and every argv stays observable in the log.
+PARENT_HERDR_BIN="$TMP_ROOT/parent-herdr-bin"
+PARENT_HERDR_LOG="$TMP_ROOT/parent-herdr.log"
+cat > "$TMP_ROOT/parent-machines.json" <<'EOF'
+[{"id":"one","label":"remote-mac","target":"remote-mac","session":"fm-remote","enabled":true,"selected":false}]
+EOF
+: > "$PARENT_HERDR_LOG"
+fm_fake_saved_herdr "$PARENT_HERDR_BIN" "$TMP_ROOT/parent-machines.json" "$PARENT_HERDR_LOG"
 git -C "$REMOTE_ROOT" init -q -b main
 git -C "$REMOTE_ROOT" config user.email test@example.com
 git -C "$REMOTE_ROOT" config user.name Test
@@ -126,6 +137,7 @@ printf 'codex\n' > "$PARENT/config/crew-harness"
 printf '## In flight\n\n## Queued\n\n## Done\n' > "$PARENT/data/backlog.md"
 
 remote_env() {
+  PATH="$PARENT_HERDR_BIN:$PATH" \
   FM_HOME="$PARENT" \
   FM_ROOT_OVERRIDE="$REMOTE_ROOT" \
   FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" \

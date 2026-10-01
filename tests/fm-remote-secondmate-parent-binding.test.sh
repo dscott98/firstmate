@@ -190,6 +190,7 @@ SH
 chmod +x "$FAKEBIN/fake-ssh"
 
 remote_env() {
+  PATH="$PARENT_HERDR_BIN:$PATH" \
   FM_HOME="$PARENT" \
   FM_ROOT_OVERRIDE="$REMOTE_ROOT" \
   FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" \
@@ -203,6 +204,15 @@ remote_env() {
   FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 \
   "$@"
 }
+
+# The launch's saved-machine save (bin/fm-herdr-machine-lib.sh) consults the
+# LOCAL herdr; a fake listing the route host as already saved keeps that call
+# off the runner's real Herdr and its saved machines.
+PARENT_HERDR_BIN="$TMP_ROOT/parent-herdr-bin"
+fm_fake_saved_herdr "$PARENT_HERDR_BIN" "$TMP_ROOT/parent-machines.json" "$TMP_ROOT/parent-herdr.log"
+cat > "$TMP_ROOT/parent-machines.json" <<'EOF'
+[{"id":"one","label":"remote-mac","target":"remote-mac","session":"fm-remote","enabled":true,"selected":false}]
+EOF
 
 FM_SECONDMATE_CHARTER='Own iOS delivery on the build Mac.' \
   FM_SECONDMATE_SCOPE='iOS implementation and Xcode validation' \

@@ -104,6 +104,57 @@ SH
 chmod +x "$REMOTE_ROOT/bin/tmux"
 install_remote_herdr_fixture "$REMOTE_ROOT" "$HERDR_STATE" "$HERDR_LOG" \
   "$TMP_ROOT/herdr-send-fail" "$TMP_ROOT/herdr.sock"
+# The parent-side saved-machine save (bin/fm-herdr-machine-lib.sh) consults the
+# LOCAL herdr after a remote launch or an alive probe. A fake here keeps every
+# such call off the runner's real Herdr and its saved machines: the list comes
+# from parent-machines.json, a successful machine add appends to it, a
+# non-empty parent-herdr-refuse makes the add fail, and every argv lands in
+# parent-herdr.log.
+PARENT_HERDR_BIN="$TMP_ROOT/parent-herdr-bin"
+PARENT_MACHINES="$TMP_ROOT/parent-machines.json"
+PARENT_HERDR_LOG="$TMP_ROOT/parent-herdr.log"
+PARENT_HERDR_REFUSE="$TMP_ROOT/parent-herdr-refuse"
+mkdir -p "$PARENT_HERDR_BIN"
+ln -sf "$(command -v jq)" "$PARENT_HERDR_BIN/jq"
+cat > "$PARENT_HERDR_BIN/herdr" <<'SH'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "${FM_FAKE_PARENT_HERDR_LOG:?}"
+case "${1:-} ${2:-}" in
+  "machine list")
+    cat "${FM_FAKE_PARENT_MACHINES:?}" 2>/dev/null || printf '[]\n'
+    exit 0
+    ;;
+  "machine add")
+    if [ -s "${FM_FAKE_PARENT_HERDR_REFUSE:-}" ]; then
+      cat "${FM_FAKE_PARENT_HERDR_REFUSE}" >&2
+      exit 1
+    fi
+    shift 2
+    label= session= target=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --label) shift; label=$1 ;;
+        --remote-session) shift; session=$1 ;;
+        -*) ;;
+        *) target=$1 ;;
+      esac
+      shift
+    done
+    jq --arg t "$target" --arg s "$session" --arg l "$label" \
+      '. + [{"id":"fake","label":$l,"target":$t,"session":$s,"enabled":true,"selected":false}]' \
+      "${FM_FAKE_PARENT_MACHINES:?}" > "${FM_FAKE_PARENT_MACHINES:?}.tmp" \
+      && mv "${FM_FAKE_PARENT_MACHINES:?}.tmp" "${FM_FAKE_PARENT_MACHINES:?}"
+    printf 'machine saved\n'
+    exit 0
+    ;;
+esac
+exit 0
+SH
+chmod +x "$PARENT_HERDR_BIN/herdr"
+printf '[]\n' > "$PARENT_MACHINES"
+: > "$PARENT_HERDR_LOG"
+: > "$PARENT_HERDR_REFUSE"
 git -C "$REMOTE_ROOT" init -q -b main
 git -C "$REMOTE_ROOT" config user.email test@example.com
 git -C "$REMOTE_ROOT" config user.name Test
@@ -265,6 +316,10 @@ publish_healthy_watcher_identity() { # <state> <home> <watch-script>
 }
 
 remote_env() {
+  PATH="$PARENT_HERDR_BIN:$PATH" \
+  FM_FAKE_PARENT_MACHINES="$PARENT_MACHINES" \
+  FM_FAKE_PARENT_HERDR_LOG="$PARENT_HERDR_LOG" \
+  FM_FAKE_PARENT_HERDR_REFUSE="$PARENT_HERDR_REFUSE" \
   FM_HOME="$PARENT" \
   FM_ROOT_OVERRIDE="$REMOTE_ROOT" \
   FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" \
@@ -834,6 +889,9 @@ pass "mixed local and remote routes validate without migration"
 printf 'pi\n' > "$PARENT/config/crew-harness"
 launches_before_inherit=0
 [ ! -f "$HERDR_LOG" ] || launches_before_inherit=$(grep -c '^tab create' "$HERDR_LOG" || true)
+# A refused local save must never fail the launch itself, so the first launch
+# runs against a refusing local herdr (bin/fm-herdr-machine-lib.sh).
+printf 'error: remote server is not ready for saved machines\n' > "$PARENT_HERDR_REFUSE"
 if FM_FAKE_SSH_MODE=inherit-partial remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate \
   > "$TMP_ROOT/spawn-inherit-partial.out" 2>&1; then
   fail "remote spawn launched after ambiguous partial inheritance"
@@ -845,6 +903,10 @@ launches_after_inherit=0
 assert_absent "$PARENT/state/ios.meta" "failed remote inheritance published launch metadata"
 out=$(remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate)
 assert_contains "$out" 'remote=remote-mac backend=herdr' "remote spawn did not report separate host and backend dimensions"
+assert_not_contains "$out" 'saved herdr machine' "a refused local save leaked a success line into the launch report"
+assert_grep 'machine add --label remote-mac --remote-session fm-remote remote-mac' "$PARENT_HERDR_LOG" \
+  "the launch did not attempt the local saved-machine save"
+: > "$PARENT_HERDR_REFUSE"
 assert_grep 'remote_host=remote-mac' "$PARENT/state/ios.meta" "parent metadata omitted the remote host"
 assert_grep 'remote_backend=herdr' "$PARENT/state/ios.meta" "parent metadata omitted the remote-local backend"
 assert_grep 'remote_herdr_session=fm-remote' "$PARENT/state/ios.meta" "parent metadata omitted the pinned remote Herdr session"
@@ -861,6 +923,31 @@ publish_healthy_watcher_identity "$PARENT/state" "$PARENT" "$ROOT/bin/fm-watch.s
 # without the rendered-output fallback a tmux endpoint needs.
 [ "$(remote_env "$ROOT/bin/fm-on.sh" ios fm-remote-secondmate-control.sh observe ios)" = idle ] \
   || fail "remote endpoint delivery observation did not execute on its own host"
+# The liveness probe saves what the refused launch could not, and never saves
+# twice for the same host.
+# shellcheck disable=SC2016 # positional params expand in the child shell.
+probe_out=$(remote_env env STATE="$PARENT/state" bash -c '
+  . "$0/bin/fm-secondmate-liveness-lib.sh"
+  fm_secondmate_liveness_probe "$1" ios poll
+  printf "%s|%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"
+' "$ROOT" "$PARENT/state/ios.meta")
+printf '%s\n' "$probe_out" | grep -q '^alive|alive$' \
+  || fail "an alive poll probe changed its verdict while saving, got: $probe_out"
+printf '%s\n' "$probe_out" | grep -q '^saved herdr machine remote-mac (remote session fm-remote)$' \
+  || fail "an alive poll probe did not save the refused machine, got: $probe_out"
+# shellcheck disable=SC2016 # positional params expand in the child shell.
+probe_out=$(remote_env env STATE="$PARENT/state" bash -c '
+  . "$0/bin/fm-secondmate-liveness-lib.sh"
+  fm_secondmate_liveness_probe "$1" ios poll
+  printf "%s|%s\n" "$FM_SM_LIVE_STATUS" "$FM_SM_LIVE_STATE"
+' "$ROOT" "$PARENT/state/ios.meta")
+[ "$probe_out" = 'alive|alive' ] \
+  || fail "a second alive probe re-announced an already-saved machine, got: $probe_out"
+[ "$(grep -c 'machine add' "$PARENT_HERDR_LOG" || true)" -eq 2 ] \
+  || fail "the saved-machine save was not idempotent: $(grep 'machine add' "$PARENT_HERDR_LOG")"
+[ "$(jq '. | length' "$PARENT_MACHINES")" = 1 ] \
+  || fail "more than one machine was saved: $(cat "$PARENT_MACHINES")"
+pass "an alive remote route is saved once as a local herdr machine, launch refusal notwithstanding"
 pass "remote spawn launches on the remote-local backend and records a host-qualified route"
 
 remote_route_meta="$REMOTE_HOME/state/parent-route/ios.meta"
