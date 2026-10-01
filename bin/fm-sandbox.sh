@@ -1,0 +1,572 @@
+#!/usr/bin/env bash
+# fm-sandbox.sh - the provider-neutral SANDBOX ADAPTER: the only Firstmate code
+# that invokes a sandbox provider. It translates Firstmate's per-task sandbox
+# lifecycle onto one external provider command with argv only, never a shell
+# string, and validates everything the provider reports before any of it
+# reaches Firstmate. The provider owns the infrastructure (VMs, labels, the
+# firewall, SSH wiring, reaping); Firstmate owns the lifecycle decisions.
+# Firstmate never holds the provider's API token and never calls the
+# provider's API: every effect and every observation flows through this
+# script. docs/remote-sandboxes.md owns the operator guide; this header is
+# the single owner of the provider command, output, and exit contracts.
+#
+# Usage: fm-sandbox.sh <verb> [args]
+#   create <task-id> [--profile <name>] [--ttl <duration>]
+#   status <name>
+#   list
+#   extend <name> [--ttl <duration>]
+#   hold <name>
+#   release <name>
+#   policy <name>
+#   exec <name> -- <argv...>
+#   snapshot <name> <label>
+#   rollback <name> <label>
+#   destroy <name> --expect-task <task-id>
+#
+# DEFAULT-OFF AND CONFIGURATION (config/sandbox-provider, local and
+# gitignored; FM_HOME selects the home, FM_CONFIG_OVERRIDE redirects
+# config/). With no config file every verb except --help refuses with exit 3
+# and changes nothing else. The file holds:
+#   line 1: the provider command's ABSOLUTE path (it may contain spaces; it
+#           is always executed as one argv element, never through a shell)
+#   then key=value lines, blank lines, and #-comments, with all three keys
+#   required and unknown or duplicate keys refused:
+#     default_profile=<name>  profile used when create omits --profile
+#     ttl=<duration>          default duration for create and extend: one
+#                             integer plus one unit of s, m, h, d, or w
+#     ssh_include=<path>      ABSOLUTE path of the provider-managed SSH
+#                             config include that sandbox aliases are
+#                             written into, no whitespace
+#
+# HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
+# sharing one provider namespace never see or destroy each other's sandboxes.
+# The tag comes from fm_backend_hometag (bin/fm-backend-hometag-lib.sh), the
+# same per-home discriminator the session-provider backends use.
+#
+# PROVIDER INVOCATION CONTRACT (argv only; every value below is one argv
+# element and this script never builds a shell string):
+#   <provider> create <task-id> --home <tag> --profile <name> --ttl <dur>
+#   <provider> status <name>
+#   <provider> list --home <tag>
+#   <provider> extend <name> --ttl <dur>
+#   <provider> hold <name>
+#   <provider> release <name>
+#   <provider> policy <name>
+#   <provider> exec <name> -- <argv...>
+#   <provider> snapshot <name> <label>
+#   <provider> rollback <name> <label>
+#   <provider> destroy <name> --expect-task <task-id> --home <tag>
+# create must label the sandbox fm_task=<task-id> and fm_home=<tag> and set
+# the hold label (which the provider's reaper always honours, in addition to
+# the TTL). list must return only the calling home's records; this script
+# filters the output again, fail-closed. destroy must refuse when the
+# sandbox's fm_task or fm_home labels disagree with --expect-task or --home,
+# and must treat an already-absent sandbox as success. exec is bootstrap
+# only: its argv after -- is the command argv, relayed verbatim.
+#
+# PROVIDER OUTPUT CONTRACT (every verb except exec): stdout is key=value
+# lines, one pair per line, no blank lines, values non-empty, keys matched by
+# ^[a-z][a-z0-9_]*$. Keys come from one closed set, split per verb:
+#   create:  name vmid node ssh_alias user profile ttl_expires hostkey
+#            (all eight required; hostkey must be exactly "pinned")
+#   object:  name vmid node ssh_alias user profile ttl_expires state
+#            fm_task fm_home hold
+#            (status, list, extend, hold, release, snapshot, rollback,
+#            destroy; status requires state=running|stopped|absent)
+#   policy:  name profile rule
+#            (policy requires profile; rule may repeat)
+# A key outside the set for that verb, a duplicate key within one record, a
+# malformed line, an empty value, or a missing required key is refused and
+# nothing from that call is trusted. list is a sequence of records, each
+# starting with its name= line; every record must carry state, and this
+# script keeps only records whose fm_home equals the home tag (a record
+# without the label is dropped, not refused). extend, hold, release,
+# snapshot, rollback, and destroy may answer with empty output. exec is
+# exempt from the key=value contract: the provider relays the remote
+# command's stdout and exit status verbatim and this script passes both
+# through untouched, including non-zero statuses.
+#
+# EXIT STATUSES:
+#   0  success (create/status/list/policy print validated key=value lines)
+#   2  usage error: unknown verb, missing or malformed arguments, or a
+#      name, task id, label, or profile that is not a safe single token
+#      (non-empty, printable, no whitespace, no "=", no leading "-")
+#   3  refusal: no config/sandbox-provider (default-off), a malformed
+#      config, a provider command that is missing or not executable, a
+#      provider exit that is neither 0 nor 75 (its stderr is included), or
+#      provider output that violates the contract above
+#   4  capacity blocker: the provider exited 75, its dedicated capacity
+#      refusal status. A capacity refusal is a blocker to surface, never a
+#      reason to fall back to local placement or to retry silently.
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
+CONFIG="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}/sandbox-provider"
+
+# shellcheck source=bin/fm-backend-hometag-lib.sh
+. "$SCRIPT_DIR/fm-backend-hometag-lib.sh"
+
+FM_SANDBOX_CAPACITY_RC=75
+
+FM_SANDBOX_PROVIDER=
+FM_SANDBOX_DEFAULT_PROFILE=
+FM_SANDBOX_TTL=
+FM_SANDBOX_OUT=
+FM_SANDBOX_RC=0
+
+usage() {
+  cat <<'USAGE'
+usage: fm-sandbox.sh <verb> [args]
+  create <task-id> [--profile <name>] [--ttl <duration>]
+  status <name>
+  list
+  extend <name> [--ttl <duration>]
+  hold <name>
+  release <name>
+  policy <name>
+  exec <name> -- <argv...>
+  snapshot <name> <label>
+  rollback <name> <label>
+  destroy <name> --expect-task <task-id>
+This script is the only Firstmate code that invokes the sandbox provider.
+Its header owns the provider command, output, and exit contracts.
+USAGE
+}
+
+fm_usage_error() {
+  printf 'usage error: %s\n' "$1" >&2
+  usage >&2
+  exit 2
+}
+
+refuse() {
+  printf 'refused: %s\n' "$1" >&2
+  exit 3
+}
+
+blocked() {
+  printf 'blocked: %s\n' "$1" >&2
+  exit 4
+}
+
+fm_sandbox_token_ok() {
+  case "$1" in
+    ''|-*|*[[:space:]]*|*=*|*[![:print:]]*) return 1 ;;
+  esac
+  return 0
+}
+
+fm_sandbox_valid_duration() {
+  [[ "$1" =~ ^[0-9]+[smhdw]$ ]]
+}
+
+fm_sandbox_read_config() {
+  [ -f "$CONFIG" ] || refuse "no sandbox provider configured at $CONFIG; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)"
+  local line key value got_path=0 seen=" " cr=$'\r'
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%"$cr"}
+    if [ "$got_path" -eq 0 ]; then
+      case "$line" in
+        /*) ;;
+        *) refuse "the first line of $CONFIG must be the provider command's absolute path (found '${line:-<empty>}')" ;;
+      esac
+      FM_SANDBOX_PROVIDER=$line
+      got_path=1
+      continue
+    fi
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in
+      *=*) ;;
+      *) refuse "malformed line '$line' in $CONFIG: expected key=value" ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$seen" in
+      *" $key "*) refuse "duplicate key '$key' in $CONFIG" ;;
+    esac
+    case "$key" in
+      default_profile)
+        fm_sandbox_token_ok "$value" || refuse "default_profile '$value' in $CONFIG must be a non-empty printable token without whitespace, '=', or a leading '-'"
+        FM_SANDBOX_DEFAULT_PROFILE=$value
+        ;;
+      ttl)
+        fm_sandbox_valid_duration "$value" || refuse "ttl '$value' in $CONFIG must be one integer plus one unit of s, m, h, d, or w, for example 4h"
+        FM_SANDBOX_TTL=$value
+        ;;
+      ssh_include)
+        case "$value" in
+          /*) ;;
+          *) refuse "ssh_include '$value' in $CONFIG must be an absolute path" ;;
+        esac
+        case "$value" in
+          *[[:space:]]*) refuse "ssh_include '$value' in $CONFIG must not contain whitespace" ;;
+        esac
+        ;;
+      *)
+        refuse "unknown key '$key' in $CONFIG: accepted keys are default_profile, ttl, and ssh_include"
+        ;;
+    esac
+    seen="$seen$key "
+  done < "$CONFIG"
+  [ "$got_path" -eq 1 ] || refuse "$CONFIG is empty; its first line must be the provider command's absolute path"
+  local k
+  for k in default_profile ttl ssh_include; do
+    case "$seen" in
+      *" $k "*) ;;
+      *) refuse "missing key '$k' in $CONFIG" ;;
+    esac
+  done
+}
+
+fm_sandbox_require_provider() {
+  [ -f "$FM_SANDBOX_PROVIDER" ] || refuse "sandbox provider command '$FM_SANDBOX_PROVIDER' from $CONFIG does not exist"
+  [ -x "$FM_SANDBOX_PROVIDER" ] || refuse "sandbox provider command '$FM_SANDBOX_PROVIDER' from $CONFIG is not executable"
+}
+
+fm_sandbox_invoke() {
+  fm_sandbox_require_provider
+  local err_file detail
+  err_file=$(mktemp "${TMPDIR:-/tmp}/fm-sandbox.XXXXXX") || refuse "cannot create a temp file for the provider's stderr"
+  if FM_SANDBOX_OUT=$("$FM_SANDBOX_PROVIDER" "$@" 2>"$err_file"); then
+    FM_SANDBOX_RC=0
+  else
+    FM_SANDBOX_RC=$?
+  fi
+  if [ "$FM_SANDBOX_RC" -eq "$FM_SANDBOX_CAPACITY_RC" ]; then
+    rm -f "$err_file"
+    blocked "the sandbox provider reports no capacity for this request (provider exit $FM_SANDBOX_CAPACITY_RC); this is a blocker to surface, never a reason to fall back to local placement"
+  fi
+  if [ "$FM_SANDBOX_RC" -ne 0 ]; then
+    detail=$(cat "$err_file" 2>/dev/null || true)
+    rm -f "$err_file"
+    if [ -n "$detail" ]; then
+      refuse "sandbox provider exited $FM_SANDBOX_RC: $detail"
+    fi
+    refuse "sandbox provider exited $FM_SANDBOX_RC with no stderr"
+  fi
+  # On success the provider's stderr is diagnostics, not data: forward it.
+  cat "$err_file" >&2 2>/dev/null || true
+  rm -f "$err_file"
+  return 0
+}
+
+fm_sandbox_key_in_create_set() {
+  case "$1" in
+    name|vmid|node|ssh_alias|user|profile|ttl_expires|hostkey) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_sandbox_key_in_object_set() {
+  case "$1" in
+    name|vmid|node|ssh_alias|user|profile|ttl_expires|state|fm_task|fm_home|hold) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+fm_sandbox_key_in_policy_set() {
+  case "$1" in
+    name|profile|rule) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+FM_SANDBOX_LINE_KEY=
+FM_SANDBOX_LINE_VALUE=
+
+fm_sandbox_parse_line() {
+  local line=$1 cr=$'\r'
+  case "$line" in
+    *"$cr"*) refuse "malformed provider output (carriage return): '$line'" ;;
+  esac
+  case "$line" in
+    *=*) ;;
+    *) refuse "malformed provider output (expected key=value): '$line'" ;;
+  esac
+  FM_SANDBOX_LINE_KEY=${line%%=*}
+  FM_SANDBOX_LINE_VALUE=${line#*=}
+  [[ "$FM_SANDBOX_LINE_KEY" =~ ^[a-z][a-z0-9_]*$ ]] || refuse "malformed provider output key: '$FM_SANDBOX_LINE_KEY'"
+  [ -n "$FM_SANDBOX_LINE_VALUE" ] || refuse "provider output key '$FM_SANDBOX_LINE_KEY' has an empty value"
+}
+
+fm_sandbox_check_semantics() {
+  case "$1" in
+    state)
+      case "$2" in
+        running|stopped|absent) ;;
+        *) refuse "provider output state must be running, stopped, or absent (got '$2')" ;;
+      esac
+      ;;
+    hostkey)
+      [ "$2" = pinned ] || refuse "provider output hostkey must be 'pinned' (got '$2'); firstmate will not trust a sandbox host key the provider did not pin"
+      ;;
+  esac
+}
+
+fm_sandbox_emit_single() {
+  local keyset=$1 required=$2 verb=$3 line key seen=" "
+  local -a lines=()
+  if [ -n "$FM_SANDBOX_OUT" ]; then
+    while IFS= read -r line; do
+      fm_sandbox_parse_line "$line"
+      "fm_sandbox_key_in_${keyset}_set" "$FM_SANDBOX_LINE_KEY" || refuse "unknown provider output key '${FM_SANDBOX_LINE_KEY}' for $verb (line: '$line')"
+      fm_sandbox_check_semantics "$FM_SANDBOX_LINE_KEY" "$FM_SANDBOX_LINE_VALUE"
+      # rule is the one repeatable key: policy prints one rule line per rule.
+      if [ "$FM_SANDBOX_LINE_KEY" != rule ]; then
+        case "$seen" in
+          *" $FM_SANDBOX_LINE_KEY "*) refuse "duplicate provider output key '${FM_SANDBOX_LINE_KEY}' for $verb" ;;
+        esac
+      fi
+      seen="$seen$FM_SANDBOX_LINE_KEY "
+      lines+=("$line")
+    done <<<"$FM_SANDBOX_OUT"
+  fi
+  for key in $required; do
+    case "$seen" in
+      *" $key "*) ;;
+      *) refuse "provider output for $verb is missing required key '$key'" ;;
+    esac
+  done
+  if [ "${#lines[@]}" -gt 0 ]; then
+    printf '%s\n' "${lines[@]}"
+  fi
+  return 0
+}
+
+fm_sandbox_emit_list() {
+  local tag=$1 line key value in_record=0 seen=" " rec_name="" rec_home="" have_state=0
+  local -a record=()
+
+  fm_sandbox_flush_record() {
+    if [ "$in_record" -eq 0 ]; then
+      return 0
+    fi
+    if [ "$have_state" -eq 0 ]; then
+      refuse "provider list record '$rec_name' is missing required key 'state'"
+    fi
+    # Fail-closed filter: only records labelled with this home's tag pass,
+    # including records the provider failed to label at all.
+    if [ "$rec_home" = "$tag" ]; then
+      if [ "${#record[@]}" -gt 0 ]; then
+        printf '%s\n' "${record[@]}"
+      fi
+    fi
+    return 0
+  }
+
+  if [ -n "$FM_SANDBOX_OUT" ]; then
+    while IFS= read -r line; do
+      fm_sandbox_parse_line "$line"
+      key=$FM_SANDBOX_LINE_KEY
+      value=$FM_SANDBOX_LINE_VALUE
+      fm_sandbox_key_in_object_set "$key" || refuse "unknown provider output key '$key' in list output (line: '$line')"
+      fm_sandbox_check_semantics "$key" "$value"
+      if [ "$key" = name ]; then
+        fm_sandbox_flush_record
+        in_record=1
+        seen=" "
+        have_state=0
+        rec_name=$value
+        rec_home=
+        record=("$line")
+        continue
+      fi
+      if [ "$in_record" -eq 0 ]; then
+        refuse "provider list output must start each record with 'name=' (first key was '$key')"
+      fi
+      case "$seen" in
+        *" $key "*) refuse "duplicate provider output key '$key' in list record '$rec_name'" ;;
+      esac
+      seen="$seen$key "
+      if [ "$key" = state ]; then
+        have_state=1
+      fi
+      if [ "$key" = fm_home ]; then
+        rec_home=$value
+      fi
+      record+=("$line")
+    done <<<"$FM_SANDBOX_OUT"
+  fi
+  fm_sandbox_flush_record
+  return 0
+}
+
+# --- argument parsing --------------------------------------------------------
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
+VERB=${1:-}
+[ -n "$VERB" ] || fm_usage_error "a verb is required"
+shift
+
+TASK_ID=
+NAME=
+LABEL=
+PROFILE_FLAG=
+TTL_FLAG=
+EXPECT_TASK=
+EXEC_ARGV=()
+
+case "$VERB" in
+  create)
+    TASK_ID=${1:-}
+    [ -n "$TASK_ID" ] || fm_usage_error "create requires a task id"
+    fm_sandbox_token_ok "$TASK_ID" || fm_usage_error "task id '$TASK_ID' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --profile)
+          [ "$#" -ge 2 ] || fm_usage_error "--profile requires a value"
+          PROFILE_FLAG=$2
+          shift 2
+          ;;
+        --ttl)
+          [ "$#" -ge 2 ] || fm_usage_error "--ttl requires a value"
+          TTL_FLAG=$2
+          shift 2
+          ;;
+        *)
+          fm_usage_error "unknown argument '$1' for create"
+          ;;
+      esac
+    done
+    if [ -n "$PROFILE_FLAG" ]; then
+      fm_sandbox_token_ok "$PROFILE_FLAG" || fm_usage_error "profile '$PROFILE_FLAG' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    fi
+    if [ -n "$TTL_FLAG" ]; then
+      fm_sandbox_valid_duration "$TTL_FLAG" || fm_usage_error "--ttl '$TTL_FLAG' must be one integer plus one unit of s, m, h, d, or w, for example 4h"
+    fi
+    ;;
+  status|hold|release|policy)
+    NAME=${1:-}
+    [ -n "$NAME" ] || fm_usage_error "$VERB requires a sandbox name"
+    fm_sandbox_token_ok "$NAME" || fm_usage_error "sandbox name '$NAME' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    [ "$#" -eq 0 ] || fm_usage_error "$VERB takes no arguments beyond the sandbox name"
+    ;;
+  list)
+    [ "$#" -eq 0 ] || fm_usage_error "list takes no arguments"
+    ;;
+  extend)
+    NAME=${1:-}
+    [ -n "$NAME" ] || fm_usage_error "extend requires a sandbox name"
+    fm_sandbox_token_ok "$NAME" || fm_usage_error "sandbox name '$NAME' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --ttl)
+          [ "$#" -ge 2 ] || fm_usage_error "--ttl requires a value"
+          TTL_FLAG=$2
+          shift 2
+          ;;
+        *)
+          fm_usage_error "unknown argument '$1' for extend"
+          ;;
+      esac
+    done
+    if [ -n "$TTL_FLAG" ]; then
+      fm_sandbox_valid_duration "$TTL_FLAG" || fm_usage_error "--ttl '$TTL_FLAG' must be one integer plus one unit of s, m, h, d, or w, for example 4h"
+    fi
+    ;;
+  exec)
+    NAME=${1:-}
+    [ -n "$NAME" ] || fm_usage_error "exec requires a sandbox name"
+    fm_sandbox_token_ok "$NAME" || fm_usage_error "sandbox name '$NAME' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    [ "${1:-}" = "--" ] || fm_usage_error "exec requires '--' before the command argv, because the command is an argv, never a shell string"
+    shift
+    [ "$#" -ge 1 ] || fm_usage_error "exec requires at least one command argument after '--'"
+    EXEC_ARGV=("$@")
+    ;;
+  snapshot|rollback)
+    NAME=${1:-}
+    [ -n "$NAME" ] || fm_usage_error "$VERB requires a sandbox name"
+    fm_sandbox_token_ok "$NAME" || fm_usage_error "sandbox name '$NAME' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    LABEL=${1:-}
+    [ -n "$LABEL" ] || fm_usage_error "$VERB requires a label"
+    fm_sandbox_token_ok "$LABEL" || fm_usage_error "label '$LABEL' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    [ "$#" -eq 0 ] || fm_usage_error "$VERB takes no arguments beyond the sandbox name and label"
+    ;;
+  destroy)
+    NAME=${1:-}
+    [ -n "$NAME" ] || fm_usage_error "destroy requires a sandbox name"
+    fm_sandbox_token_ok "$NAME" || fm_usage_error "sandbox name '$NAME' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --expect-task)
+          [ "$#" -ge 2 ] || fm_usage_error "--expect-task requires a value"
+          EXPECT_TASK=$2
+          shift 2
+          ;;
+        *)
+          fm_usage_error "unknown argument '$1' for destroy"
+          ;;
+      esac
+    done
+    [ -n "$EXPECT_TASK" ] || fm_usage_error "destroy requires --expect-task <task-id>, so it refuses when the sandbox's labels disagree"
+    fm_sandbox_token_ok "$EXPECT_TASK" || fm_usage_error "task id '$EXPECT_TASK' must be a non-empty printable token without whitespace, '=', or a leading '-'"
+    ;;
+  *)
+    fm_usage_error "unknown verb '$VERB'"
+    ;;
+esac
+
+# --- config, home tag, dispatch ----------------------------------------------
+
+fm_sandbox_read_config
+TAG=$(fm_backend_hometag)
+
+case "$VERB" in
+  create)
+    PROFILE=${PROFILE_FLAG:-$FM_SANDBOX_DEFAULT_PROFILE}
+    TTL=${TTL_FLAG:-$FM_SANDBOX_TTL}
+    fm_sandbox_invoke create "$TASK_ID" --home "$TAG" --profile "$PROFILE" --ttl "$TTL"
+    fm_sandbox_emit_single create "name vmid node ssh_alias user profile ttl_expires hostkey" create
+    ;;
+  status)
+    fm_sandbox_invoke status "$NAME"
+    fm_sandbox_emit_single object state status
+    ;;
+  list)
+    fm_sandbox_invoke list --home "$TAG"
+    fm_sandbox_emit_list "$TAG"
+    ;;
+  extend)
+    TTL=${TTL_FLAG:-$FM_SANDBOX_TTL}
+    fm_sandbox_invoke extend "$NAME" --ttl "$TTL"
+    fm_sandbox_emit_single object "" extend
+    ;;
+  hold|release)
+    fm_sandbox_invoke "$VERB" "$NAME"
+    fm_sandbox_emit_single object "" "$VERB"
+    ;;
+  policy)
+    fm_sandbox_invoke policy "$NAME"
+    fm_sandbox_emit_single policy profile policy
+    ;;
+  snapshot|rollback)
+    fm_sandbox_invoke "$VERB" "$NAME" "$LABEL"
+    fm_sandbox_emit_single object "" "$VERB"
+    ;;
+  destroy)
+    fm_sandbox_invoke destroy "$NAME" --expect-task "$EXPECT_TASK" --home "$TAG"
+    fm_sandbox_emit_single object "" destroy
+    ;;
+  exec)
+    fm_sandbox_require_provider
+    # Raw relay: the provider relays the remote command's stdout and exit
+    # status verbatim, so nothing here validates or translates them.
+    set +e
+    "$FM_SANDBOX_PROVIDER" exec "$NAME" -- "${EXEC_ARGV[@]}"
+    EXEC_RC=$?
+    set -e
+    exit "$EXEC_RC"
+    ;;
+esac
