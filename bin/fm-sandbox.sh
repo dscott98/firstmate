@@ -314,7 +314,7 @@ fm_sandbox_check_semantics() {
 FM_SANDBOX_RECORD_HOME=
 
 fm_sandbox_validate_record() {
-  local keyset=$1 required=$2 verb=$3 line=$4 tag=${5:-} field key state= seen=" "
+  local keyset=$1 required=$2 verb=$3 line=$4 tag=${5:-} field key state='' seen=" "
   local -a fields=()
   FM_SANDBOX_RECORD_HOME=
   IFS=' ' read -r -a fields <<<"$line"
