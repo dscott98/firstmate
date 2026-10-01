@@ -78,6 +78,7 @@ mkdir -p "$isolated/bin"
 cp "$INBOX_BIN" "$isolated/bin/fm-inbox.sh"
 chmod +x "$isolated/bin/fm-inbox.sh"
 cp "$ROOT/bin/fm-wake-lib.sh" "$isolated/bin/fm-wake-lib.sh"
+cp "$ROOT/bin/fm-path-lib.sh" "$isolated/bin/fm-path-lib.sh"
 printf '\nfm_wake_append_locked() { return 1; }\n' >> "$isolated/bin/fm-wake-lib.sh"
 home=$(make_home human-wake-fail)
 set +e
