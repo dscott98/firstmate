@@ -445,12 +445,11 @@ herdr machine add --label <ssh-alias> --remote-session fm-remote <ssh-alias>
 
 That saved machine is what makes the remote agent's activity visible in the local Herdr sidebar, so a rebuilt or reinstalled local Herdr converges again on the next supervision pass.
 
-- The save is idempotent: an enabled machine targeting the alias and required remote session is left alone.
-  Each successful add records its alias and session in the primary home's `state/.herdr-machine-<alias>.json` ownership record.
-  If a recorded machine is disabled or uses another session, Firstmate removes it and adds an enabled machine for the required session, updating the record.
-  Without that record, Firstmate leaves the machine untouched and warns with the host, mismatch, and exact removal and add commands an operator can run.
+- The save is idempotent: an enabled machine targeting the alias and required remote session is left alone silently.
+  Firstmate never removes or rewrites any existing saved machine.
+  A mismatched or disabled pre-existing entry is left untouched and reported with the host, mismatch, and exact manual removal and add commands an operator can run.
   Both launch and liveness report these warnings without failing.
-- A primary with no local herdr skips the save silently.
+- A primary with no local herdr or jq skips the save silently.
 - A refused save, for example a remote server too old to serve saved machines, is reported as a warning and never fails the launch or the probe around it.
   The readiness floor above is the durable fix for that refusal.
 - Each save is bounded, so an unreachable host cannot stall a launch or a supervision pass, and mates that share one host serialize behind one per-host save.
