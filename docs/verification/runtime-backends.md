@@ -1204,6 +1204,26 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Detached server launch (no caller descriptors)
+
+Measured 2026-10-01 on Linux x86_64 against Herdr 0.9.1 (client protocol 22), in isolated `fm-lab-` sessions (`bin/fm-herdr-lab.sh`), after the live 2026-10-01 incident where `bin/fm-remote-doctor.sh --fix` on agent01 (Ubuntu 24.04) never returned after starting the Herdr server, hanging `bin/fm-remote-home-seed.sh` until the server was pre-started detached by hand.
+
+The adapter's `fm_backend_herdr_server_ensure` launches the server by exec'ing the resolved client binary in place inside the async fork (`setsid` when available, plain `exec` as the portable fallback), so the long-lived server is a direct exec away from the launcher and holds no caller descriptor.
+
+The pre-fix launch wrapped `herdr server` in a live bash fork that waited on the server forever, and that wrapper inherited the caller's saved stdout/stderr: bash parks the temporary redirections of a redirected function call (callers use `fm_backend_herdr_server_ensure <session> >/dev/null 2>&1`) on close-on-exec fds for undo, and a fork inside the function inherits them.
+Observed on the pre-fix code, the wrapper held the capturing caller's pipe on exactly fds 10 and 11 while sitting in `wait4` under the doctor's own cmdline, and a caller reading that output to EOF blocked forever:
+
+```text
+# /proc/<async-wrapper>/fd of the pre-fix launch, captured through a substitution
+10 -> pipe:[18019600]
+11 -> pipe:[18019600]
+# the capturing reader's own fd 3 -> pipe:[18019600] (write end never closed)
+```
+
+After the fix, the same capture shape returns immediately (`rc=0` within the readiness poll window), the server reports `running=true` through the lab session's socket, and the server process owns its session and process group (`sid == pgid == pid`, parented to the user manager) with fds 0/1/2 on `/dev/null` and no inherited pipe.
+`tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh` re-proves both halves against the real binary (prompt caller return and a genuinely running server) and fails on the pre-fix code within its 45-second bound; that suite is the refresh entry point for this record.
+The macOS remote-doctor path never launches the server through the ensure (launchd owns it there), and the plain-`exec` fallback keeps the launch portable where `setsid` is absent.
+
 ### fm-remote server birth and login-keychain access
 
 Measured 2026-09-09 on macOS 26 (Darwin 25.6.0) aarch64 with Claude Code 2.1.266 and Herdr 0.9.0, the guarantee behind `bin/fm-remote-herdr-guard.sh` and the doctor's `herdr-server` check: login-keychain access follows the audit session a process was born into, never the launch shape or the shell.

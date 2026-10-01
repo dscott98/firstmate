@@ -394,7 +394,10 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
   # refusal can be recognized and retried once on a compatible client; see
   # "client selection" below. A failed command's stderr is replayed verbatim.
   # The long-lived `server` launch is exec'd straight through: buffering its
-  # stderr would hold this call open for the server's whole lifetime.
+  # stderr would hold this call open for the server's whole lifetime. The
+  # DETACHED server launch is fm_backend_herdr_server_ensure's to make: it
+  # execs the resolved client in place so the server holds no caller
+  # descriptors, which this generic router cannot do from inside a function.
   if [ "${1:-}" = server ]; then
     HERDR_SESSION="$session" "$client_bin" "$@" --session "$session"
     return $?
@@ -1653,15 +1656,43 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
 # every later pane, so remove home, harness identity, and supervision selection
 # inherited from whichever agent happened to start it. Bounded poll for the
 # server to report running.
+#
+# The launch EXECs the server binary in place inside the async fork and never
+# leaves a wrapping shell behind. A wrapping shell is not merely wasteful: it
+# held the caller's own stdout/stderr open forever. Bash applies the temporary
+# redirections of a redirected function call (callers use exactly
+# `fm_backend_herdr_server_ensure <session> >/dev/null 2>&1`) by saving the
+# caller's original descriptors on close-on-exec fds for undo, and a fork
+# inside the function inherits those saves. When the fork wraps `herdr server`
+# in a live shell that waits on the server for its whole lifetime, the saves
+# never close, so any reader of that output to EOF - the remote seeder's
+# command substitution over ssh, or sshd's session teardown - blocks forever
+# while a process still carrying the launcher's cmdline sits in wait
+# (the 2026-10-01 `fm-remote-doctor.sh --fix` hang on Linux). The exec closes
+# every close-on-exec save at once, and `setsid` (util-linux; plain exec is the
+# portable fallback where it is absent) also frees the server from the
+# caller's session and process group, so no caller signal or terminal can
+# reach it. fds 0/1/2 point at /dev/null before the exec, so the server holds
+# no caller descriptor at all.
 fm_backend_herdr_server_ensure() {  # <session>
-  local session=$1 running out i
+  local session=$1 running i client_bin
   running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
   [ "$running" = "true" ] && return 0
+  # Resolve the client the same way fm_backend_herdr_cli would, before the
+  # launch fork: the launcher must exec the resolved binary directly, and a
+  # late resolution would need a live shell around it again.
+  client_bin=herdr
+  if [ "${FM_BACKEND_HERDR_CLIENT_SESSION:-}" = "$session" ]; then
+    client_bin=$(fm_backend_herdr_bin)
+  fi
   (
     unset FM_HOME FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE \
       CURSOR_AGENT CURSOR_INVOKED_AS CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT FM_SUPERVISION_MODEL
-    fm_backend_herdr_cli "$session" server >/dev/null 2>&1 &
-  ) || return 1
+    if command -v setsid >/dev/null 2>&1; then
+      HERDR_SESSION="$session" exec setsid "$client_bin" server --session "$session" >/dev/null 2>&1
+    fi
+    HERDR_SESSION="$session" exec "$client_bin" server --session "$session" >/dev/null 2>&1
+  ) &
   for i in $(seq 1 20); do
     running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
     [ "$running" = "true" ] && return 0
