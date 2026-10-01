@@ -1,0 +1,125 @@
+$ bin/fm-sandbox.sh create t1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh status sbx-1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh list
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh extend sbx-1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh hold sbx-1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh release sbx-1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh policy sbx-1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh exec sbx-1 -- true
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh snapshot sbx-1 snap1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh rollback sbx-1 snap1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+$ bin/fm-sandbox.sh destroy sbx-1 --expect-task t1
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
+
+Operational home remains empty after all eleven requests.
+
+Configuration case: forbidden open default
+
+$ bin/fm-sandbox.sh create t1
+refused: default_profile=open is forbidden: open requires explicit per-task --profile open
+exit=3
+
+Configuration case: relative provider
+
+$ bin/fm-sandbox.sh create t1
+refused: the first line of /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider must be the provider command's absolute path (found 'relative-provider')
+exit=3
+
+Configuration case: unknown config key
+
+$ bin/fm-sandbox.sh create t1
+refused: unknown key 'extra' in /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider: accepted keys are default_profile, ttl, and ssh_include
+exit=3
+
+Configuration case: missing provider
+
+$ bin/fm-sandbox.sh create t1
+refused: sandbox provider command '/nonexistent/sandbox-provider' from /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WQ5D481B5JQXWBSE31422E/.sandbox-live-run5m0ff/config/sandbox-provider does not exist
+exit=3
+
+$ bin/fm-sandbox.sh destroy sbx-1
+usage error: destroy requires --expect-task <task-id>, so it refuses when the sandbox's labels disagree
+usage: fm-sandbox.sh <verb> [args]
+  create <task-id> [--profile <name>] [--ttl <duration>]
+  status <name>
+  list
+  extend <name> [--ttl <duration>]
+  hold <name>
+  release <name>
+  policy <name>
+  exec <name> -- <argv...>
+  snapshot <name> <label>
+  rollback <name> <label>
+  destroy <name> --expect-task <task-id>
+This script is the only Firstmate code that invokes the sandbox provider.
+Its header owns the provider command, output, and exit contracts.
+exit=2
+
+$ bin/fm-sandbox.sh exec sbx-1 true
+usage error: exec requires '--' before the command argv, because the command is an argv, never a shell string
+usage: fm-sandbox.sh <verb> [args]
+  create <task-id> [--profile <name>] [--ttl <duration>]
+  status <name>
+  list
+  extend <name> [--ttl <duration>]
+  hold <name>
+  release <name>
+  policy <name>
+  exec <name> -- <argv...>
+  snapshot <name> <label>
+  rollback <name> <label>
+  destroy <name> --expect-task <task-id>
+This script is the only Firstmate code that invokes the sandbox provider.
+Its header owns the provider command, output, and exit contracts.
+exit=2
+
+$ bin/fm-sandbox.sh create t1 --ttl forever
+usage error: --ttl 'forever' must be one integer plus one unit of s, m, h, d, or w, for example 4h
+usage: fm-sandbox.sh <verb> [args]
+  create <task-id> [--profile <name>] [--ttl <duration>]
+  status <name>
+  list
+  extend <name> [--ttl <duration>]
+  hold <name>
+  release <name>
+  policy <name>
+  exec <name> -- <argv...>
+  snapshot <name> <label>
+  rollback <name> <label>
+  destroy <name> --expect-task <task-id>
+This script is the only Firstmate code that invokes the sandbox provider.
+Its header owns the provider command, output, and exit contracts.
+exit=2
+
+Provider availability: pve-sandbox on PATH = None; worktree config/sandbox-provider exists = False
