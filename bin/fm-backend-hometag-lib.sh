@@ -50,3 +50,8 @@ fm_backend_hometag() {
   fi
   printf '%s-%s' "$prefix" "$hash"
 }
+
+fm_home_hometag() (
+  FM_ROOT=$(cd "$FM_HOME" && pwd -P) || return 1
+  fm_backend_hometag
+)

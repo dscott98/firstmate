@@ -545,14 +545,14 @@ The first line holds the provider command's absolute path, then `key=value` line
 | Line | Meaning |
 | --- | --- |
 | `/absolute/path/to/provider` | The provider command `bin/fm-sandbox.sh` invokes, argv only. |
-| `default_profile=<name>` | Network profile used when `create` omits `--profile`. |
+| `default_profile=<name>` | Network profile used when `create` omits `--profile`; `open` is refused as a default and requires explicit per-task `--profile open`. |
 | `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
 | `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into. |
 
 All three keys are required; unknown or duplicate keys, a relative provider path or `ssh_include`, and a malformed duration are refused with the concrete problem named.
 Blank lines and `#` comments are accepted.
 
-`bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its header owns the verb, output, and exit contracts the provider must satisfy, including the closed `key=value` key set and the dedicated capacity-refusal exit status.
+`bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its header owns the verb, output, and exit contracts the provider must satisfy, including space-separated `key=value` fields framed as one record per line, the closed key set and the dedicated capacity-refusal exit status.
 Firstmate never holds the provider's API token and never calls the provider's API.
 
 Configuring a provider does not by itself place any task in a sandbox.

@@ -43,7 +43,7 @@ The placement flag, task control, status mirroring, teardown, and supervision in
 ## Network profiles
 
 - The `default` profile allows DNS and HTTPS egress, blocks LAN and RFC1918 destinations, and allows inbound SSH from the primary only.
-- The `open` profile lifts those restrictions and is used only by explicit per-task instruction, never by analogy or as a default.
+- The `open` profile lifts those restrictions and requires explicit per-task `--profile open`; configuring `default_profile=open` is refused.
 - `fm-sandbox.sh policy <name>` prints a sandbox's effective rules for visibility.
 
 ## Credentials
@@ -68,7 +68,7 @@ The provider command must satisfy the invocation, output, and exit contracts tha
 In short:
 
 - It receives argv only, one verb per call, and its `exec` argv is relayed verbatim.
-- Its stdout is `key=value` lines from a closed key set, one pair per line, with per-verb required keys; anything else is refused and nothing from that call is trusted.
+- Its stdout is `key=value` lines from a closed key set, one record per line with space-separated fields whose values contain no spaces or `=`, with per-verb required keys; anything else is refused and nothing from that call is trusted.
 - It labels every sandbox `fm_task=<task-id>` and `fm_home=<home tag>`, filters `list` by the home tag, and refuses `destroy` when the labels disagree.
 - It exits `75` only to report capacity, which surfaces as a blocker.
 
@@ -78,7 +78,7 @@ In short:
 
 - `create <task-id>` asks the provider for a sandbox and prints its `name`, `vmid`, `node`, `ssh_alias`, `user`, `profile`, `ttl_expires`, and `hostkey`.
 - `status <name>` prints the sandbox's `state` (`running`, `stopped`, or `absent`) and its labels.
-- `list` prints this home's sandboxes only, each record starting with its `name=`.
+- `list` prints this home's sandboxes only, one record line per sandbox.
 - `extend <name> --ttl <duration>` renews the TTL; `hold <name>` and `release <name>` manage the reap-blocking hold label.
 - `policy <name>` prints the effective firewall rules.
 - `exec <name> -- <argv>` runs one bootstrap command inside the sandbox; its argv is never a shell string.

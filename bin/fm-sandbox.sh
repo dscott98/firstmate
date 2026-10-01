@@ -40,8 +40,8 @@
 #
 # HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
 # sharing one provider namespace never see or destroy each other's sandboxes.
-# The tag comes from fm_backend_hometag (bin/fm-backend-hometag-lib.sh), the
-# same per-home discriminator the session-provider backends use.
+# The tag comes from fm_home_hometag (bin/fm-backend-hometag-lib.sh),
+# derived from the resolved operational FM_HOME path.
 #
 # PROVIDER INVOCATION CONTRACT (argv only; every value below is one argv
 # element and this script never builds a shell string):
@@ -65,7 +65,8 @@
 # only: its argv after -- is the command argv, relayed verbatim.
 #
 # PROVIDER OUTPUT CONTRACT (every verb except exec): stdout is key=value
-# lines, one pair per line, no blank lines, values non-empty, keys matched by
+# records, one record per line, with space-separated key=value fields,
+# no blank lines, non-empty values containing no whitespace or "=", keys matched by
 # ^[a-z][a-z0-9_]*$. Keys come from one closed set, split per verb:
 #   create:  name vmid node ssh_alias user profile ttl_expires hostkey
 #            (all eight required; hostkey must be exactly "pinned")
@@ -74,11 +75,11 @@
 #            (status, list, extend, hold, release, snapshot, rollback,
 #            destroy; status requires state=running|stopped|absent)
 #   policy:  name profile rule
-#            (policy requires profile; rule may repeat)
+#            (policy requires profile; rule fields may repeat)
 # A key outside the set for that verb, a duplicate key within one record, a
-# malformed line, an empty value, or a missing required key is refused and
-# nothing from that call is trusted. list is a sequence of records, each
-# starting with its name= line; every record must carry state, and this
+# malformed field, an empty value, or a missing required key is refused and
+# nothing from that call is trusted. create/status return exactly one record.
+# list is one record per sandbox; every record must carry name and state, and this
 # script keeps only records whose fm_home equals the home tag (a record
 # without the label is dropped, not refused). extend, hold, release,
 # snapshot, rollback, and destroy may answer with empty output. exec is
@@ -189,6 +190,7 @@ fm_sandbox_read_config() {
     case "$key" in
       default_profile)
         fm_sandbox_token_ok "$value" || refuse "default_profile '$value' in $CONFIG must be a non-empty printable token without whitespace, '=', or a leading '-'"
+        [ "$value" != open ] || refuse "default_profile=open is forbidden: open requires explicit per-task --profile open"
         FM_SANDBOX_DEFAULT_PROFILE=$value
         ;;
       ttl)
@@ -229,11 +231,18 @@ fm_sandbox_invoke() {
   fm_sandbox_require_provider
   local err_file detail
   err_file=$(mktemp "${TMPDIR:-/tmp}/fm-sandbox.XXXXXX") || refuse "cannot create a temp file for the provider's stderr"
-  if FM_SANDBOX_OUT=$("$FM_SANDBOX_PROVIDER" "$@" 2>"$err_file"); then
+  if FM_SANDBOX_OUT=$(
+    "$FM_SANDBOX_PROVIDER" "$@" 2>"$err_file"
+    rc=$?
+    printf '.'
+    exit "$rc"
+  ); then
     FM_SANDBOX_RC=0
   else
     FM_SANDBOX_RC=$?
   fi
+  FM_SANDBOX_OUT=${FM_SANDBOX_OUT%.}
+  FM_SANDBOX_OUT=${FM_SANDBOX_OUT%$'\n'}
   if [ "$FM_SANDBOX_RC" -eq "$FM_SANDBOX_CAPACITY_RC" ]; then
     rm -f "$err_file"
     blocked "the sandbox provider reports no capacity for this request (provider exit $FM_SANDBOX_CAPACITY_RC); this is a blocker to surface, never a reason to fall back to local placement"
@@ -276,7 +285,7 @@ fm_sandbox_key_in_policy_set() {
 FM_SANDBOX_LINE_KEY=
 FM_SANDBOX_LINE_VALUE=
 
-fm_sandbox_parse_line() {
+fm_sandbox_parse_field() {
   local line=$1 cr=$'\r'
   case "$line" in
     *"$cr"*) refuse "malformed provider output (carriage return): '$line'" ;;
@@ -288,7 +297,9 @@ fm_sandbox_parse_line() {
   FM_SANDBOX_LINE_KEY=${line%%=*}
   FM_SANDBOX_LINE_VALUE=${line#*=}
   [[ "$FM_SANDBOX_LINE_KEY" =~ ^[a-z][a-z0-9_]*$ ]] || refuse "malformed provider output key: '$FM_SANDBOX_LINE_KEY'"
-  [ -n "$FM_SANDBOX_LINE_VALUE" ] || refuse "provider output key '$FM_SANDBOX_LINE_KEY' has an empty value"
+  case "$FM_SANDBOX_LINE_VALUE" in
+    ''|*=*|*[[:space:]]*) refuse "malformed provider output value for '$FM_SANDBOX_LINE_KEY': expected a non-empty value without whitespace or '='" ;;
+  esac
 }
 
 fm_sandbox_check_semantics() {
@@ -305,91 +316,63 @@ fm_sandbox_check_semantics() {
   esac
 }
 
-fm_sandbox_emit_single() {
-  local keyset=$1 required=$2 verb=$3 line key seen=" "
-  local -a lines=()
-  if [ -n "$FM_SANDBOX_OUT" ]; then
-    while IFS= read -r line; do
-      fm_sandbox_parse_line "$line"
-      "fm_sandbox_key_in_${keyset}_set" "$FM_SANDBOX_LINE_KEY" || refuse "unknown provider output key '${FM_SANDBOX_LINE_KEY}' for $verb (line: '$line')"
-      fm_sandbox_check_semantics "$FM_SANDBOX_LINE_KEY" "$FM_SANDBOX_LINE_VALUE"
-      # rule is the one repeatable key: policy prints one rule line per rule.
-      if [ "$FM_SANDBOX_LINE_KEY" != rule ]; then
-        case "$seen" in
-          *" $FM_SANDBOX_LINE_KEY "*) refuse "duplicate provider output key '${FM_SANDBOX_LINE_KEY}' for $verb" ;;
-        esac
-      fi
-      seen="$seen$FM_SANDBOX_LINE_KEY "
-      lines+=("$line")
-    done <<<"$FM_SANDBOX_OUT"
-  fi
+FM_SANDBOX_RECORD_HOME=
+
+fm_sandbox_validate_record() {
+  local keyset=$1 required=$2 verb=$3 line=$4 field key seen=" "
+  local -a fields=()
+  FM_SANDBOX_RECORD_HOME=
+  IFS=' ' read -r -a fields <<<"$line"
+  [ "${#fields[@]}" -gt 0 ] || refuse "empty provider record for $verb"
+  for field in "${fields[@]}"; do
+    fm_sandbox_parse_field "$field"
+    key=$FM_SANDBOX_LINE_KEY
+    "fm_sandbox_key_in_${keyset}_set" "$key" || refuse "unknown provider output key '$key' for $verb"
+    fm_sandbox_check_semantics "$key" "$FM_SANDBOX_LINE_VALUE"
+    if [ "$key" != rule ]; then
+      case "$seen" in
+        *" $key "*) refuse "duplicate provider output key '$key' for $verb" ;;
+      esac
+    fi
+    seen="$seen$key "
+    if [ "$key" = fm_home ]; then
+      FM_SANDBOX_RECORD_HOME=$FM_SANDBOX_LINE_VALUE
+    fi
+  done
   for key in $required; do
     case "$seen" in
       *" $key "*) ;;
       *) refuse "provider output for $verb is missing required key '$key'" ;;
     esac
   done
-  if [ "${#lines[@]}" -gt 0 ]; then
-    printf '%s\n' "${lines[@]}"
+}
+
+fm_sandbox_emit_single() {
+  local keyset=$1 required=$2 verb=$3
+  if [ -z "$FM_SANDBOX_OUT" ] && [ -z "$required" ]; then
+    return 0
   fi
-  return 0
+  case "$FM_SANDBOX_OUT" in
+    *$'\n'*) refuse "provider output for $verb must contain exactly one record line" ;;
+  esac
+  fm_sandbox_validate_record "$keyset" "$required" "$verb" "$FM_SANDBOX_OUT"
+  printf '%s\n' "$FM_SANDBOX_OUT"
 }
 
 fm_sandbox_emit_list() {
-  local tag=$1 line key value in_record=0 seen=" " rec_name="" rec_home="" have_state=0
-  local -a record=()
-
-  fm_sandbox_flush_record() {
-    if [ "$in_record" -eq 0 ]; then
-      return 0
-    fi
-    if [ "$have_state" -eq 0 ]; then
-      refuse "provider list record '$rec_name' is missing required key 'state'"
-    fi
-    # Fail-closed filter: only records labelled with this home's tag pass,
-    # including records the provider failed to label at all.
-    if [ "$rec_home" = "$tag" ]; then
-      if [ "${#record[@]}" -gt 0 ]; then
-        printf '%s\n' "${record[@]}"
-      fi
-    fi
-    return 0
-  }
-
+  local tag=$1 line
+  local -a records=()
   if [ -n "$FM_SANDBOX_OUT" ]; then
     while IFS= read -r line; do
-      fm_sandbox_parse_line "$line"
-      key=$FM_SANDBOX_LINE_KEY
-      value=$FM_SANDBOX_LINE_VALUE
-      fm_sandbox_key_in_object_set "$key" || refuse "unknown provider output key '$key' in list output (line: '$line')"
-      fm_sandbox_check_semantics "$key" "$value"
-      if [ "$key" = name ]; then
-        fm_sandbox_flush_record
-        in_record=1
-        seen=" "
-        have_state=0
-        rec_name=$value
-        rec_home=
-        record=("$line")
-        continue
+      fm_sandbox_validate_record object "name state" list "$line"
+      if [ "$FM_SANDBOX_RECORD_HOME" = "$tag" ]; then
+        records+=("$line")
       fi
-      if [ "$in_record" -eq 0 ]; then
-        refuse "provider list output must start each record with 'name=' (first key was '$key')"
-      fi
-      case "$seen" in
-        *" $key "*) refuse "duplicate provider output key '$key' in list record '$rec_name'" ;;
-      esac
-      seen="$seen$key "
-      if [ "$key" = state ]; then
-        have_state=1
-      fi
-      if [ "$key" = fm_home ]; then
-        rec_home=$value
-      fi
-      record+=("$line")
     done <<<"$FM_SANDBOX_OUT"
   fi
-  fm_sandbox_flush_record
+  if [ "${#records[@]}" -gt 0 ]; then
+    printf '%s\n' "${records[@]}"
+  fi
   return 0
 }
 
@@ -521,7 +504,7 @@ esac
 # --- config, home tag, dispatch ----------------------------------------------
 
 fm_sandbox_read_config
-TAG=$(fm_backend_hometag)
+TAG=$(fm_home_hometag) || refuse "cannot resolve operational home '$FM_HOME'"
 
 case "$VERB" in
   create)
