@@ -1,0 +1,44 @@
+
+ ▀▀█  v1.0.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  ahoy, no-mistakes
+
+[Extensions]
+  fm-calm.ts, geometry-provider.ts
+
+
+ [skill] ahoy (ctrl+o to expand)
+
+
+ Thinking...
+
+
+ read probe-one.txt
+
+
+ Thinking...
+
+
+ read probe-two.txt
+
+
+ Thinking...
+
+ CALM_GEOMETRY_FINAL
+
+ - visible row one
+ - visible row two
+
+ Tool output: collapsed
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+/tmp/fm-calm-pi-extension.7Jr5az/geometry-project (main)
+↑2.4k ↓50 R4.8k W2.4k CH97.9% 60.5%/4.1k (auto)                               deterministic • medium
+

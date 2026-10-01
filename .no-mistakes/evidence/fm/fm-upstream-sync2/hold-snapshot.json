@@ -1,0 +1,429 @@
+{
+  "schema": "fm-fleet-snapshot.v1",
+  "generated": "2026-10-01T23:08:15Z",
+  "fm_home": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home",
+  "roots": {
+    "fm_root": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P",
+    "state": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/state",
+    "data": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/data",
+    "config": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/config",
+    "projects": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/projects"
+  },
+  "backlog": {
+    "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/data/backlog.md",
+    "records": [
+      {
+        "hold_age_days": 0,
+        "local_note": null,
+        "order": 1,
+        "state": "queued",
+        "body_excerpt": null,
+        "requires_child_metadata": false,
+        "priority": null,
+        "blocked_reason": null,
+        "blocked_by_ids": [],
+        "pr_url": null,
+        "kind": "scout",
+        "links": [],
+        "hold_reason": null,
+        "unresolved_blocker_ids": [],
+        "repo": "sample",
+        "current_role": "queued",
+        "hold_set": null,
+        "since": "2026-10-01",
+        "title": "review-one",
+        "hold_until": null,
+        "structured": true,
+        "body_lines": [],
+        "reported": null,
+        "hold_kind": null,
+        "id": "review-one",
+        "blocked_by": null,
+        "captain_actionable": false,
+        "report_path": null,
+        "checked": false,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "hold_bucket": null,
+        "raw": "- [ ] review-one - review-one (repo: sample) (kind: scout) (since 2026-10-01)",
+        "done": null,
+        "merged": null
+      },
+      {
+        "id": "review-two",
+        "hold_kind": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "checked": false,
+        "captain_actionable": false,
+        "report_path": null,
+        "blocked_by": null,
+        "structured": true,
+        "hold_until": null,
+        "reported": null,
+        "body_lines": [],
+        "done": null,
+        "merged": null,
+        "hold_bucket": null,
+        "raw": "- [ ] review-two - review-two (repo: sample) (kind: scout) (since 2026-10-01)",
+        "requires_child_metadata": false,
+        "body_excerpt": null,
+        "state": "queued",
+        "blocked_reason": null,
+        "priority": null,
+        "local_note": null,
+        "hold_age_days": 0,
+        "order": 2,
+        "hold_set": null,
+        "current_role": "queued",
+        "title": "review-two",
+        "since": "2026-10-01",
+        "links": [],
+        "kind": "scout",
+        "pr_url": null,
+        "blocked_by_ids": [],
+        "repo": "sample",
+        "hold_reason": null,
+        "unresolved_blocker_ids": []
+      },
+      {
+        "structured": true,
+        "hold_until": null,
+        "reported": null,
+        "body_lines": [
+          "Captain hold set: 2026-10-01T23:08:13Z",
+          "Captain hold origin: review-one",
+          "Origin: review-one"
+        ],
+        "id": "route-call",
+        "hold_kind": "captain",
+        "captain_actionable": true,
+        "report_path": null,
+        "completion": {
+          "date": null,
+          "verb": null
+        },
+        "checked": false,
+        "blocked_by": null,
+        "hold_bucket": "live",
+        "raw": "- [ ] route-call - Choose route (repo: sample) (kind: captain) (since 2026-10-01) (hold: fm-hold-v1:UGljayAobm9ydGgpIG9yICJzb3V0aCI7IGNhZsOpIDEwMCUgJTI4ClNlY29uZCBsaW5lXHBhdGg=) (hold-kind: captain)",
+        "done": null,
+        "merged": null,
+        "local_note": null,
+        "hold_age_days": 0,
+        "order": 3,
+        "state": "queued",
+        "requires_child_metadata": false,
+        "body_excerpt": "Captain hold set: 2026-10-01T23:08:13Z Captain hold origin: review-one Origin: review-one",
+        "blocked_reason": null,
+        "priority": null,
+        "kind": "captain",
+        "links": [],
+        "blocked_by_ids": [],
+        "pr_url": null,
+        "repo": "sample",
+        "hold_reason": "Pick (north) or \"south\"; café 100% %28\nSecond line\\path",
+        "unresolved_blocker_ids": [],
+        "current_role": "queued",
+        "hold_set": "2026-10-01T23:08:13Z",
+        "since": "2026-10-01",
+        "title": "Choose route"
+      }
+    ],
+    "present": true
+  },
+  "tasks": [
+    {
+      "id": "review-one",
+      "kind": "scout",
+      "harness": "",
+      "mode": "scout",
+      "yolo": "",
+      "branch": null,
+      "project": "",
+      "spawn_gen": null,
+      "backend": "tmux",
+      "remote": null,
+      "paths": {
+        "meta": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/state/review-one.meta",
+          "present": true
+        },
+        "status_log": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/state/review-one.status",
+          "present": false,
+          "kind": "event_history",
+          "last_event": {
+            "state": "",
+            "note": "",
+            "raw": "",
+            "age_seconds": null
+          }
+        },
+        "worktree": {
+          "path": null,
+          "present": false
+        },
+        "home": {
+          "path": null,
+          "present": false
+        },
+        "report": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/data/review-one/report.md",
+          "present": false
+        }
+      },
+      "secondmate_projects": [],
+      "current_state": {
+        "state": "unknown",
+        "source": "none",
+        "detail": "worktree gone (torn down?)",
+        "raw": "state: unknown · source: none · worktree gone (torn down?)",
+        "observed_at": "2026-10-01T23:08:15Z",
+        "freshness": "fresh"
+      },
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-10-01T23:08:15Z",
+        "freshness": "fresh"
+      },
+      "pr": {
+        "url": null,
+        "source": "absent",
+        "head": null
+      },
+      "hints": {
+        "pending_decision": false,
+        "blocked_event": false,
+        "open_decisions": [],
+        "scout_report_present": false,
+        "last_event_text": ""
+      },
+      "actions": {
+        "watch": "bin/fm-peek.sh fm-review-one",
+        "steer": "bin/fm-send.sh fm-review-one '<instruction>'",
+        "return_channel_note": null
+      },
+      "backlog": {
+        "hold_age_days": 0,
+        "local_note": null,
+        "order": 1,
+        "state": "queued",
+        "body_excerpt": null,
+        "requires_child_metadata": false,
+        "priority": null,
+        "blocked_reason": null,
+        "blocked_by_ids": [],
+        "pr_url": null,
+        "kind": "scout",
+        "links": [],
+        "hold_reason": null,
+        "unresolved_blocker_ids": [],
+        "repo": "sample",
+        "current_role": "queued",
+        "hold_set": null,
+        "since": "2026-10-01",
+        "title": "review-one",
+        "hold_until": null,
+        "structured": true,
+        "body_lines": [],
+        "reported": null,
+        "hold_kind": null,
+        "id": "review-one",
+        "blocked_by": null,
+        "captain_actionable": false,
+        "report_path": null,
+        "checked": false,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "hold_bucket": null,
+        "raw": "- [ ] review-one - review-one (repo: sample) (kind: scout) (since 2026-10-01)",
+        "done": null,
+        "merged": null
+      }
+    },
+    {
+      "id": "review-two",
+      "kind": "scout",
+      "harness": "",
+      "mode": "scout",
+      "yolo": "",
+      "branch": null,
+      "project": "",
+      "spawn_gen": null,
+      "backend": "tmux",
+      "remote": null,
+      "paths": {
+        "meta": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/state/review-two.meta",
+          "present": true
+        },
+        "status_log": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/state/review-two.status",
+          "present": false,
+          "kind": "event_history",
+          "last_event": {
+            "state": "",
+            "note": "",
+            "raw": "",
+            "age_seconds": null
+          }
+        },
+        "worktree": {
+          "path": null,
+          "present": false
+        },
+        "home": {
+          "path": null,
+          "present": false
+        },
+        "report": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/data/review-two/report.md",
+          "present": false
+        }
+      },
+      "secondmate_projects": [],
+      "current_state": {
+        "state": "unknown",
+        "source": "none",
+        "detail": "worktree gone (torn down?)",
+        "raw": "state: unknown · source: none · worktree gone (torn down?)",
+        "observed_at": "2026-10-01T23:08:15Z",
+        "freshness": "fresh"
+      },
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-10-01T23:08:15Z",
+        "freshness": "fresh"
+      },
+      "pr": {
+        "url": null,
+        "source": "absent",
+        "head": null
+      },
+      "hints": {
+        "pending_decision": false,
+        "blocked_event": false,
+        "open_decisions": [],
+        "scout_report_present": false,
+        "last_event_text": ""
+      },
+      "actions": {
+        "watch": "bin/fm-peek.sh fm-review-two",
+        "steer": "bin/fm-send.sh fm-review-two '<instruction>'",
+        "return_channel_note": null
+      },
+      "backlog": {
+        "id": "review-two",
+        "hold_kind": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "checked": false,
+        "captain_actionable": false,
+        "report_path": null,
+        "blocked_by": null,
+        "structured": true,
+        "hold_until": null,
+        "reported": null,
+        "body_lines": [],
+        "done": null,
+        "merged": null,
+        "hold_bucket": null,
+        "raw": "- [ ] review-two - review-two (repo: sample) (kind: scout) (since 2026-10-01)",
+        "requires_child_metadata": false,
+        "body_excerpt": null,
+        "state": "queued",
+        "blocked_reason": null,
+        "priority": null,
+        "local_note": null,
+        "hold_age_days": 0,
+        "order": 2,
+        "hold_set": null,
+        "current_role": "queued",
+        "title": "review-two",
+        "since": "2026-10-01",
+        "links": [],
+        "kind": "scout",
+        "pr_url": null,
+        "blocked_by_ids": [],
+        "repo": "sample",
+        "hold_reason": null,
+        "unresolved_blocker_ids": []
+      }
+    }
+  ],
+  "main_inventory": {
+    "valid": true,
+    "reason": null,
+    "orphan_in_flight": [],
+    "unstructured_current_count": 0
+  },
+  "contributions": {
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "unmeasured": 0,
+    "complete": true,
+    "proven_clear": true,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "unreadable_records": 0,
+    "valid_until": 900,
+    "captain": [],
+    "captain_omitted": 0
+  },
+  "scout_reports": [],
+  "secondmate_current": {
+    "registry": {
+      "present": false,
+      "available": true,
+      "complete": true,
+      "reason": null,
+      "provenance": "registered-table",
+      "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-validation/hold-home/data/secondmates.md",
+      "freshness": {
+        "status": "fresh",
+        "observed_at": "2026-10-01T23:08:15Z"
+      },
+      "records": [],
+      "input_truncated": false,
+      "records_truncated": false,
+      "reasons": [],
+      "lines_in_window": 0,
+      "records_in_window": 0
+    },
+    "records": [],
+    "total_registered": 0,
+    "total": 0,
+    "shown": 0,
+    "truncated": 0
+  },
+  "secondmate_landed": {
+    "records": [],
+    "truncated": [],
+    "unreadable": [],
+    "partial": []
+  },
+  "secondmate_guidance": {
+    "note": "For kind=secondmate, bearings selects validated structured state from that registered home; parent events and bounded terminal evidence are fallback-only supplements and never current-state authority."
+  }
+}

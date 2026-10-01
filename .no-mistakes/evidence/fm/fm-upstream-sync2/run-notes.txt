@@ -1,0 +1,7 @@
+Pi 1.0.0 installed only under .test-local/pi, then removed after testing. Local npm layout adapted with a node_modules symlink for the existing suite.
+Initial full Calm run: /reload transition assertion failed. Isolated geometry rerun and full suite rerun passed.
+Selected interactive test: passed. Base-commit interactive test: also passed because its fixture already configures tuiMode=regular. Counterfactual forcing --tui-mode fullscreen reproduced the exact missing CALM_E2E_OUTPUT error.
+All Pi tmux sessions used suite-owned private sockets and explicit nonzero dimensions. Deterministic providers and restored sessions were used; no external model/login was tested.
+Manual hold checks used actual Firstmate CLI and tasks-axi against an isolated backlog. Initial manual setup lacked an origin row, then origin metadata; both were corrected before final successful run.
+Git checks: HEAD contains 349e189f and 6af83310; origin push URL is https://github.com/dscott98/firstmate.git. No push, merge, PR, or upstream mutation performed. Delivery remains the outer executor responsibility.
+Final checks: fm-captain-hold-lifecycle.test.sh exited 0 (Beads-only migration cases skipped by installed markdown-only tasks-axi); fm-afk-return.test.sh exited 0; full Pi suite retry exited 0. Temporary drivers and local package installation removed; git status clean. No tracked changes made.

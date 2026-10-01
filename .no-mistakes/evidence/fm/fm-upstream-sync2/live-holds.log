@@ -1,0 +1,642 @@
+
+$ bin/fm-captain-hold.sh hold proof-call --title Rollout\ choice --reason $'Choose rollout (safe or fast).\nPreserve café and "quotes".' --origin proof-origin --repo sample
+proof-call
+
+$ bin/fm-tasks-axi.sh show proof-call
+task:
+  id: proof-call
+  title: Rollout choice
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: yes
+  hold_reason: "Choose rollout (safe or fast).\nPreserve café and \"quotes\"."
+  hold_kind: captain
+  hold_until: "-"
+  kind: captain
+  repo: sample
+  priority: "-"
+  created: 2026-10-01
+  closed: "-"
+  deps: none
+  links: none
+  body: "Captain hold set: 2026-10-01T22:56:45Z\nCaptain hold origin: proof-origin\n\nOrigin: proof-origin"
+
+$ bin/fm-tasks-axi.sh list
+count: 4
+tasks[4]{id,state,kind,repo,title}:
+  proof-origin,queued,task,sample,proof-origin
+  wrong-origin,queued,task,sample,wrong-origin
+  legacy-origin,queued,task,sample,legacy-origin
+  proof-call,queued,captain,sample,Rollout choice
+help[2]:
+  - Run `tasks-axi show <id>` for full notes on a task
+  - Run `tasks-axi ready` to see unblocked queued work
+{
+  "schema": "fm-fleet-snapshot.v1",
+  "generated": "2026-10-01T22:56:46Z",
+  "fm_home": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home",
+  "roots": {
+    "fm_root": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P",
+    "state": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state",
+    "data": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data",
+    "config": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/config",
+    "projects": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/projects"
+  },
+  "backlog": {
+    "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data/backlog.md",
+    "records": [
+      {
+        "hold_until": null,
+        "merged": null,
+        "captain_actionable": false,
+        "title": "proof-origin",
+        "local_note": null,
+        "state": "queued",
+        "done": null,
+        "pr_url": null,
+        "hold_bucket": null,
+        "links": [],
+        "priority": null,
+        "current_role": "queued",
+        "reported": null,
+        "id": "proof-origin",
+        "kind": null,
+        "body_excerpt": null,
+        "blocked_reason": null,
+        "hold_kind": null,
+        "order": 1,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "blocked_by": null,
+        "unresolved_blocker_ids": [],
+        "structured": true,
+        "blocked_by_ids": [],
+        "checked": false,
+        "requires_child_metadata": false,
+        "repo": "sample",
+        "since": "2026-10-01",
+        "raw": "- [ ] proof-origin - proof-origin (repo: sample) (since 2026-10-01)",
+        "hold_set": null,
+        "report_path": null,
+        "hold_reason": null,
+        "body_lines": [],
+        "hold_age_days": 0
+      },
+      {
+        "structured": true,
+        "unresolved_blocker_ids": [],
+        "blocked_by": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "hold_kind": null,
+        "order": 2,
+        "blocked_reason": null,
+        "body_excerpt": null,
+        "kind": null,
+        "id": "wrong-origin",
+        "reported": null,
+        "current_role": "queued",
+        "priority": null,
+        "links": [],
+        "hold_bucket": null,
+        "pr_url": null,
+        "done": null,
+        "state": "queued",
+        "local_note": null,
+        "title": "wrong-origin",
+        "captain_actionable": false,
+        "merged": null,
+        "hold_until": null,
+        "hold_age_days": 0,
+        "body_lines": [],
+        "hold_reason": null,
+        "report_path": null,
+        "hold_set": null,
+        "since": "2026-10-01",
+        "raw": "- [ ] wrong-origin - wrong-origin (repo: sample) (since 2026-10-01)",
+        "requires_child_metadata": false,
+        "repo": "sample",
+        "checked": false,
+        "blocked_by_ids": []
+      },
+      {
+        "checked": false,
+        "blocked_by_ids": [],
+        "repo": "sample",
+        "requires_child_metadata": false,
+        "raw": "- [ ] legacy-origin - legacy-origin (repo: sample) (since 2026-10-01)",
+        "since": "2026-10-01",
+        "hold_set": null,
+        "report_path": null,
+        "body_lines": [],
+        "hold_reason": null,
+        "hold_age_days": 0,
+        "hold_until": null,
+        "captain_actionable": false,
+        "title": "legacy-origin",
+        "merged": null,
+        "done": null,
+        "local_note": null,
+        "state": "queued",
+        "links": [],
+        "hold_bucket": null,
+        "pr_url": null,
+        "id": "legacy-origin",
+        "reported": null,
+        "priority": null,
+        "current_role": "queued",
+        "blocked_reason": null,
+        "kind": null,
+        "body_excerpt": null,
+        "completion": {
+          "date": null,
+          "verb": null
+        },
+        "order": 3,
+        "hold_kind": null,
+        "unresolved_blocker_ids": [],
+        "structured": true,
+        "blocked_by": null
+      },
+      {
+        "reported": null,
+        "id": "proof-call",
+        "current_role": "queued",
+        "priority": null,
+        "blocked_reason": null,
+        "body_excerpt": "Captain hold set: 2026-10-01T22:56:45Z Captain hold origin: proof-origin Origin: proof-origin",
+        "kind": "captain",
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "hold_kind": "captain",
+        "order": 4,
+        "unresolved_blocker_ids": [],
+        "structured": true,
+        "blocked_by": null,
+        "hold_until": null,
+        "title": "Rollout choice",
+        "captain_actionable": true,
+        "merged": null,
+        "done": null,
+        "state": "queued",
+        "local_note": null,
+        "links": [],
+        "pr_url": null,
+        "hold_bucket": "live",
+        "report_path": null,
+        "body_lines": [
+          "Captain hold set: 2026-10-01T22:56:45Z",
+          "Captain hold origin: proof-origin",
+          "Origin: proof-origin"
+        ],
+        "hold_reason": "Choose rollout (safe or fast).\nPreserve café and \"quotes\".",
+        "hold_age_days": 0,
+        "checked": false,
+        "blocked_by_ids": [],
+        "raw": "- [ ] proof-call - Rollout choice (repo: sample) (kind: captain) (since 2026-10-01) (hold: fm-hold-v1:Q2hvb3NlIHJvbGxvdXQgKHNhZmUgb3IgZmFzdCkuClByZXNlcnZlIGNhZsOpIGFuZCAicXVvdGVzIi4=) (hold-kind: captain)",
+        "since": "2026-10-01",
+        "requires_child_metadata": false,
+        "repo": "sample",
+        "hold_set": "2026-10-01T22:56:45Z"
+      }
+    ],
+    "present": true
+  },
+  "tasks": [
+    {
+      "id": "legacy-origin",
+      "kind": "scout",
+      "harness": "",
+      "mode": "scout",
+      "yolo": "",
+      "branch": null,
+      "project": "",
+      "spawn_gen": null,
+      "backend": "tmux",
+      "remote": null,
+      "paths": {
+        "meta": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/legacy-origin.meta",
+          "present": true
+        },
+        "status_log": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/legacy-origin.status",
+          "present": false,
+          "kind": "event_history",
+          "last_event": {
+            "state": "",
+            "note": "",
+            "raw": "",
+            "age_seconds": null
+          }
+        },
+        "worktree": {
+          "path": null,
+          "present": false
+        },
+        "home": {
+          "path": null,
+          "present": false
+        },
+        "report": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data/legacy-origin/report.md",
+          "present": false
+        }
+      },
+      "secondmate_projects": [],
+      "current_state": {
+        "state": "unknown",
+        "source": "none",
+        "detail": "worktree gone (torn down?)",
+        "raw": "state: unknown · source: none · worktree gone (torn down?)",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "pr": {
+        "url": null,
+        "source": "absent",
+        "head": null
+      },
+      "hints": {
+        "pending_decision": false,
+        "blocked_event": false,
+        "open_decisions": [],
+        "scout_report_present": false,
+        "last_event_text": ""
+      },
+      "actions": {
+        "watch": "bin/fm-peek.sh fm-legacy-origin",
+        "steer": "bin/fm-send.sh fm-legacy-origin '<instruction>'",
+        "return_channel_note": null
+      },
+      "backlog": {
+        "checked": false,
+        "blocked_by_ids": [],
+        "repo": "sample",
+        "requires_child_metadata": false,
+        "raw": "- [ ] legacy-origin - legacy-origin (repo: sample) (since 2026-10-01)",
+        "since": "2026-10-01",
+        "hold_set": null,
+        "report_path": null,
+        "body_lines": [],
+        "hold_reason": null,
+        "hold_age_days": 0,
+        "hold_until": null,
+        "captain_actionable": false,
+        "title": "legacy-origin",
+        "merged": null,
+        "done": null,
+        "local_note": null,
+        "state": "queued",
+        "links": [],
+        "hold_bucket": null,
+        "pr_url": null,
+        "id": "legacy-origin",
+        "reported": null,
+        "priority": null,
+        "current_role": "queued",
+        "blocked_reason": null,
+        "kind": null,
+        "body_excerpt": null,
+        "completion": {
+          "date": null,
+          "verb": null
+        },
+        "order": 3,
+        "hold_kind": null,
+        "unresolved_blocker_ids": [],
+        "structured": true,
+        "blocked_by": null
+      }
+    },
+    {
+      "id": "proof-origin",
+      "kind": "scout",
+      "harness": "",
+      "mode": "scout",
+      "yolo": "",
+      "branch": null,
+      "project": "",
+      "spawn_gen": null,
+      "backend": "tmux",
+      "remote": null,
+      "paths": {
+        "meta": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/proof-origin.meta",
+          "present": true
+        },
+        "status_log": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/proof-origin.status",
+          "present": false,
+          "kind": "event_history",
+          "last_event": {
+            "state": "",
+            "note": "",
+            "raw": "",
+            "age_seconds": null
+          }
+        },
+        "worktree": {
+          "path": null,
+          "present": false
+        },
+        "home": {
+          "path": null,
+          "present": false
+        },
+        "report": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data/proof-origin/report.md",
+          "present": false
+        }
+      },
+      "secondmate_projects": [],
+      "current_state": {
+        "state": "unknown",
+        "source": "none",
+        "detail": "worktree gone (torn down?)",
+        "raw": "state: unknown · source: none · worktree gone (torn down?)",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "pr": {
+        "url": null,
+        "source": "absent",
+        "head": null
+      },
+      "hints": {
+        "pending_decision": false,
+        "blocked_event": false,
+        "open_decisions": [],
+        "scout_report_present": false,
+        "last_event_text": ""
+      },
+      "actions": {
+        "watch": "bin/fm-peek.sh fm-proof-origin",
+        "steer": "bin/fm-send.sh fm-proof-origin '<instruction>'",
+        "return_channel_note": null
+      },
+      "backlog": {
+        "hold_until": null,
+        "merged": null,
+        "captain_actionable": false,
+        "title": "proof-origin",
+        "local_note": null,
+        "state": "queued",
+        "done": null,
+        "pr_url": null,
+        "hold_bucket": null,
+        "links": [],
+        "priority": null,
+        "current_role": "queued",
+        "reported": null,
+        "id": "proof-origin",
+        "kind": null,
+        "body_excerpt": null,
+        "blocked_reason": null,
+        "hold_kind": null,
+        "order": 1,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "blocked_by": null,
+        "unresolved_blocker_ids": [],
+        "structured": true,
+        "blocked_by_ids": [],
+        "checked": false,
+        "requires_child_metadata": false,
+        "repo": "sample",
+        "since": "2026-10-01",
+        "raw": "- [ ] proof-origin - proof-origin (repo: sample) (since 2026-10-01)",
+        "hold_set": null,
+        "report_path": null,
+        "hold_reason": null,
+        "body_lines": [],
+        "hold_age_days": 0
+      }
+    },
+    {
+      "id": "wrong-origin",
+      "kind": "scout",
+      "harness": "",
+      "mode": "scout",
+      "yolo": "",
+      "branch": null,
+      "project": "",
+      "spawn_gen": null,
+      "backend": "tmux",
+      "remote": null,
+      "paths": {
+        "meta": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/wrong-origin.meta",
+          "present": true
+        },
+        "status_log": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/state/wrong-origin.status",
+          "present": false,
+          "kind": "event_history",
+          "last_event": {
+            "state": "",
+            "note": "",
+            "raw": "",
+            "age_seconds": null
+          }
+        },
+        "worktree": {
+          "path": null,
+          "present": false
+        },
+        "home": {
+          "path": null,
+          "present": false
+        },
+        "report": {
+          "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data/wrong-origin/report.md",
+          "present": false
+        }
+      },
+      "secondmate_projects": [],
+      "current_state": {
+        "state": "unknown",
+        "source": "none",
+        "detail": "worktree gone (torn down?)",
+        "raw": "state: unknown · source: none · worktree gone (torn down?)",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "endpoint": {
+        "target": null,
+        "exists": null,
+        "agent_alive": "not_checked",
+        "status": "unknown",
+        "observed_at": "2026-10-01T22:56:46Z",
+        "freshness": "fresh"
+      },
+      "pr": {
+        "url": null,
+        "source": "absent",
+        "head": null
+      },
+      "hints": {
+        "pending_decision": false,
+        "blocked_event": false,
+        "open_decisions": [],
+        "scout_report_present": false,
+        "last_event_text": ""
+      },
+      "actions": {
+        "watch": "bin/fm-peek.sh fm-wrong-origin",
+        "steer": "bin/fm-send.sh fm-wrong-origin '<instruction>'",
+        "return_channel_note": null
+      },
+      "backlog": {
+        "structured": true,
+        "unresolved_blocker_ids": [],
+        "blocked_by": null,
+        "completion": {
+          "verb": null,
+          "date": null
+        },
+        "hold_kind": null,
+        "order": 2,
+        "blocked_reason": null,
+        "body_excerpt": null,
+        "kind": null,
+        "id": "wrong-origin",
+        "reported": null,
+        "current_role": "queued",
+        "priority": null,
+        "links": [],
+        "hold_bucket": null,
+        "pr_url": null,
+        "done": null,
+        "state": "queued",
+        "local_note": null,
+        "title": "wrong-origin",
+        "captain_actionable": false,
+        "merged": null,
+        "hold_until": null,
+        "hold_age_days": 0,
+        "body_lines": [],
+        "hold_reason": null,
+        "report_path": null,
+        "hold_set": null,
+        "since": "2026-10-01",
+        "raw": "- [ ] wrong-origin - wrong-origin (repo: sample) (since 2026-10-01)",
+        "requires_child_metadata": false,
+        "repo": "sample",
+        "checked": false,
+        "blocked_by_ids": []
+      }
+    }
+  ],
+  "main_inventory": {
+    "valid": true,
+    "reason": null,
+    "orphan_in_flight": [],
+    "unstructured_current_count": 0
+  },
+  "contributions": {
+    "known": 0,
+    "checked": 0,
+    "counts": {
+      "captain": 0,
+      "fleet": 0,
+      "maintainer": 0,
+      "nobody": 0
+    },
+    "unmeasured": 0,
+    "complete": true,
+    "proven_clear": true,
+    "stale_verdicts": 0,
+    "missing_verdicts": 0,
+    "unreadable_records": 0,
+    "valid_until": 900,
+    "captain": [],
+    "captain_omitted": 0
+  },
+  "scout_reports": [],
+  "secondmate_current": {
+    "registry": {
+      "present": false,
+      "available": true,
+      "complete": true,
+      "reason": null,
+      "provenance": "registered-table",
+      "path": "/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WTMD48P6JA22314QBDEW0P/.test-local/hold-home/data/secondmates.md",
+      "freshness": {
+        "status": "fresh",
+        "observed_at": "2026-10-01T22:56:46Z"
+      },
+      "records": [],
+      "input_truncated": false,
+      "records_truncated": false,
+      "reasons": [],
+      "lines_in_window": 0,
+      "records_in_window": 0
+    },
+    "records": [],
+    "total_registered": 0,
+    "total": 0,
+    "shown": 0,
+    "truncated": 0
+  },
+  "secondmate_landed": {
+    "records": [],
+    "truncated": [],
+    "unreadable": [],
+    "partial": []
+  },
+  "secondmate_guidance": {
+    "note": "For kind=secondmate, bearings selects validated structured state from that registered home; parent events and bounded terminal evidence are fallback-only supplements and never current-state authority."
+  }
+}
+true
+
+$ bin/fm-captain-hold.sh complete proof-origin proof-call
+complete: proof-origin captain-call inventory reviewed (proof-call)
+
+$ bin/fm-captain-hold.sh verify proof-origin
+verified: proof-origin captain-call inventory
+
+$ bin/fm-captain-hold.sh complete proof-call proof-call
+fm-captain-hold: origin proof-call cannot be its own captain-call inventory entry; hold a separate captain task for the call and list that task
+Expected refusal
+
+$ bin/fm-captain-hold.sh complete wrong-origin proof-call
+fm-captain-hold: captain-held task proof-call was held for origin proof-origin, not wrong-origin; hold a task for wrong-origin or list the right one
+Expected refusal
+
+$ bin/fm-captain-hold.sh hold legacy-call --title Legacy\ call --reason Original\ reason --repo sample
+legacy-call
+
+$ bin/fm-captain-hold.sh complete legacy-origin legacy-call
+complete: legacy-origin captain-call inventory reviewed (legacy-call) [no recorded origin on: legacy-call; not checked against legacy-origin]
+
+$ bin/fm-captain-hold.sh verify legacy-origin
+verified: legacy-origin captain-call inventory
+
+All live CLI assertions passed.
