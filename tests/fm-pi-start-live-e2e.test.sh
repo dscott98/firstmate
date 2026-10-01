@@ -150,6 +150,7 @@ for harness in pi pi-signed; do
   id="pi-start-live-$$-$harness-secondmate"
   ids+=("$id")
   sm="$LAB/secondmate-$harness"
+  fm_git_init_commit "$sm"
   mkdir -p "$sm/bin" "$sm/data" "$sm/.pi/extensions"
   printf '%s\n' "$id" > "$sm/.fm-secondmate-home"
   printf '# Test home\n' > "$sm/AGENTS.md"

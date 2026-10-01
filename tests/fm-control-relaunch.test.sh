@@ -2040,7 +2040,14 @@ case "${1:-} ${2:-}" in
     # and tests/fixtures.sh do.
     payload=${4:-}
     case "$payload" in
-      ". '"*"'") staged=${payload#". '"}; staged=${staged%"'"}; [ ! -f "$staged" ] || payload=$(cat "$staged") ;;
+      ". '"*"'")
+        staged=${payload#". '"}
+        staged=${staged%"'"}
+        if [ -f "$staged" ]; then
+          "$(dirname "$0")/fm-test-pi-start" "$staged" || exit 1
+          payload=$(cat "$staged")
+        fi
+        ;;
     esac
     case "$payload" in
       *'encode launch-brief'* | *'Firstmate operational input waiting: read'*)
@@ -2154,6 +2161,7 @@ test_herdr_relaunch_resumes_only_the_registered_pi_session() {
       return 0
     }
     dir=$HERDR_CASE_DIR
+    fm_fake_pi "$dir/fakebin"
     rm -f "$dir/fake/herdr-stopped"
     sed -i 's/^harness=claude$/harness=pi/' "$dir/home/state/resume-$registered.meta"
     # Keep the pane's status authority registered to an existing Pi session,

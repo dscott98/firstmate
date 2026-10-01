@@ -42,7 +42,7 @@ SH
 #!/usr/bin/env bash
 root=\${PI_CODING_AGENT_DIR:-\$HOME/.pi/agent}
 case "\${1:-}" in
-  --help) printf '%s\n' 'Pi 0.86.1' 'Options: --help --tui-mode <mode>'; exit 0 ;;
+  --help) printf '%s\n' 'Pi 0.86.1' 'Options: --help --tui-mode <mode> --approve'; exit 0 ;;
   auth)
     provider=\$4
     printf '%s %s\n' "\${PI_CODING_AGENT_DIR-unset}" "\$provider" >> '$dir/pi-checks'
@@ -274,7 +274,7 @@ test_pi_pin_refusals() {
   assert_refused_before_launch "$id-out" "$out" "which is not signed in for provider 'anthropic'"
   out=$(spawn_ship "$id-raw" --harness "pi --provider openai-codex --model openai-codex/gpt-5.5"); rc=$?
   expect_code 1 "$rc" "a raw Pi launch must refuse under a pin"
-  assert_refused_before_launch "$id-raw" "$out" "a raw Pi launch command runs verbatim"
+  assert_refused_before_launch "$id-raw" "$out" "Pi startup verification requires the canonical --harness pi or pi-signed launch"
   pass "a Pi pin refuses unqualified, missing, undeclared, signed-out, and raw launches"
 }
 
