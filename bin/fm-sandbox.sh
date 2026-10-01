@@ -73,7 +73,8 @@
 #   object:  name vmid node ssh_alias user profile ttl_expires state
 #            fm_task fm_home hold
 #            (status, list, extend, hold, release, snapshot, rollback,
-#            destroy; status requires state=running|stopped|absent)
+#            destroy; status requires state=running|stopped|absent, with
+#            fm_task and fm_home required for running/stopped)
 #   policy:  name profile rule
 #            (policy requires profile; rule fields may repeat)
 # A key outside the set for that verb, a duplicate key within one record, a
@@ -81,7 +82,9 @@
 # nothing from that call is trusted. create/status return exactly one record.
 # list is one record per sandbox; every record must carry name and state, and this
 # script keeps only records whose fm_home equals the home tag (a record
-# without the label is dropped, not refused). extend, hold, release,
+# without the label is dropped, not refused). Retained running/stopped
+# list records require fm_task and fm_home; absent records need no labels.
+# extend, hold, release,
 # snapshot, rollback, and destroy may answer with empty output. exec is
 # exempt from the key=value contract: the provider relays the remote
 # command's stdout and exit status verbatim and this script passes both
@@ -319,7 +322,7 @@ fm_sandbox_check_semantics() {
 FM_SANDBOX_RECORD_HOME=
 
 fm_sandbox_validate_record() {
-  local keyset=$1 required=$2 verb=$3 line=$4 field key seen=" "
+  local keyset=$1 required=$2 verb=$3 line=$4 tag=${5:-} field key state= seen=" "
   local -a fields=()
   FM_SANDBOX_RECORD_HOME=
   IFS=' ' read -r -a fields <<<"$line"
@@ -335,10 +338,16 @@ fm_sandbox_validate_record() {
       esac
     fi
     seen="$seen$key "
-    if [ "$key" = fm_home ]; then
-      FM_SANDBOX_RECORD_HOME=$FM_SANDBOX_LINE_VALUE
-    fi
+    case "$key" in
+      fm_home) FM_SANDBOX_RECORD_HOME=$FM_SANDBOX_LINE_VALUE ;;
+      state) state=$FM_SANDBOX_LINE_VALUE ;;
+    esac
   done
+  if [ "$state" = running ] || [ "$state" = stopped ]; then
+    if [ "$verb" = status ] || { [ "$verb" = list ] && [ "$FM_SANDBOX_RECORD_HOME" = "$tag" ]; }; then
+      required="$required fm_task fm_home"
+    fi
+  fi
   for key in $required; do
     case "$seen" in
       *" $key "*) ;;
@@ -364,7 +373,7 @@ fm_sandbox_emit_list() {
   local -a records=()
   if [ -n "$FM_SANDBOX_OUT" ]; then
     while IFS= read -r line; do
-      fm_sandbox_validate_record object "name state" list "$line"
+      fm_sandbox_validate_record object "name state" list "$line" "$tag"
       if [ "$FM_SANDBOX_RECORD_HOME" = "$tag" ]; then
         records+=("$line")
       fi

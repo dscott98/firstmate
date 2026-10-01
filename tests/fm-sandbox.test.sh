@@ -279,12 +279,26 @@ run status sbx-gone
 [ "$RC" -eq 0 ] || fail "status of an absent sandbox must succeed, got $RC"
 argv_has status
 argv_has sbx-gone
+printf 'state=absent\n' | cmp -s - "$OUT" || fail "absent status must remain valid without labels"
 set_fake 0 "" "name=sbx-tag-t1 vmid=101"
 run status sbx-tag-t1
 [ "$RC" -eq 3 ] || fail "status output missing state must be refused, got $RC"
 set_fake 0 "" "name=sbx-tag-t1 state=sleeping"
 run status sbx-tag-t1
 [ "$RC" -eq 3 ] || fail "an unknown state value must be refused, got $RC"
+for state in running stopped; do
+  for labels in "" "fm_task=t1" "fm_home=$TAG"; do
+    set_fake 0 "" "state=$state $labels"
+    run status sbx-a
+    [ "$RC" -eq 3 ] || fail "$state status must refuse incomplete ownership labels: $labels"
+    [ ! -s "$OUT" ] || fail "invalid status must emit no trusted output"
+    grep -q 'missing required key' "$ERR" || fail "status refusal must identify the missing key"
+  done
+  set_fake 0 "" "fm_home=$TAG fm_task=t1 state=$state"
+  run status sbx-a
+  [ "$RC" -eq 0 ] || fail "$state status with both labels must succeed"
+  printf 'fm_home=%s fm_task=t1 state=%s\n' "$TAG" "$state" | cmp -s - "$OUT" || fail "status must preserve labelled records"
+done
 pass "ok - status passes through state and labels, refuses missing or invalid state"
 
 # --- list filtering ------------------------------------------------------------
@@ -350,16 +364,34 @@ run list
 [ "$(cat "$CTRL/home-seen")" = "$TAG" ] || fail "home aliases must resolve to the same ownership"
 HOME_DIR=$HOME_A
 
-set_fake 0 "" "name=sbx-a state=running fm_home=$TAG
-name=sbx-b state=running fm_home=$TAG"
+set_fake 0 "" "name=sbx-a state=running fm_task=t1 fm_home=$TAG
+name=sbx-b state=running fm_task=t2 fm_home=$TAG"
 run list
 [ "$RC" -eq 0 ] || fail "list must accept multiple owned records"
-printf '%s\n' "name=sbx-a state=running fm_home=$TAG" "name=sbx-b state=running fm_home=$TAG" | cmp -s - "$OUT" || fail "list must preserve record framing"
-set_fake 0 "" "name=sbx-a state=running fm_home=$TAG
+printf '%s\n' "name=sbx-a state=running fm_task=t1 fm_home=$TAG" "name=sbx-b state=running fm_task=t2 fm_home=$TAG" | cmp -s - "$OUT" || fail "list must preserve record framing"
+set_fake 0 "" "name=sbx-a state=running fm_task=t1 fm_home=$TAG
 name=sbx-b state=running broken"
 run list
 [ "$RC" -eq 3 ] || fail "malformed later list records must refuse"
 [ ! -s "$OUT" ] || fail "list must validate all records before emitting output"
+
+for state in running stopped; do
+  set_fake 0 "" "name=sbx-a state=$state fm_home=$TAG"
+  run list
+  [ "$RC" -eq 3 ] || fail "owned $state list record must require fm_task"
+  [ ! -s "$OUT" ] || fail "incomplete owned record must emit nothing"
+  set_fake 0 "" "name=sbx-a state=$state fm_task=t1 fm_home=$TAG
+name=sbx-foreign state=$state fm_home=another-home
+name=sbx-unlabelled state=$state"
+  run list
+  [ "$RC" -eq 0 ] || fail "list must validate owned records and filter foreign or unlabelled records"
+  printf 'name=sbx-a state=%s fm_task=t1 fm_home=%s\n' "$state" "$TAG" | cmp -s - "$OUT" || fail "list must emit only the fully labelled owned record"
+done
+set_fake 0 "" "name=sbx-gone state=absent
+name=sbx-owned-gone state=absent fm_home=$TAG"
+run list
+[ "$RC" -eq 0 ] || fail "absent list records must not require ownership labels"
+printf 'name=sbx-owned-gone state=absent fm_home=%s\n' "$TAG" | cmp -s - "$OUT" || fail "absent list records must still obey home filtering"
 
 # --- extend, hold, release, policy, snapshot, rollback --------------------------
 

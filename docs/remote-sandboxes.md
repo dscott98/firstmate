@@ -77,8 +77,9 @@ In short:
 `bin/fm-sandbox.sh` is the single entry point, and its `--help` prints the verb list.
 
 - `create <task-id>` asks the provider for a sandbox and prints its `name`, `vmid`, `node`, `ssh_alias`, `user`, `profile`, `ttl_expires`, and `hostkey`.
-- `status <name>` prints the sandbox's `state` (`running`, `stopped`, or `absent`) and its labels.
-- `list` prints this home's sandboxes only, one record line per sandbox.
+- `status <name>` prints the sandbox's `state` (`running`, `stopped`, or `absent`); running and stopped records require both `fm_task` and `fm_home`, while absent records may omit labels.
+- `list` prints this home's sandboxes only, one record line per sandbox, requiring both ownership labels for running and stopped records it retains.
+  Records without this home's `fm_home` label are dropped.
 - `extend <name> --ttl <duration>` renews the TTL; `hold <name>` and `release <name>` manage the reap-blocking hold label.
 - `policy <name>` prints the effective firewall rules.
 - `exec <name> -- <argv>` runs one bootstrap command inside the sandbox; its argv is never a shell string.
