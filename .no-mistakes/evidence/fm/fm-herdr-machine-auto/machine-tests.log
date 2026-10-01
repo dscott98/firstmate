@@ -1,0 +1,11 @@
+ok - an absent local herdr skips the save silently
+ok - an absent local jq skips the save silently
+ok - an enabled machine for the required session is a silent no-op
+ok - a machine saved under another session is reported and never rewritten
+ok - a disabled foreign machine is left untouched with repair commands
+ok - a missing machine is added through the exact idempotent save command
+ok - a manual replacement after an automatic add stays untouched
+ok - the save passes the route's remote session through
+ok - a refused add reports the refusal and still succeeds
+ok - an unreadable machine list is reported and never blind-adds
+ok - a concurrent save for the same alias skips quietly under its lock
