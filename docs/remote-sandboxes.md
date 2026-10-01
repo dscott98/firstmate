@@ -3,8 +3,8 @@
 This page covers how to configure and operate the provider that runs Firstmate task sandboxes: short-lived, disposable virtual machines that host one task's working home.
 It is for operators who wire a sandbox provider into a firstmate home and for anyone checking the adapter's safety behavior.
 
-A sandbox task is an ordinary ship or scout whose endpoint and files live in a one-task Firstmate home on a disposable VM, driven by the primary through the same remote transport that drives remote second mates.
-The primary stays the only supervisor; the VM provides an isolated worker environment on provider infrastructure, and the sandbox is destroyed when the task is done.
+The planned placement integration will run ordinary ships and scouts in one-task Firstmate homes on disposable VMs, with the primary as their only supervisor.
+Today, operators manage sandbox lifecycles manually; task launch and automatic cleanup are not integrated.
 
 ## Find a topic
 
@@ -37,8 +37,8 @@ The placement flag, task control, status mirroring, teardown, and supervision in
   Every effect and every observation flows through `bin/fm-sandbox.sh`, which invokes the provider with argv only, never a shell string.
 - Every sandbox carries two labels: `fm_task=<task-id>` and `fm_home=<home tag>`.
   Destroying a sandbox refuses when the labels disagree, so one home can never destroy another home's sandbox, and an already-absent sandbox is success, so cleanup is idempotent.
-- Nothing destroys unlanded work.
-  Destroying a sandbox is cleanup, and the landed-work gate that stands in front of it ships with the teardown integration.
+- Preserve unlanded work before invoking `destroy` manually.
+  The adapter checks no landing evidence; the landed-work gate ships with the teardown integration.
 
 ## Network profiles
 
@@ -54,23 +54,7 @@ Host keys are pinned by the provider, not trusted on first use, and the SSH conf
 ## Configure a provider
 
 `config/sandbox-provider` is local and gitignored, selected by `FM_HOME` like every other config file; [the configuration reference](configuration.md#sandbox-provider-configsandbox-provider) owns its exact format.
-The reference layout:
-
-```sh
-/usr/local/bin/pve-sandbox
-default_profile=default
-ttl=4h
-ssh_include=/home/operator/.ssh/config.d/firstmate-sandboxes
-```
-
-The first line is the provider command's absolute path; the three keys are all required.
-The provider command must satisfy the invocation, output, and exit contracts that [the `fm-sandbox.sh` header](../bin/fm-sandbox.sh) owns.
-In short:
-
-- It receives argv only, one verb per call, and its `exec` argv is relayed verbatim.
-- Its stdout is `key=value` lines from a closed key set, one record per line with space-separated fields whose values contain no spaces or `=`, with per-verb required keys; anything else is refused and nothing from that call is trusted.
-- It labels every sandbox `fm_task=<task-id>` and `fm_home=<home tag>`, filters `list` by the home tag, and refuses `destroy` when the labels disagree.
-- It exits `75` only to report capacity, which surfaces as a blocker.
+The provider command must satisfy the invocation, record framing, ownership-label validation, and exit contracts that [the `fm-sandbox.sh` header](../bin/fm-sandbox.sh) owns.
 
 ## Operate
 
@@ -88,11 +72,13 @@ In short:
 
 ## Capacity and failures
 
-A provider that cannot take another sandbox exits `75`, and the adapter surfaces that as a capacity blocker (exit 4).
+For lifecycle verbs other than `exec`, a provider capacity refusal surfaces as a blocker; [the adapter header](../bin/fm-sandbox.sh) owns the exact exit statuses.
 Treat it like any other infrastructure blocker: surface it, free sandboxes, or wait; never fall back to local placement.
 
-Every other refusal exits 3 and names the concrete problem: no configuration, a malformed configuration, a missing or non-executable provider, a provider failure with its stderr included, or provider output that violates the contract.
-Usage errors, such as a malformed duration or a name containing whitespace, exit 2 and change nothing.
+Refusals name the concrete configuration, provider, or output problem, and provider failures include its stderr.
+Invalid output is withheld, but refusal does not roll back effects the provider already performed.
+Usage errors are rejected before invoking the provider.
+After local validation, `exec` relays raw provider output and exit status unchanged, including nonzero statuses; it does not apply lifecycle record validation or capacity translation.
 
 ## Verification
 

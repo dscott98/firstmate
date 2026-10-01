@@ -538,7 +538,7 @@ Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.
 
 Remote task sandboxes run on an external provider, and `config/sandbox-provider` is the local, gitignored file that wires one provider into a home.
 The file is absent by default: with no provider configured, every sandbox request refuses and nothing else changes, so the whole feature is opt-in per home.
-[`docs/remote-sandboxes.md`](remote-sandboxes.md) owns the operator guide, including the provider contract and the security posture.
+[`docs/remote-sandboxes.md`](remote-sandboxes.md) owns the operator guide and security posture.
 
 The first line holds the provider command's absolute path, then `key=value` lines configure the adapter:
 
@@ -547,12 +547,15 @@ The first line holds the provider command's absolute path, then `key=value` line
 | `/absolute/path/to/provider` | The provider command `bin/fm-sandbox.sh` invokes, argv only. |
 | `default_profile=<name>` | Network profile used when `create` omits `--profile`; `open` is refused as a default and requires explicit per-task `--profile open`. |
 | `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
-| `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into. |
+| `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into; whitespace is refused. |
 
 All three keys are required; unknown or duplicate keys, a relative provider path or `ssh_include`, and a malformed duration are refused with the concrete problem named.
-Blank lines and `#` comments are accepted.
+Blank lines and `#` comments are accepted after the first line.
+The provider path may contain spaces and must name an executable file.
+`default_profile` must be a non-empty printable token without whitespace, `=`, or a leading `-`.
+The adapter validates `ssh_include` but does not write it, pass it to the provider, or install an SSH `Include` directive; configure the provider and SSH client consistently with that path.
 
-`bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its header owns the verb, output, and exit contracts the provider must satisfy, including space-separated `key=value` fields framed as one record per line, the closed key set, state-dependent ownership-label requirements for status and retained list records, and the dedicated capacity-refusal exit status.
+`bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its [header](../bin/fm-sandbox.sh) owns the verb, record framing, ownership-label validation, and exit contracts the provider must satisfy.
 Firstmate never holds the provider's API token and never calls the provider's API.
 
 Configuring a provider does not by itself place any task in a sandbox.

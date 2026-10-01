@@ -2,8 +2,8 @@
 # fm-sandbox.sh - the provider-neutral SANDBOX ADAPTER: the only Firstmate code
 # that invokes a sandbox provider. It translates Firstmate's per-task sandbox
 # lifecycle onto one external provider command with argv only, never a shell
-# string, and validates everything the provider reports before any of it
-# reaches Firstmate. The provider owns the infrastructure (VMs, labels, the
+# string, and validates lifecycle records before they reach Firstmate
+# (exec output is relayed verbatim). The provider owns the infrastructure (VMs, labels, the
 # firewall, SSH wiring, reaping); Firstmate owns the lifecycle decisions.
 # Firstmate never holds the provider's API token and never calls the
 # provider's API: every effect and every observation flows through this
@@ -26,20 +26,11 @@
 # DEFAULT-OFF AND CONFIGURATION (config/sandbox-provider, local and
 # gitignored; FM_HOME selects the home, FM_CONFIG_OVERRIDE redirects
 # config/). With no config file every verb except --help refuses with exit 3
-# and changes nothing else. The file holds:
-#   line 1: the provider command's ABSOLUTE path (it may contain spaces; it
-#           is always executed as one argv element, never through a shell)
-#   then key=value lines, blank lines, and #-comments, with all three keys
-#   required and unknown or duplicate keys refused:
-#     default_profile=<name>  profile used when create omits --profile
-#     ttl=<duration>          default duration for create and extend: one
-#                             integer plus one unit of s, m, h, d, or w
-#     ssh_include=<path>      ABSOLUTE path of the provider-managed SSH
-#                             config include that sandbox aliases are
-#                             written into, no whitespace
+# and changes nothing else. docs/configuration.md, "Sandbox provider",
+# owns the file format, required keys, and default-profile restrictions.
 #
 # HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
-# sharing one provider namespace never see or destroy each other's sandboxes.
+# sharing one provider namespace have separate list and destroy scopes.
 # The tag comes from fm_home_hometag (bin/fm-backend-hometag-lib.sh),
 # derived from the resolved operational FM_HOME path.
 #
@@ -90,7 +81,8 @@
 # command's stdout and exit status verbatim and this script passes both
 # through untouched, including non-zero statuses.
 #
-# EXIT STATUSES:
+# EXIT STATUSES (exec relays the provider status unchanged after local
+# validation, as described above):
 #   0  success (create/status/list/policy print validated key=value lines)
 #   2  usage error: unknown verb, missing or malformed arguments, or a
 #      name, task id, label, or profile that is not a safe single token

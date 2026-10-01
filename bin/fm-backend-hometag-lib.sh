@@ -51,6 +51,10 @@ fm_backend_hometag() {
   printf '%s-%s' "$prefix" "$hash"
 }
 
+# fm_home_hometag() uses the resolved operational FM_HOME instead of the
+# code root, so homes sharing one checkout have separate sandbox ownership.
+# Resolving the home must succeed; relocation changes the tag. The subshell
+# leaves the caller's FM_ROOT and existing backend-tag behavior unchanged.
 fm_home_hometag() (
   FM_ROOT=$(cd "$FM_HOME" && pwd -P) || return 1
   fm_backend_hometag
