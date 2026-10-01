@@ -1,0 +1,2 @@
+ok - a caller capturing the ensure's output returned promptly
+ok - the ensure started the isolated session's server
