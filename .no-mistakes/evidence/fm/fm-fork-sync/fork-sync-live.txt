@@ -1,0 +1,459 @@
+$ git ls-remote https://github.com/dscott98/firstmate.git refs/heads/main
+22534f7857ad75e2b8b474d6ac6571fd5d580616	refs/heads/main
+exit=0
+$ git ls-remote https://github.com/kunchenguid/firstmate.git refs/heads/main
+8f756bbc287c5bdfacc64a7cc09e8516c64fc919	refs/heads/main
+exit=0
+$ git merge-base --is-ancestor 8f756bbc287c5bdfacc64a7cc09e8516c64fc919 77b87efb050c2bcd9904aecc49153311a6b28961
+exit=0
+$ git merge-base --is-ancestor 22534f7857ad75e2b8b474d6ac6571fd5d580616 77b87efb050c2bcd9904aecc49153311a6b28961
+exit=0
+$ git remote get-url --push --all origin
+https://github.com/dscott98/firstmate.git
+exit=0
+$ git bundle create /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3W9CMQ1R2W9DRAK32K4F14H/.fork-sync-test-vhr878df/source.bundle HEAD
+exit=0
+$ git clone --quiet /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3W9CMQ1R2W9DRAK32K4F14H/.fork-sync-test-vhr878df/source.bundle /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3W9CMQ1R2W9DRAK32K4F14H/.fork-sync-test-vhr878df/install
+Note: switching to '77b87efb050c2bcd9904aecc49153311a6b28961'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+exit=0
+$ git remote set-url origin https://github.com/dscott98/firstmate.git
+exit=0
+$ git switch -C main 22534f7857ad75e2b8b474d6ac6571fd5d580616
+Warning: you are leaving 134 commits behind, not connected to
+any of your branches:
+
+  77b87ef Merge upstream main into fork (2026-10-01 sync)
+  8f756bb fix(bin): recognize clone roots across path spelling differences (#6306)
+  b5d9061 fix(bin): document accepted contribution verdict actors (#6307)
+  f593060 fix(bin): exclude a remote mate's own parent channel from self-home status scans (#5263)
+ ... and 130 more.
+
+If you want to keep them by creating a new branch, this may be a good time
+to do so with:
+
+ git branch <new-branch-name> 77b87ef
+
+Switched to a new branch 'main'
+exit=0
+$ git merge --ff-only --stat 77b87efb050c2bcd9904aecc49153311a6b28961
+Updating 22534f7..77b87ef
+Fast-forward
+ .agents/skills/afk/SKILL.md                        |   58 +-
+ .agents/skills/agent-skill-trigger-index/SKILL.md  |   28 +
+ .agents/skills/ahoy/SKILL.md                       |    3 +-
+ .agents/skills/away-quiet-supervision/SKILL.md     |   24 +
+ .agents/skills/bootstrap-diagnostics/SKILL.md      |    3 +-
+ .agents/skills/captain-hold-lifecycle/SKILL.md     |    3 +-
+ .agents/skills/firstmate-codexapp/SKILL.md         |    2 +-
+ .../skills/firstmate-coding-guidelines/SKILL.md    |    7 +-
+ .agents/skills/fmx-respond/SKILL.md                |   15 +
+ .../references/common/control-and-recovery.md      |    7 +-
+ .../references/common/primary-hooks.md             |    2 +-
+ .../harness-adapters/references/harness/claude.md  |   11 +-
+ .../harness-adapters/references/harness/codex.md   |    1 +
+ .../harness-adapters/references/harness/cursor.md  |    2 +
+ .../harness-adapters/references/harness/devin.md   |    2 +-
+ .../harness-adapters/references/harness/grok.md    |   31 +-
+ .../harness-adapters/references/harness/omp.md     |    2 +-
+ .../references/harness/opencode.md                 |    3 +-
+ .../harness-adapters/references/harness/pi.md      |    5 +-
+ .agents/skills/operational-home-layout/SKILL.md    |  123 +
+ .agents/skills/process-event-sources/SKILL.md      |   12 +-
+ .agents/skills/project-management/SKILL.md         |   11 +-
+ .agents/skills/quiet/SKILL.md                      |   48 +-
+ .agents/skills/scout-completion/SKILL.md           |   16 +
+ .agents/skills/secondmate-provisioning/SKILL.md    |    9 +-
+ .agents/skills/session-start-recovery/SKILL.md     |   43 +
+ .agents/skills/ship-landing/SKILL.md               |   30 +
+ .agents/skills/stow/SKILL.md                       |   10 +-
+ .agents/skills/validation-supervision/SKILL.md     |   32 +
+ .../mods/firstmate-calm/.claude-plugin/plugin.json |    2 +-
+ .claude/mods/firstmate-calm/hooks/register.ts      |  227 +-
+ .claude/mods/firstmate-calm/lib/fm-branch-notes.ts |  166 ++
+ .../firstmate-calm/lib/fm-calm-presentation.ts     |   23 +-
+ .../firstmate-calm/lib/fm-operational-input.ts     |   34 +
+ .../mods/firstmate-calm/tests/branch-notes.test.ts |  175 ++
+ .claude/mods/firstmate-calm/tests/calm.test.ts     |   51 +-
+ .claude/mods/firstmate-calm/tests/support.ts       |   37 +-
+ .claude/settings.json                              |   16 +
+ .cursor/hooks.json                                 |   14 +
+ .github/workflows/ci.yml                           |   24 +-
+ .no-mistakes.yaml                                  |    6 +-
+ .omp/extensions/fm-primary-omp-watch.ts            |   93 +-
+ .opencode/plugins/fm-primary-watch-arm.js          |   86 +-
+ .pi/extensions/fm-branch-supervision.ts            |  135 +-
+ .pi/extensions/fm-calm.ts                          |   14 +-
+ .pi/extensions/fm-primary-pi-watch.ts              |   45 +-
+ .pi/extensions/lib/fm-branch-dispatch.ts           |  321 ++-
+ .../lib/fm-calm-operational-user-layout.ts         |   11 +-
+ .../lib/fm-calm-pending-operational-layout.ts      |  310 +++
+ .pi/extensions/lib/fm-operational-input.ts         |   16 +
+ AGENTS.md                                          |  347 +--
+ README.md                                          |   12 +-
+ bin/backends/herdr.sh                              |  240 +-
+ bin/fm-afk-contract.sh                             |  130 +-
+ bin/fm-afk-launch.sh                               |  242 +-
+ bin/fm-afk-return.sh                               |  197 +-
+ bin/fm-afk-start.sh                                |    3 +-
+ bin/fm-agent-process-lib.sh                        |    7 +-
+ bin/fm-arm-command-policy.mjs                      |   15 +-
+ bin/fm-backend.sh                                  |   42 +-
+ bin/fm-backlog-transition-lib.sh                   |  114 +-
+ bin/fm-bearings-snapshot.sh                        |   15 +-
+ bin/fm-bootstrap.sh                                |  187 +-
+ bin/fm-branch-dispatch.mjs                         |  131 +
+ bin/fm-branch-outcome.sh                           |  258 +-
+ bin/fm-branch-prompt.sh                            |   33 +-
+ bin/fm-branch-report.sh                            |  153 ++
+ bin/fm-brief-heading-lib.sh                        |   94 +
+ bin/fm-brief.sh                                    |  264 +-
+ bin/fm-captain-hold.sh                             |    7 +-
+ bin/fm-classify-lib.sh                             |  352 ++-
+ bin/fm-claude-stop-autoarm.sh                      |  216 +-
+ bin/fm-claude-trust.sh                             |   53 +-
+ bin/fm-composer-lib.sh                             |   33 +-
+ bin/fm-config-inherit-lib.sh                       |  145 +-
+ bin/fm-contributions.sh                            |  113 +-
+ bin/fm-control-lib.sh                              |   50 +-
+ bin/fm-control.sh                                  |   13 +
+ bin/fm-crew-state.sh                               |   94 +-
+ bin/fm-devin-config.sh                             |   13 +-
+ bin/fm-dispatch-resolve.sh                         |  161 +-
+ bin/fm-dod-lib.sh                                  |  470 +++-
+ bin/fm-ensure-agents-md.sh                         |    8 +-
+ bin/fm-ff-lib.sh                                   |   16 +
+ bin/fm-fleet-snapshot.sh                           |    3 +
+ bin/fm-fleet-sync.sh                               |   17 +-
+ bin/fm-forge-detect.sh                             |   63 +
+ bin/fm-gate-refuse-lib.sh                          |  106 +-
+ bin/fm-git-strip-ai-trailers.sh                    |  265 ++
+ bin/fm-guard.sh                                    |   15 +-
+ bin/fm-harness.sh                                  |   34 +-
+ bin/fm-herdr-lab.sh                                |   14 +-
+ bin/fm-home-seed.sh                                |   33 +-
+ bin/fm-host-mirror.sh                              |  319 +++
+ bin/fm-inactive-reconcile.sh                       |   18 +-
+ bin/fm-jev-mem-guard.py                            |  260 ++
+ bin/fm-jev-mem-guard.sh                            |    7 +
+ bin/fm-lab-home.sh                                 |  107 +
+ bin/fm-lease-lib.sh                                |  132 +-
+ bin/fm-lint.sh                                     |  498 +++-
+ bin/fm-live-lab.sh                                 |  869 +++++++
+ bin/fm-merge-authority-lib.sh                      |   18 +-
+ bin/fm-merge-local.sh                              |   10 +-
+ bin/fm-nm-run-lib.sh                               |   30 +-
+ bin/fm-operational-input.sh                        |  184 +-
+ bin/fm-parent-channel-lib.sh                       |   24 +-
+ bin/fm-path-lib.sh                                 |   39 +
+ bin/fm-pending-reply-lib.sh                        |  145 +-
+ bin/fm-pr-check.sh                                 |   50 +-
+ bin/fm-pr-lib.sh                                   |  171 +-
+ bin/fm-pr-merge.sh                                 |  301 ++-
+ bin/fm-pr-poll.sh                                  |   74 +-
+ bin/fm-primary-scope-lib.sh                        |   21 +-
+ bin/fm-procevent-lavish.sh                         |  101 +-
+ bin/fm-procevent-lib.sh                            |   42 +
+ bin/fm-procevent-remote-reply.sh                   |   21 +-
+ bin/fm-procevent.sh                                |  290 ++-
+ bin/fm-project-mode.sh                             |  215 +-
+ bin/fm-promote.sh                                  |   84 +-
+ bin/fm-push-transition-lib.sh                      |   12 +-
+ bin/fm-quota-axi-lib.sh                            |   13 +-
+ bin/fm-remote-delta-read.sh                        |    7 +-
+ bin/fm-remote-home-provision.sh                    |   32 +-
+ bin/fm-remote-home-seed.sh                         |    6 +-
+ bin/fm-remote-inherit-push.sh                      |   15 +-
+ bin/fm-remote-inherit.sh                           |   19 +-
+ bin/fm-remote-job-lib.sh                           |   21 +-
+ bin/fm-remote-job-worker.sh                        |  193 +-
+ bin/fm-remote-secondmate-control.sh                |   17 +-
+ bin/fm-remote-secondmate-relaunch.sh               |   95 +
+ bin/fm-review-diff.sh                              |   31 +-
+ bin/fm-secondmate-liveness-lib.sh                  |  305 +++
+ bin/fm-secondmate-restart.sh                       |   17 +-
+ bin/fm-send.sh                                     |   21 +-
+ bin/fm-session-lock-lib.sh                         |    5 +-
+ bin/fm-session-start.sh                            |  102 +-
+ bin/fm-sessionstart-run.sh                         |   10 +
+ bin/fm-spawn.sh                                    |  552 +++-
+ bin/fm-startup-network.sh                          |  190 +-
+ bin/fm-supervise-daemon.sh                         |  330 ++-
+ bin/fm-supervision-engine-lib.sh                   |  458 ++++
+ bin/fm-supervision-host.sh                         | 1135 +++++++++
+ bin/fm-supervision-instructions.sh                 |   49 +-
+ bin/fm-task-inbox-lib.sh                           |   80 +-
+ bin/fm-tasks-axi.sh                                |   13 +
+ bin/fm-teardown.sh                                 |  163 +-
+ bin/fm-test-run.sh                                 |  549 ++--
+ bin/fm-timeout-lib.sh                              |  162 +-
+ bin/fm-tmux-lib.sh                                 |   19 +-
+ bin/fm-tool-update-check.sh                        |   21 +-
+ bin/fm-turnend-guard-cursor.sh                     |   57 +-
+ bin/fm-wake-drain.sh                               |  253 +-
+ bin/fm-wake-lib.sh                                 |  275 +-
+ bin/fm-watch-arm.sh                                |  166 +-
+ bin/fm-watch-checkpoint.sh                         |   86 +-
+ bin/fm-watch.sh                                    |  362 ++-
+ bin/fm-worker-account-lib.sh                       |  281 ++
+ bin/fm-x-dismiss.sh                                |    8 +-
+ bin/fm-x-followup.sh                               |   48 +-
+ bin/fm-x-reply.sh                                  |   55 +-
+ bin/fm_voice_records.py                            |   39 +-
+ docs/agent-control.md                              |   18 +-
+ docs/architecture.md                               |   91 +-
+ docs/arm-pretool-check.md                          |    3 +
+ docs/calm-mode-feasibility.md                      |  160 +-
+ docs/calm.md                                       |  315 ++-
+ docs/captain-hold-lifecycle.md                     |  589 ++++-
+ docs/configuration.md                              | 1841 +++++++++++---
+ docs/documentation-audiences.json                  |   48 +
+ docs/fm-test-portable-shards.md                    |   67 +-
+ docs/gerrit-change-watch.md                        |  133 +
+ docs/gerrit-forge-integration.md                   |  355 +++
+ docs/gitlab-merge-watch.md                         |    2 +-
+ docs/herdr-backend.md                              |  711 +++++-
+ docs/jev-guards.md                                 |   33 +
+ docs/pi-supervision-branch.md                      |  767 +++++-
+ docs/remote-secondmates.md                         |  649 ++++-
+ docs/scripts.md                                    |   30 +-
+ docs/secondmate-parent-channel.md                  |    5 +-
+ docs/sessionstart-nudge.md                         |  470 +++-
+ docs/supervision-host.md                           |  419 +++
+ docs/supervision-protocols/claude.md               |    2 +-
+ docs/supervision-protocols/cursor.md               |    2 +-
+ docs/supervision-protocols/grok.md                 |    6 +-
+ docs/supervision-protocols/omp.md                  |    2 +-
+ docs/supervision-protocols/pi.md                   |    9 +-
+ docs/supervision-protocols/supervision-host.md     |   31 +
+ docs/turnend-guard.md                              |  580 ++++-
+ docs/verification/dispatch-resolve.md              |   48 +-
+ docs/verification/process-event-sources.md         |   37 +-
+ docs/verification/runtime-backends.md              |  159 +-
+ docs/verification/supervision.md                   |  206 +-
+ docs/watcher-continuity.md                         |  525 +++-
+ tests/fm-afk-contract.test.sh                      |   64 +
+ tests/fm-afk-inject-e2e.test.sh                    |   42 +-
+ tests/fm-afk-inject-herdr-e2e.test.sh              |    5 +
+ tests/fm-afk-launch.test.sh                        |  509 +++-
+ tests/fm-afk-return.test.sh                        |  503 +++-
+ tests/fm-arm-pretool-check.test.sh                 |    9 +
+ ...fm-backend-herdr-launcher-workspace-e2e.test.sh |    4 +
+ ...fm-backend-herdr-workspace-per-home-e2e.test.sh |    4 +
+ tests/fm-backend-herdr.test.sh                     |  561 +++-
+ tests/fm-backend-orca.test.sh                      |    3 +-
+ tests/fm-backend.test.sh                           |   21 +-
+ tests/fm-backlog-atomicity.test.sh                 |   69 +-
+ tests/fm-backlog-read-bound.test.sh                |    2 +-
+ tests/fm-bearings-board-render.test.sh             |    2 +-
+ tests/fm-bearings-board.test.sh                    |   37 +-
+ tests/fm-bearings-snapshot.test.sh                 |   41 +
+ tests/fm-bootstrap-network-parallel.test.sh        |   78 +
+ tests/fm-bootstrap.test.sh                         |   19 +-
+ tests/fm-branch-supervision.test.sh                |  510 +++-
+ tests/fm-brief.test.sh                             |  353 ++-
+ tests/fm-calm-claude-mod-live-e2e.test.sh          |  135 +-
+ tests/fm-calm-claude-mod-plugin.test.sh            |    7 +-
+ tests/fm-calm-claude-mod.test.sh                   |  203 +-
+ tests/fm-calm-pi-extension.test.sh                 |  614 ++++-
+ tests/fm-calm-pi-queue-retention-live-e2e.test.sh  |  153 ++
+ tests/fm-captain-hold-lifecycle.test.sh            |  112 +
+ tests/fm-classify-corr-token.test.sh               |    8 +-
+ tests/fm-classify-decision-key.test.sh             |   77 +
+ tests/fm-claude-stop-autoarm.test.sh               |  499 +++-
+ tests/fm-claude-trust.test.sh                      |   43 +-
+ tests/fm-composer-lib.test.sh                      |   52 +
+ tests/fm-contributions.test.sh                     |  294 ++-
+ tests/fm-control-relaunch.test.sh                  |  154 +-
+ tests/fm-control.test.sh                           |   40 +-
+ tests/fm-crew-state.test.sh                        |  373 ++-
+ tests/fm-cursor-primary.test.sh                    |  123 +-
+ tests/fm-daemon.test.sh                            |  392 ++-
+ tests/fm-devin-harness.test.sh                     |   14 +
+ tests/fm-dispatch-resolve.test.sh                  |  245 +-
+ tests/fm-dod-lib.test.sh                           |   81 +
+ tests/fm-extension-binding.test.sh                 |   75 +-
+ tests/fm-fleet-sync.test.sh                        |   59 +-
+ tests/fm-forge-detect.test.sh                      |   95 +
+ tests/fm-fork-free-helpers.test.sh                 |  237 ++
+ tests/fm-gate-refuse.test.sh                       |  181 ++
+ tests/fm-git-strip-ai-trailers.test.sh             |  376 +++
+ tests/fm-gotmp.test.sh                             |   11 +-
+ tests/fm-guard-stale-banner.test.sh                |   33 +
+ tests/fm-harness-precedence.test.sh                |   86 +-
+ tests/fm-herdr-lab.test.sh                         |   39 +-
+ tests/fm-herdr-submit-confirm-live-e2e.test.sh     |   99 +-
+ tests/fm-host-mirror-live-e2e.test.sh              |  178 ++
+ tests/fm-host-mirror.test.sh                       |  477 ++++
+ tests/fm-inactive-reconcile.test.sh                |   76 +
+ tests/fm-inbox.test.sh                             |    1 +
+ tests/fm-jev-mem-guard.test.sh                     |  101 +
+ tests/fm-kimi-harness.test.sh                      |   22 +-
+ tests/fm-lint.test.sh                              |  484 +++-
+ tests/fm-live-gate.test.sh                         |  115 +-
+ tests/fm-live-lab-up-mate.test.sh                  |   69 +
+ tests/fm-live-lab.test.sh                          |  764 ++++++
+ tests/fm-mail-check.test.sh                        |    1 +
+ tests/fm-omp-harness.test.sh                       |  293 ++-
+ tests/fm-operational-input.test.sh                 |   98 +
+ tests/fm-parent-channel-scan-exclusion.test.sh     |  414 +++
+ tests/fm-pending-reply.test.sh                     |  405 ++-
+ tests/fm-pi-branch-extension.test.sh               |  581 ++++-
+ tests/fm-pi-codex-native.test.sh                   |    2 +-
+ tests/fm-pi-primary-live-e2e.test.sh               |    1 +
+ tests/fm-pi-primary-types.test.sh                  |    1 +
+ tests/fm-pi-watch-extension.test.sh                |   94 +
+ tests/fm-pr-check-security.test.sh                 |  580 ++++-
+ tests/fm-pr-merge.test.sh                          |  642 ++++-
+ tests/fm-procevent.test.sh                         |  702 ++++-
+ tests/fm-quota-choose.test.sh                      |   34 +
+ tests/fm-remote-backlog-handoff.test.sh            |    2 +-
+ tests/fm-remote-job.test.sh                        |  539 ++++
+ tests/fm-remote-reply.test.sh                      |  245 +-
+ tests/fm-remote-secondmate-lifecycle-e2e.test.sh   |  321 ++-
+ tests/fm-remote-secondmate-relaunch.test.sh        |  192 ++
+ tests/fm-remote-transport-lanes.test.sh            |    2 +-
+ tests/fm-review-diff.test.sh                       |   49 +
+ tests/fm-secondmate-harness.test.sh                |  100 +-
+ tests/fm-secondmate-lifecycle-e2e.test.sh          |    8 +
+ tests/fm-secondmate-liveness.test.sh               |  166 +-
+ tests/fm-secondmate-reconcile.test.sh              |    1 +
+ tests/fm-secondmate-restart.test.sh                |   12 +-
+ tests/fm-secondmate-safety.test.sh                 |   64 +-
+ tests/fm-secondmate-sync.test.sh                   |    2 +-
+ tests/fm-send-inbox-doorbell-live-e2e.test.sh      |   21 +-
+ tests/fm-send-inbox.test.sh                        |  100 +-
+ tests/fm-session-lock-ancestry.test.sh             |   22 +-
+ tests/fm-session-start.test.sh                     |  348 ++-
+ tests/fm-sessionstart-nudge.test.sh                |   48 +
+ tests/fm-shared-captain-inheritance.test.sh        |  212 +-
+ tests/fm-spawn-compact-adviser-disable.test.sh     |   44 +-
+ tests/fm-spawn-dispatch-profile.test.sh            |  397 ++-
+ tests/fm-spawn-orca-worktree.test.sh               |  170 ++
+ tests/fm-spawn-worktree-settle.test.sh             |    2 +-
+ tests/fm-startup-memory-budget.test.sh             |    4 +-
+ tests/fm-startup-network.test.sh                   |  101 +
+ .../fm-supervision-host-attended-live-e2e.test.sh  |  443 ++++
+ tests/fm-supervision-host-live-e2e.test.sh         |  140 +
+ tests/fm-supervision-host.test.sh                  | 2689 ++++++++++++++++++++
+ tests/fm-supervision-instructions.test.sh          |   88 +
+ tests/fm-task-delivery.test.sh                     |  746 +++++-
+ tests/fm-task-inbox.test.sh                        |  214 +-
+ tests/fm-tasks-axi.test.sh                         |   24 +
+ tests/fm-teardown-endpoint-safety.test.sh          |   55 +
+ tests/fm-teardown.test.sh                          |  417 +++
+ tests/fm-test-run.test.sh                          |  100 +-
+ tests/fm-timeout-lib.test.sh                       |  344 +++
+ tests/fm-tool-update-check.test.sh                 |   52 +
+ tests/fm-trace-context-spawn.test.sh               |    3 +
+ tests/fm-turnend-guard.test.sh                     |   12 +-
+ tests/fm-voice-relay.test.sh                       |   44 +
+ tests/fm-wake-drain-outcome-backstop.test.sh       |    8 +
+ tests/fm-wake-drain-unread-status.test.sh          |    8 +
+ tests/fm-wake-queue.test.sh                        |  992 +++++++-
+ tests/fm-watch-arm.test.sh                         |  408 ++-
+ tests/fm-watch-checkpoint.test.sh                  |  119 +
+ tests/fm-watch-triage.test.sh                      |  528 +++-
+ tests/fm-watcher-lock.test.sh                      |  393 +++
+ tests/fm-worker-account-live-e2e.test.sh           |  132 +
+ tests/fm-worker-account.test.sh                    |  401 +++
+ tests/fm-x-mode.test.sh                            |  179 +-
+ tests/lib.sh                                       |  151 +-
+ tests/wake-helpers.sh                              |    9 +
+ 321 files changed, 47360 insertions(+), 4134 deletions(-)
+ create mode 100644 .agents/skills/agent-skill-trigger-index/SKILL.md
+ create mode 100644 .agents/skills/away-quiet-supervision/SKILL.md
+ create mode 100644 .agents/skills/operational-home-layout/SKILL.md
+ create mode 100644 .agents/skills/scout-completion/SKILL.md
+ create mode 100644 .agents/skills/session-start-recovery/SKILL.md
+ create mode 100644 .agents/skills/ship-landing/SKILL.md
+ create mode 100644 .agents/skills/validation-supervision/SKILL.md
+ create mode 100644 .claude/mods/firstmate-calm/lib/fm-branch-notes.ts
+ create mode 100644 .claude/mods/firstmate-calm/tests/branch-notes.test.ts
+ create mode 100644 .pi/extensions/lib/fm-calm-pending-operational-layout.ts
+ create mode 100755 bin/fm-branch-dispatch.mjs
+ create mode 100755 bin/fm-branch-report.sh
+ create mode 100644 bin/fm-brief-heading-lib.sh
+ create mode 100755 bin/fm-forge-detect.sh
+ create mode 100755 bin/fm-git-strip-ai-trailers.sh
+ create mode 100755 bin/fm-host-mirror.sh
+ create mode 100755 bin/fm-jev-mem-guard.py
+ create mode 100755 bin/fm-jev-mem-guard.sh
+ create mode 100755 bin/fm-lab-home.sh
+ create mode 100755 bin/fm-live-lab.sh
+ create mode 100644 bin/fm-path-lib.sh
+ create mode 100755 bin/fm-remote-secondmate-relaunch.sh
+ create mode 100644 bin/fm-secondmate-liveness-lib.sh
+ create mode 100644 bin/fm-supervision-engine-lib.sh
+ create mode 100755 bin/fm-supervision-host.sh
+ create mode 100644 bin/fm-worker-account-lib.sh
+ create mode 100644 docs/gerrit-change-watch.md
+ create mode 100644 docs/gerrit-forge-integration.md
+ create mode 100644 docs/jev-guards.md
+ create mode 100644 docs/supervision-host.md
+ create mode 100644 docs/supervision-protocols/supervision-host.md
+ create mode 100755 tests/fm-calm-pi-queue-retention-live-e2e.test.sh
+ create mode 100755 tests/fm-forge-detect.test.sh
+ create mode 100755 tests/fm-fork-free-helpers.test.sh
+ create mode 100644 tests/fm-git-strip-ai-trailers.test.sh
+ create mode 100755 tests/fm-host-mirror-live-e2e.test.sh
+ create mode 100755 tests/fm-host-mirror.test.sh
+ create mode 100755 tests/fm-jev-mem-guard.test.sh
+ create mode 100644 tests/fm-live-lab-up-mate.test.sh
+ create mode 100755 tests/fm-live-lab.test.sh
+ create mode 100755 tests/fm-parent-channel-scan-exclusion.test.sh
+ create mode 100755 tests/fm-remote-secondmate-relaunch.test.sh
+ create mode 100755 tests/fm-spawn-orca-worktree.test.sh
+ create mode 100755 tests/fm-supervision-host-attended-live-e2e.test.sh
+ create mode 100755 tests/fm-supervision-host-live-e2e.test.sh
+ create mode 100755 tests/fm-supervision-host.test.sh
+ create mode 100755 tests/fm-timeout-lib.test.sh
+ create mode 100755 tests/fm-worker-account-live-e2e.test.sh
+ create mode 100755 tests/fm-worker-account.test.sh
+exit=0
+$ git rev-parse HEAD
+77b87efb050c2bcd9904aecc49153311a6b28961
+exit=0
+$ git merge-base --is-ancestor 22534f7857ad75e2b8b474d6ac6571fd5d580616 HEAD
+exit=0
+$ git merge-base --is-ancestor 8f756bbc287c5bdfacc64a7cc09e8516c64fc919 HEAD
+exit=0
+PASS: fork main fast-forwards to candidate retaining fork and upstream histories.
+$ git fetch https://github.com/kunchenguid/firstmate.git refs/heads/main:refs/remotes/upstream/main
+From https://github.com/kunchenguid/firstmate
+ * [new branch]      main       -> upstream/main
+exit=0
+$ git remote get-url --push --all origin
+https://github.com/dscott98/firstmate.git
+exit=0
+$ git remote
+origin
+exit=0
+$ git merge-base --is-ancestor refs/remotes/upstream/main HEAD
+exit=0
+PASS: documented upstream fetch works without adding an upstream push remote.
+$ git merge --ff-only refs/remotes/upstream/main
+Already up to date.
+exit=0
+$ git rev-parse HEAD
+77b87efb050c2bcd9904aecc49153311a6b28961
+exit=0
+$ git status --porcelain
+exit=0
+PASS: repeat upstream integration leaves merged fork commit and clean files intact.
+Removed isolated installation and bundle. No remote writes performed.
