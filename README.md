@@ -81,9 +81,11 @@ Launch it with `--trust`, or none of its project hooks load; it also has no turn
 
 ```sh
 gh auth login
-git clone https://github.com/kunchenguid/firstmate
+git clone https://github.com/dscott98/firstmate
 cd firstmate
 ```
+
+For subsequent upstream updates, follow [Keeping the fork current](CONTRIBUTING.md#keeping-the-fork-current).
 
 Then launch one of the co-primary harnesses; AGENTS.md takes over from there:
 
