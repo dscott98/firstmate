@@ -35,7 +35,22 @@ TOOLS="$TMP_ROOT/tools"
 mkdir -p "$TOOLS"
 ln -sf "$(command -v git)" "$TOOLS/git"
 ln -sf "$(command -v jq)" "$TOOLS/jq"
-BASE_PATH="$TOOLS:/usr/bin:/bin:/usr/sbin:/sbin"
+# Keep system-installed required tools and harnesses out of missing-tool cases.
+# They must not suppress the fixture's wrapper repair or missing-tool reports.
+SYSTEM_TOOLS="$TMP_ROOT/system-tools"
+mkdir -p "$SYSTEM_TOOLS"
+for system_dir in /usr/bin /bin /usr/sbin /sbin; do
+  for system_tool in "$system_dir"/*; do
+    tool_name=${system_tool##*/}
+    case "$tool_name" in
+      herdr|tasks-axi|treehouse|claude|codex|opencode|pi|pi-signed|grok|kimi) continue ;;
+    esac
+    [ -x "$system_tool" ] && [ ! -d "$system_tool" ] || continue
+    [ ! -e "$SYSTEM_TOOLS/$tool_name" ] || continue
+    ln -s "$system_tool" "$SYSTEM_TOOLS/$tool_name"
+  done
+done
+BASE_PATH="$TOOLS:$SYSTEM_TOOLS"
 
 # Real socket-owner holders for the Darwin birth check: jq blocked on a fifo
 # this test keeps open, with exactly the marker environment each birth needs.
