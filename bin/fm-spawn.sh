@@ -1178,7 +1178,7 @@ spawn_remote_secondmate() {
   fm_lock_release "$SPAWN_TASK_LOCK" || true
   # The endpoint exists and is recorded, so make the remote host visible in
   # this machine's local Herdr as a saved machine. Best-effort and idempotent:
-  # it never fails the launch and never rewrites an existing save
+  # it never fails the launch
   # (bin/fm-herdr-machine-lib.sh owns the contract).
   fm_herdr_machine_saved_ensure "$host" "$remote_herdr_session"
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true

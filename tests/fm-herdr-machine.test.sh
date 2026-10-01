@@ -42,7 +42,17 @@ case "${1:-} ${2:-}" in
       cat "${FM_FAKE_HERDR_ADD_REFUSE}" >&2
       exit 1
     fi
+    jq --arg a "$7" --arg s "$6" \
+      '. + [{id: "added", label: $a, target: $a, session: $s, enabled: true}]' \
+      "$FM_FAKE_HERDR_MACHINES" > "$FM_FAKE_HERDR_MACHINES.tmp"
+    mv "$FM_FAKE_HERDR_MACHINES.tmp" "$FM_FAKE_HERDR_MACHINES"
     printf 'machine saved\n'
+    exit 0
+    ;;
+  "machine remove")
+    [ ! -s "${FM_FAKE_HERDR_ADD_REFUSE}.remove" ] || exit 1
+    jq --arg id "$3" 'map(select(.id != $id))' "$FM_FAKE_HERDR_MACHINES" > "$FM_FAKE_HERDR_MACHINES.tmp"
+    mv "$FM_FAKE_HERDR_MACHINES.tmp" "$FM_FAKE_HERDR_MACHINES"
     exit 0
     ;;
 esac
@@ -59,6 +69,10 @@ make_world() {
   mkdir -p "$w/home/state" "$w/fakebin"
   if [ "$no_herdr" = no-herdr ]; then
     ln -sf "$(command -v jq)" "$w/fakebin/jq"
+    ln -sf "$(command -v bash)" "$w/fakebin/bash"
+    ln -sf "$(command -v dirname)" "$w/fakebin/dirname"
+    ln -sf "$(command -v sed)" "$w/fakebin/sed"
+    touch "$w/no-herdr"
   else
     make_herdr_fake "$w/fakebin"
   fi
@@ -72,13 +86,15 @@ make_world() {
 # on one line; the save itself always exits 0, so its outcome travels through
 # FM_HERDR_MACHINE_RESULT and its printed report.
 ensure() {
-  local w=$1 alias=$2 session=${3:-fm-remote}
+  local w=$1 alias=$2 session=${3:-fm-remote} test_path
+  test_path="$w/fakebin:/usr/bin:/bin"
+  [ ! -e "$w/no-herdr" ] || test_path="$w/fakebin"
   # shellcheck disable=SC2016 # positional params expand in the child shell.
   env STATE="$w/home/state" \
     FM_FAKE_HERDR_LOG="$w/herdr.log" \
     FM_FAKE_HERDR_MACHINES="$w/machines.json" \
     FM_FAKE_HERDR_ADD_REFUSE="$w/add-refuse" \
-    PATH="$w/fakebin:/usr/bin:/bin" \
+    PATH="$test_path" \
     bash -c '
       . "$1/bin/fm-herdr-machine-lib.sh"
       : > "$2/out"; : > "$2/err"
@@ -102,13 +118,14 @@ w=$(make_world present)
 cat > "$w/machines.json" <<'EOF'
 [
   {"id":"one","label":"captain-mac","target":"captain-mac","session":"fm-remote","enabled":true,"selected":false},
-  {"id":"two","label":"agent07","target":"agent07","session":"fm-remote","enabled":false,"selected":false}
+  {"id":"two","label":"agent07","target":"agent07","session":"fm-remote","enabled":true,"selected":false}
 ]
 EOF
 out=$(ensure "$w" agent07)
 [ "$out" = 'present||' ] || fail "an existing correct machine was not a silent no-op: $out"
-assert_no_grep 'machine add' "$w/herdr.log" "an existing correct machine was added again"
-pass "an existing machine for the alias is a silent no-op, even when disabled"
+[ "$(cat "$w/herdr.log")" = 'machine list --json' ] || fail "an existing correct machine was changed"
+[ ! -e "$w/home/state/.herdr-machine-agent07.json" ] || fail "an existing foreign machine gained ownership"
+pass "an enabled machine for the required session is a silent no-op"
 
 # --- an existing machine under another session is reported, never rewritten --
 
@@ -117,10 +134,54 @@ cat > "$w/machines.json" <<'EOF'
 [{"id":"one","label":"agent07","target":"agent07","session":"personal","enabled":true,"selected":false}]
 EOF
 out=$(ensure "$w" agent07)
-[ "$out" = 'mismatch_session||warning: saved herdr machine agent07 already points at session personal, expected fm-remote; left unchanged' ] \
+[ "$out" = 'mismatch||warning: saved herdr machine agent07 has {"session":"personal","enabled":true}, expected enabled session fm-remote; left unchanged; run: herdr machine remove one; herdr machine add --label agent07 --remote-session fm-remote agent07' ] \
   || fail "a foreign-session machine was not reported as left unchanged: $out"
 assert_no_grep 'machine add' "$w/herdr.log" "a foreign-session machine was rewritten"
 pass "a machine saved under another session is reported and never rewritten"
+assert_no_grep 'machine remove' "$w/herdr.log" "a foreign machine was removed"
+[ "$(wc -l < "$w/err")" -eq 1 ] || fail "foreign mismatch emitted multiple warning lines"
+
+w=$(make_world foreign-disabled)
+printf '[{"id":"foreign","target":"agent07","session":"fm-remote","enabled":false}]\n' > "$w/machines.json"
+out=$(ensure "$w" agent07)
+[ "$out" = 'mismatch||warning: saved herdr machine agent07 has {"session":"fm-remote","enabled":false}, expected enabled session fm-remote; left unchanged; run: herdr machine remove foreign; herdr machine add --label agent07 --remote-session fm-remote agent07' ] || fail "disabled foreign machine warning: $out"
+[ "$(cat "$w/herdr.log")" = 'machine list --json' ] || fail "disabled foreign machine was changed"
+pass "a disabled foreign machine is left untouched with repair commands"
+
+for change in disabled wrong-session; do
+  w=$(make_world "own-$change")
+  ensure "$w" agent07 >/dev/null
+  jq -e '.alias == "agent07" and .session == "fm-remote"' \
+    "$w/home/state/.herdr-machine-agent07.json" >/dev/null || fail "successful add did not record ownership"
+  if [ "$change" = disabled ]; then
+    jq '.[0].enabled = false' "$w/machines.json" > "$w/changed.json"
+  else
+    jq '.[0].session = "personal"' "$w/machines.json" > "$w/changed.json"
+  fi
+  mv "$w/changed.json" "$w/machines.json"
+  : > "$w/herdr.log"
+  out=$(ensure "$w" agent07)
+  [ "$out" = 'added|saved herdr machine agent07 (remote session fm-remote)|' ] || fail "own $change machine did not converge: $out"
+  [ "$(cat "$w/herdr.log")" = 'machine list --json
+machine remove added
+machine add --label agent07 --remote-session fm-remote agent07' ] || fail "own $change repair commands differed"
+  jq -e 'length == 1 and .[0].enabled == true and .[0].session == "fm-remote"' "$w/machines.json" >/dev/null || fail "own $change machine remains mismatched"
+  out=$(ensure "$w" agent07)
+  [ "$out" = 'present||' ] || fail "own $change repair was not idempotent: $out"
+  pass "an owned $change machine converges and stays idempotent"
+done
+
+w=$(make_world remove-failed)
+ensure "$w" agent07 >/dev/null
+jq '.[0].enabled = false' "$w/machines.json" > "$w/changed.json"
+mv "$w/changed.json" "$w/machines.json"
+printf 'refuse\n' > "$w/add-refuse.remove"
+: > "$w/herdr.log"
+out=$(ensure "$w" agent07)
+[[ "$out" == refused\|\|warning:* ]] || fail "failed removal was not best-effort: $out"
+assert_no_grep 'machine add' "$w/herdr.log" "failed removal still added a machine"
+pass "failed removal warns without adding or failing the caller"
+
 
 # --- a missing machine is added with the exact save command ------------------
 
@@ -148,6 +209,7 @@ printf 'error: remote server is not ready for saved machines\n' > "$w/add-refuse
 out=$(ensure "$w" agent07)
 [ "$out" = 'refused||warning: herdr machine agent07 was not saved: error: remote server is not ready for saved machines' ] \
   || fail "a refused add was not reported as a warning: $out"
+[ ! -e "$w/home/state/.herdr-machine-agent07.json" ] || fail "refused add claimed ownership"
 pass "a refused add reports the refusal and still succeeds"
 
 # --- an unreadable machine list is reported and adds nothing -----------------

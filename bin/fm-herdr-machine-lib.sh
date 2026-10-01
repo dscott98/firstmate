@@ -17,15 +17,6 @@
 #
 #   - With no local herdr (or no jq to parse its list output) it skips
 #     silently: a primary that does not run Herdr saves nothing.
-#   - It reads `herdr machine list --json` before touching anything. An entry
-#     whose target already names the alias is left completely alone, whatever
-#     its session, label, or enabled state: Firstmate never removes or rewrites
-#     a saved machine. A target already saved under a different session is
-#     reported, not rewritten.
-#   - Only when no entry targets the alias does it run
-#     `herdr machine add --label <alias> --remote-session <session> <alias>`,
-#     bounded by fm_run_timed so an unreachable host cannot stall a launch or a
-#     supervision tick.
 #   - A refused add (for example a remote server too old to serve saved
 #     machines) is reported as a warning and never fails the launch or probe
 #     around it; bin/fm-remote-doctor.sh owns reporting the host upgrade that
@@ -34,7 +25,7 @@
 # The per-alias lock serializes concurrent ensures for mates that share one
 # host; a busy lock skips quietly because its holder is performing this same
 # save. FM_HERDR_MACHINE_RESULT carries the last outcome (absent_herdr,
-# absent_jq, busy, present, mismatch_session, list_failed, added, refused) for
+# absent_jq, busy, present, mismatch, list_failed, added, refused, record_failed) for
 # callers and tests.
 
 FM_HERDR_MACHINE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -60,10 +51,10 @@ fm_herdr_machine_require_timeout() {
 # Best-effort and idempotent; always returns 0 so provisioning and liveness
 # never fail over a local visibility save. Reports one line on stdout when a
 # machine is added and one warning on stderr when a save is impossible or
-# refused; an existing entry and an absent local herdr stay silent.
+# refused; a correct entry and an absent local herdr stay silent.
 fm_herdr_machine_saved_ensure() { # <host-alias> [<session>]
   local alias=$1 session=${2:-fm-remote} herdr_bin jq_bin key lock list rc matches
-  local first_session add_out reason
+  local entry entry_id add_out reason record record_tmp repair_command
   FM_HERDR_MACHINE_RESULT=present
   herdr_bin=$(command -v herdr 2>/dev/null || true)
   if [ -z "$herdr_bin" ] || [ ! -x "$herdr_bin" ]; then
@@ -79,6 +70,7 @@ fm_herdr_machine_saved_ensure() { # <host-alias> [<session>]
   key=$(printf '%s' "$alias" | sed 's/[^A-Za-z0-9._-]/_/g')
   [ -n "$key" ] || key=host
   lock="$STATE/.herdr-machine-$key.lock"
+  record="$STATE/.herdr-machine-$key.json"
   if ! fm_herdr_machine_require_locks || ! fm_lock_try_acquire "$lock"; then
     FM_HERDR_MACHINE_RESULT=busy
     return 0
@@ -97,19 +89,45 @@ fm_herdr_machine_saved_ensure() { # <host-alias> [<session>]
     fm_lock_release "$lock" 2>/dev/null || true
     return 0
   fi
-  if ! matches=$(printf '%s' "$list" | jq -r --arg t "$alias" \
-    '(. // [])[] | select(.target == $t) | .session' 2>/dev/null); then
+  if ! matches=$(printf '%s' "$list" | jq -ce --arg t "$alias" \
+    '[.[] | select(.target == $t)]' 2>/dev/null); then
     echo "warning: the saved herdr machines could not be parsed, so $alias was not saved" >&2
     FM_HERDR_MACHINE_RESULT=list_failed
     fm_lock_release "$lock" 2>/dev/null || true
     return 0
   fi
-  first_session=$(printf '%s\n' "$matches" | sed -n '1p')
-  if [ -n "$first_session" ]; then
-    if [ "$first_session" != "$session" ]; then
-      echo "warning: saved herdr machine $alias already points at session $first_session, expected $session; left unchanged" >&2
-      FM_HERDR_MACHINE_RESULT=mismatch_session
+  if printf '%s' "$matches" | jq -e --arg s "$session" \
+    'any(.[]; .session == $s and .enabled == true)' >/dev/null; then
+    fm_lock_release "$lock" 2>/dev/null || true
+    return 0
+  fi
+  entry=$(printf '%s' "$matches" | jq -c '.[0] // empty')
+  if [ -n "$entry" ]; then
+    entry_id=$(printf '%s' "$entry" | jq -r '.id // empty')
+    reason=$(printf '%s' "$entry" | jq -c '{session, enabled}')
+    printf -v repair_command 'herdr machine remove %q; herdr machine add --label %q --remote-session %q %q' \
+      "$entry_id" "$alias" "$session" "$alias"
+    if [ -z "$entry_id" ] || ! jq -e --arg t "$alias" \
+      '.alias == $t and (.session | type == "string")' "$record" >/dev/null 2>&1; then
+      echo "warning: saved herdr machine $alias has $reason, expected enabled session $session; left unchanged; run: $repair_command" >&2
+      FM_HERDR_MACHINE_RESULT=mismatch
+      fm_lock_release "$lock" 2>/dev/null || true
+      return 0
     fi
+    if ! fm_run_timed "$FM_HERDR_MACHINE_CALL_TIMEOUT_SECS" \
+      "$herdr_bin" machine remove "$entry_id" < /dev/null >/dev/null 2>&1; then
+      echo "warning: saved herdr machine $alias has $reason; removal failed; run: $repair_command" >&2
+      FM_HERDR_MACHINE_RESULT=refused
+      fm_lock_release "$lock" 2>/dev/null || true
+      return 0
+    fi
+  fi
+  record_tmp=$(mktemp "$record.XXXXXX")
+  if [ -z "$record_tmp" ] || ! jq -n --arg a "$alias" --arg s "$session" \
+    '{alias: $a, session: $s}' > "$record_tmp"; then
+    [ -z "$record_tmp" ] || rm -f "$record_tmp"
+    echo "warning: herdr machine $alias was not saved: ownership record could not be prepared" >&2
+    FM_HERDR_MACHINE_RESULT=record_failed
     fm_lock_release "$lock" 2>/dev/null || true
     return 0
   fi
@@ -119,6 +137,10 @@ fm_herdr_machine_saved_ensure() { # <host-alias> [<session>]
   if [ "$rc" -eq 0 ]; then
     # shellcheck disable=SC2034 # Read by sourcing callers and tests as the save's outcome word.
     FM_HERDR_MACHINE_RESULT=added
+    if ! mv -f "$record_tmp" "$record"; then
+      FM_HERDR_MACHINE_RESULT=record_failed
+      echo "warning: herdr machine $alias was saved but its ownership record could not be published" >&2
+    fi
     echo "saved herdr machine $alias (remote session $session)"
   else
     # shellcheck disable=SC2034 # Read by sourcing callers and tests as the save's outcome word.
@@ -130,6 +152,7 @@ fm_herdr_machine_saved_ensure() { # <host-alias> [<session>]
     [ -n "$reason" ] || reason="herdr machine add exited $rc"
     echo "warning: herdr machine $alias was not saved: $reason" >&2
   fi
+  rm -f "$record_tmp"
   fm_lock_release "$lock" 2>/dev/null || true
   return 0
 }
