@@ -396,8 +396,8 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
   # The long-lived `server` launch is exec'd straight through: buffering its
   # stderr would hold this call open for the server's whole lifetime. The
   # DETACHED server launch is fm_backend_herdr_server_ensure's to make: it
-  # execs the resolved client in place so the server holds no caller
-  # descriptors, which this generic router cannot do from inside a function.
+  # execs the resolved client in place so Bash closes its saved caller output
+  # descriptors without leaving a persistent shell wrapper.
   if [ "${1:-}" = server ]; then
     HERDR_SESSION="$session" "$client_bin" "$@" --session "$session"
     return $?
@@ -1657,23 +1657,13 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
 # inherited from whichever agent happened to start it. Bounded poll for the
 # server to report running.
 #
-# The launch EXECs the server binary in place inside the async fork and never
-# leaves a wrapping shell behind. A wrapping shell is not merely wasteful: it
-# held the caller's own stdout/stderr open forever. Bash applies the temporary
-# redirections of a redirected function call (callers use exactly
-# `fm_backend_herdr_server_ensure <session> >/dev/null 2>&1`) by saving the
-# caller's original descriptors on close-on-exec fds for undo, and a fork
-# inside the function inherits those saves. When the fork wraps `herdr server`
-# in a live shell that waits on the server for its whole lifetime, the saves
-# never close, so any reader of that output to EOF - the remote seeder's
-# command substitution over ssh, or sshd's session teardown - blocks forever
-# while a process still carrying the launcher's cmdline sits in wait
-# (the 2026-10-01 `fm-remote-doctor.sh --fix` hang on Linux). The exec closes
-# every close-on-exec save at once, and `setsid` (util-linux; plain exec is the
-# portable fallback where it is absent) also frees the server from the
-# caller's session and process group, so no caller signal or terminal can
-# reach it. fds 0/1/2 point at /dev/null before the exec, so the server holds
-# no caller descriptor at all.
+# Exec the server inside the async fork: a persistent shell wrapper would
+# retain Bash's close-on-exec saves of the caller's stdout/stderr during a
+# redirected function call and prevent capturing readers from reaching EOF.
+# Exec closes those saves; standard input/output/error use /dev/null.
+# setsid additionally separates the session and process group when available;
+# plain exec preserves the descriptor fix without that session isolation.
+# Regression: tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh.
 fm_backend_herdr_server_ensure() {  # <session>
   local session=$1 running i client_bin
   running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)

@@ -1206,23 +1206,21 @@ No ambient `herdr server stop` command is a supported test operation.
 
 ### Detached server launch (no caller descriptors)
 
-Measured 2026-10-01 on Linux x86_64 against Herdr 0.9.1 (client protocol 22), in isolated `fm-lab-` sessions (`bin/fm-herdr-lab.sh`), after the live 2026-10-01 incident where `bin/fm-remote-doctor.sh --fix` on agent01 (Ubuntu 24.04) never returned after starting the Herdr server, hanging `bin/fm-remote-home-seed.sh` until the server was pre-started detached by hand.
+Measured 2026-10-01 on Linux x86_64 against Herdr 0.9.1 (client protocol 22), in isolated `fm-lab-` sessions (`bin/fm-herdr-lab.sh`).
+The [operator contract](../herdr-backend.md#named-server-and-session-routing) owns startup behavior; the comment beside `fm_backend_herdr_server_ensure` in [`bin/backends/herdr.sh`](../../bin/backends/herdr.sh) owns the descriptor safety invariant.
 
-The adapter's `fm_backend_herdr_server_ensure` launches the server by exec'ing the resolved client binary in place inside the async fork (`setsid` when available, plain `exec` as the portable fallback), so the long-lived server is a direct exec away from the launcher and holds no caller descriptor.
+The captured redirected ensure call returned `rc=0` within the readiness poll window and the server reported `running=true` through the lab session's socket.
+On this Linux host with `setsid`, the server owned its session and process group (`sid == pgid == pid`, parented to the user manager), with fds 0/1/2 on `/dev/null` and no inherited pipe.
 
-The pre-fix launch wrapped `herdr server` in a live bash fork that waited on the server forever, and that wrapper inherited the caller's saved stdout/stderr: bash parks the temporary redirections of a redirected function call (callers use `fm_backend_herdr_server_ensure <session> >/dev/null 2>&1`) on close-on-exec fds for undo, and a fork inside the function inherits them.
-Observed on the pre-fix code, the wrapper held the capturing caller's pipe on exactly fds 10 and 11 while sitting in `wait4` under the doctor's own cmdline, and a caller reading that output to EOF blocked forever:
+Refresh the caller-return and server-readiness assertions against the real binary with:
 
-```text
-# /proc/<async-wrapper>/fd of the pre-fix launch, captured through a substitution
-10 -> pipe:[18019600]
-11 -> pipe:[18019600]
-# the capturing reader's own fd 3 -> pipe:[18019600] (write end never closed)
+```sh
+bash tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh
 ```
 
-After the fix, the same capture shape returns immediately (`rc=0` within the readiness poll window), the server reports `running=true` through the lab session's socket, and the server process owns its session and process group (`sid == pgid == pid`, parented to the user manager) with fds 0/1/2 on `/dev/null` and no inherited pipe.
-`tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh` re-proves both halves against the real binary (prompt caller return and a genuinely running server) and fails on the pre-fix code within its 45-second bound; that suite is the refresh entry point for this record.
-The macOS remote-doctor path never launches the server through the ensure (launchd owns it there), and the plain-`exec` fallback keeps the launch portable where `setsid` is absent.
+The regression requires the capturing caller to return successfully within 45 seconds and independently checks that the server is running; it fails on the pre-fix code within that bound.
+It does not assert session identity or inspect descriptors, so those Linux observations require separate inspection to refresh.
+The macOS remote-doctor path uses launchd instead of this ensure path.
 
 ### fm-remote server birth and login-keychain access
 
