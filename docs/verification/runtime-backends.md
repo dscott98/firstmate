@@ -1204,6 +1204,24 @@ The CLI matrix was checked directly:
 All destructive verification used `bin/fm-herdr-lab.sh` with a non-default `fm-lab-` name and a byte-identical default-session tripwire.
 No ambient `herdr server stop` command is a supported test operation.
 
+### Detached server launch (no caller descriptors)
+
+Measured 2026-10-01 on Linux x86_64 against Herdr 0.9.1 (client protocol 22), in isolated `fm-lab-` sessions (`bin/fm-herdr-lab.sh`).
+The [operator contract](../herdr-backend.md#named-server-and-session-routing) owns startup behavior; the comment beside `fm_backend_herdr_server_ensure` in [`bin/backends/herdr.sh`](../../bin/backends/herdr.sh) owns the descriptor safety invariant.
+
+The captured redirected ensure call returned `rc=0` within the readiness poll window and the server reported `running=true` through the lab session's socket.
+On this Linux host with `setsid`, the server owned its session and process group (`sid == pgid == pid`, parented to the user manager), with fds 0/1/2 on `/dev/null` and no inherited pipe.
+
+Refresh the caller-return and server-readiness assertions against the real binary with:
+
+```sh
+bash tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh
+```
+
+The regression requires the capturing caller to return successfully within 45 seconds and independently checks that the server is running; it fails on the pre-fix code within that bound.
+It does not assert session identity or inspect descriptors, so those Linux observations require separate inspection to refresh.
+The macOS remote-doctor path uses launchd instead of this ensure path.
+
 ### fm-remote server birth and login-keychain access
 
 Measured 2026-09-09 on macOS 26 (Darwin 25.6.0) aarch64 with Claude Code 2.1.266 and Herdr 0.9.0, the guarantee behind `bin/fm-remote-herdr-guard.sh` and the doctor's `herdr-server` check: login-keychain access follows the audit session a process was born into, never the launch shape or the shell.
