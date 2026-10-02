@@ -1,0 +1,76 @@
+$ git init -q /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/origin
+exit=0
+
+$ git -C /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/origin -c user.name=Lab -c user.email=lab@example.invalid commit --allow-empty -qm seed
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-brief.sh live-pr3 alpha --mode direct-PR --for-home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/task --for-root /opt/firstmate-lab
+scaffolded: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/primary/data/live-pr3/brief.md (ship, mode=direct-PR, for sandbox home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/task; replace {TASK} and {FIRSTMATE_SPEC})
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+error: Pi credential refused: provider=labprovider type=oauth reason=oauth-forbidden
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+error: Pi credential refused: provider=labprovider type=unknown reason=unsupported-type
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+error: Pi credential refused: provider=labprovider type=api_key reason=unknown-field
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+schema=fm-remote-task-control.v1
+provision=created
+task_id=live-pr3
+manifest_sha256=1f5a0ff4cecc2bd84a56713f06a5f92c7088ed5493b708c1ebb1b5a83f4b9e7d
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+schema=fm-remote-task-control.v1
+provision=current
+task_id=live-pr3
+manifest_sha256=1f5a0ff4cecc2bd84a56713f06a5f92c7088ed5493b708c1ebb1b5a83f4b9e7d
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh state wrong-owner
+error: the sandbox task home belongs to task live-pr3, not wrong-owner
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+error: the sandbox task home for live-pr3 was provisioned from a different manifest; refusing to change it in place
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh state live-pr3
+missing
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh brief-update live-pr3
+schema=fm-remote-task-control.v1
+brief=updated
+brief_sha256=c0ddc3997a2d9eca44f47a3800ba1755ee1518e43d6f4a9e03daa54d34230735
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh brief-update live-pr3
+error: the brief tells its worker to append status to /another-home/state/live-pr3.status, not to this home's /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/task/state/live-pr3.status; render it with fm-brief.sh --for-home and --for-root for this sandbox
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+fatal: '/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/missing-origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+error: could not clone project alpha from its origin
+exit=1
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-lab-home.sh create /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/marked-lab
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/.rtc-live-jf9sl6nb/marked-lab
+exit=0
+
+$ /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XTF38S4CD8T17R8TADK5B2/bin/fm-remote-task-control.sh provision live-pr3
+error: the sandbox task home has content but no provisioning marker; refusing to provision over it
+exit=1
+
+Observed: exact brief bytes, manual backlog, Pi auth mode 0600, idempotence, owner/digest refusals, absent agent, atomic brief update/refusal, and credential rollback verified.
