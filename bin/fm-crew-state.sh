@@ -964,6 +964,9 @@ nm_run_head_matches_worktree() {
 #   - The host's endpoint-gone verdict is the only death evidence it reports,
 #     read as unknown with that reason; an unreachable host or a block that
 #     fails validation is unknown-remote, never death.
+# Before buffering or parsing, the primary bounds stdout and stderr to 64 KiB
+# each through bin/fm-remote-receive.sh, with a 10-second deadline overridden
+# by FM_CREW_STATE_REMOTE_SECONDS. Exceeding either bound is unknown-remote.
 sandbox_emit_status_done() {
   if fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META" >/dev/null; then
     emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"

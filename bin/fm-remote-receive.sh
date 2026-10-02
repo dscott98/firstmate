@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# Bounded primary-side receiver, invoked with bash:
+#   fm-remote-receive.sh <seconds> <stdout-cap> <stderr-cap> <status-file> <command> [args...]
+# fm-timeout-lib.sh owns the deadline; byte caps apply independently before
+# bytes reach the caller's output files. Callers publish output only for exit:0.
+# A successful receiver writes exit:<command-status>, over:stdout, over:stderr,
+# or timeout to status-file. Receiver failures exit 2 and must not be confused
+# with a remote-controlled exit status recorded in that file.
+# The command must implement fm-on.sh's FM_ON_LOCAL_STATUS launch handshake:
+# mark remote immediately before exec, restoring local if setup or exec fails.
+# This locally owned marker keeps missing helpers and failed local launches
+# distinguishable from remote refusals without reserving a remote exit code.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

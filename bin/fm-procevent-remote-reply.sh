@@ -98,7 +98,7 @@
 # bounds fetch_remote_file enforces, fails open exactly as a refused offered
 # document does: the lines still mirror and one unkeyed note says why. It also
 # removes any earlier local copy, so an older report is never read as the one
-# the line announces. An SSH exit 255 or a local storage failure leaves the
+# the line announces. An SSH exit 255 or a primary-side receiver failure leaves the
 # delta uncommitted for retry and the local report untouched.
 set -u
 
@@ -112,9 +112,10 @@ REMOTE_LOG='state/parent-replies.status'
 WAIT_SECONDS=${FM_REMOTE_REPLY_WAIT_SECONDS:-55}
 MAX_DOC_BYTES=${FM_REMOTE_REPLY_MAX_DOC_BYTES:-262144}
 MAX_SCOUT_REPORT_BYTES=1048576
-# fm-on.sh returns ssh's status unchanged, so 255 alone means unavailable
-# transport or unknown remote completion. Any other nonzero status is the remote
-# reader's own refusal of that path at that moment. The reader has no permanence
+# After a confirmed local launch, fm-on.sh returns ssh's status unchanged, so
+# 255 alone means unavailable transport or unknown remote completion. Other
+# remote nonzero statuses are refusals; local receiver failures are separate.
+# The reader has no permanence
 # vocabulary - a report the mate has not finished writing refuses exactly like a
 # path that will never exist - so a refusal fails open rather than being read as
 # final (see cmd_ingest).

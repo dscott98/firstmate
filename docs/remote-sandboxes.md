@@ -139,8 +139,7 @@ The worker appends status lines to its own home's `state/<id>.status` on the san
 - This home's copy is the task's authoritative status log, because only it holds the `resolved` lines an answer writes here.
 - A task's lines offer no documents and settle no correlated reply, so a `report=` pointer in them mirrors as written.
 - For a scout, a mirrored `done` or `failed` line first fetches `data/<id>/report.md`, at most 1 MiB, through the path-confined reader into this home's `data/<id>/report.md`, so scout completion reads a local report before the line wakes anyone.
-  This home enforces the size bound and a transfer deadline itself, so an oversized, endless, or stalled transfer is refused rather than installed.
-  A refused fetch still mirrors the line, adds one unkeyed note with the reason, and removes any older local report, while an SSH exit 255 or a local storage failure leaves the delta for the runner's retry.
+  The shared [document-fetch failure policy](remote-secondmates.md#when-an-offered-document-cannot-be-fetched) applies; a refused scout fetch also removes any older local report so it cannot stand in for the report the terminal line announces.
 
 Peek, steering, and the current-state read route by task id to [host-side task control](#host-side-task-control):
 
