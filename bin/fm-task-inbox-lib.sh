@@ -184,6 +184,7 @@ fm_task_inbox_request_of() {  # <record-path>
     rec="${rec%/*}/handled/${rec##*/}"
     [ -f "$rec" ] || return 1
   fi
+  # shellcheck disable=SC2016 # awk program text: $0 is awk's own record.
   local header='
     $0 == "--" { exit }
     index($0, "request=") == 1 { print substr($0, 9); exit }
