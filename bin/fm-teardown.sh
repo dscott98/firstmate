@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tear down a finished task: return the treehouse worktree, release the Orca
-# worktree, or retire a secondmate home; kill the recorded runtime endpoint,
+# worktree, destroy a task sandbox, or retire a secondmate home; kill the recorded runtime endpoint,
 # clear volatile state, and transition this home's backlog item for ship and
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
@@ -3459,6 +3459,9 @@ teardown_public_followup_checks() {
 #      (bin/fm-sandbox-reconcile-lib.sh) must list it as running or stopped
 #      under this task's fm_task label. An unreadable inventory, or a sandbox
 #      labelled for another task, refuses even under --force.
+#      If the inventory omits it, only --force plus a successful provider status
+#      confirming state=absent permits records-only cleanup; an unknown status
+#      or a sandbox belonging to another home still refuses.
 #   2. A scout's report must be local - fetched through its status mirror's
 #      path-confined reader when it is missing - and the scout completion gate
 #      must pass. No host-side teardown runs, because a scout's worktree is

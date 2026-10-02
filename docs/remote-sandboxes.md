@@ -39,7 +39,7 @@ Sandbox placement is not for real use until the remaining stages land.
 Lifecycle control arrives in PR6: interrupt, exit, and relaunch with the record republished.
 Until PR6, `fm-control.sh` keeps its explicit named refusal of sandbox tasks.
 Stale-pane and liveness supervision of a placed task arrives in a later stage of the plan.
-A launch that never published its final record is still reconciled by hand: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
+A launch that never published its final record still needs operator reconciliation; follow [orphan handling](../.agents/skills/bootstrap-diagnostics/SKILL.md) before removing a sandbox that may hold work.
 
 ## Principles
 
@@ -177,17 +177,16 @@ A sandbox brief must be self-contained, because the sandbox cannot read the supe
 A placed task's worktree is its sandbox, so destroying the sandbox is its teardown, and the landed-work gate stands in front of that destroy exactly as it stands in front of a local worktree return.
 `bin/fm-teardown.sh <task-id>` runs it; [the teardown script's sandbox branch](../bin/fm-teardown.sh) owns the exact sequence and refusals, and [`bin/fm-sandbox-reconcile-lib.sh`](../bin/fm-sandbox-reconcile-lib.sh) owns the inventory read and the destroy.
 
-- Teardown first confirms the sandbox in this home's provider inventory under this task's `fm_task` label.
-  An unreadable inventory, or another task's label, refuses even with `--force`.
+- Teardown enforces the [sandbox branch's inventory and ownership checks](../bin/fm-teardown.sh), including its narrow records-only exception for `--force` when provider status positively confirms absence.
 - A scout needs its report locally, fetched through the status mirror's confined reader when it is missing, and the same captain-call completion gate as a local scout.
-  Nothing runs on its host, because a scout's worktree is scratch.
+  No host-side teardown runs, because a scout's worktree is scratch.
 - A ship runs its host's `retire`, the host's own teardown with the full landed-work test.
   A refusal is relayed, and the sandbox, its hold label, the record, and the backlog item stay; an SSH exit 255 is unknown completion and preserves everything for a rerun.
 - On a pass, teardown closes this home's records and backlog item and retires the status mirror, and only then destroys the sandbox, once, with `--expect-task` label confirmation.
   A failed destroy leaves `state/<id>.sandbox-destroy-pending`, which session start retries once the task's backlog transition has landed.
 - `--force` is the captain's explicit discard: it skips the scout gate and the host's `retire`, because destroying the sandbox discards everything on it.
 
-`bin/fm-pr-check.sh` registers a sandbox ship's PR without reading its worktree: the PR head comes from the forge alone, and [the named-head gate](../bin/fm-dod-lib.sh) reads the sandbox copy's HEAD through the host's `head` verb, accepting it when the forge or this home's project clone already holds that commit.
+`bin/fm-pr-check.sh` registers a sandbox ship's PR without reading its worktree locally; [the named-head gate](../bin/fm-dod-lib.sh) owns when forge evidence suffices and when the host's `head` verb must verify the sandbox copy.
 A Gerrit change from a sandbox ship cannot pass that gate, because its published-tree check needs the copy itself.
 
 Every Firstmate-owned sandbox carries the reap-blocking hold label from creation until its destroy.
