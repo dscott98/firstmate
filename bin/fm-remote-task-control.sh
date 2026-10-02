@@ -53,7 +53,11 @@
 #                                     claude-permission-mode, keep-ai-trailers,
 #                                     and launch-env-allowlist
 #   pi_auth_b64=<base64 JSON object>  optional Pi API-key provider entries,
-#                                     only for a pi or pi-signed harness
+#                                     only for a pi or pi-signed harness;
+#                                     each provider object requires type=api_key
+#                                     and a nonempty string key, permits only
+#                                     an optional env object of string values,
+#                                     and refuses OAuth and all other fields
 #   gh_token_b64=<base64 token>       optional per-repository GitHub token
 # It clones the project from its origin, runs no-mistakes init for a
 # no-mistakes ship, and writes the brief, the registry line, the named config,

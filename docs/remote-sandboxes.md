@@ -47,7 +47,7 @@ The placement flag, the primary's use of host-side task control, status mirrorin
   `extend`, `hold`, `release`, `policy`, `exec`, `snapshot`, and `rollback` require an existing sandbox belonging to this home, enforced by the [adapter's shared status guard](../bin/fm-sandbox.sh).
   Destroying a sandbox refuses when the labels disagree, so one home can never destroy another home's sandbox, and an already-absent sandbox is success, so cleanup is idempotent.
 - Preserve unlanded work before invoking `destroy` manually.
-  The adapter checks no landing evidence; the landed-work gate ships with the teardown integration.
+  The adapter checks no landing evidence; the host-side `retire` gate described below does not make provider destruction safe automatically.
 
 ## Network profiles
 
@@ -103,6 +103,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `provision` builds the one-task home from a manifest on stdin: it clones the project from its origin, writes the brief, launch configuration, and credentials, and marks the home with `.fm-task-home` last.
   The same manifest again changes nothing, another task's home or a different manifest is refused, and a failed attempt removes what it created.
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
+  Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
 - `state`, `observe`, `capture`, `send`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox, and replace its brief.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
