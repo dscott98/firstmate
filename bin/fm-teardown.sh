@@ -361,8 +361,7 @@ unset _teardown_source
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-# shellcheck source=bin/fm-backend.sh
-. "$SCRIPT_DIR/fm-backend.sh"
+# fm-remote-route-lib.sh loads fm-backend.sh; avoid sourcing its graph twice.
 # shellcheck source=bin/fm-remote-route-lib.sh
 . "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-sandbox-reconcile-lib.sh
