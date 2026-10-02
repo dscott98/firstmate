@@ -315,8 +315,8 @@
 #   the task's status mirror (bin/fm-procevent-remote-reply.sh arm), which
 #   copies the worker's host-side status lines into this home's
 #   state/<id>.status; a failed arm keeps the launched task and its record and
-#   names the arm to rerun. Teardown, lifecycle control, and stale-pane
-#   supervision are later stages (docs/remote-sandboxes.md, "Current status").
+#   names the arm to rerun. Lifecycle control and stale-pane supervision are
+#   later stages (docs/remote-sandboxes.md, "Current status").
 #   --relaunch keeps the recorded placement: a --placement that differs from it
 #   is refused, and a sandbox task's relaunch is refused until its control plane
 #   routes there.
@@ -2106,7 +2106,7 @@ spawn_sandbox_task() {
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: teardown, lifecycle control, and stale-pane supervision of a sandbox task are later stages; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
+  echo "notice: lifecycle control and stale-pane supervision of a sandbox task are later stages; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
   echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$SBX_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 

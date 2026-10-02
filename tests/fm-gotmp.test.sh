@@ -55,6 +55,7 @@ make_fake_root() {
   # unless every sibling the real tmux adapter sources is present.
   ln -s "$ROOT/bin/fm-backend.sh" "$fake/bin/fm-backend.sh"
   ln -s "$ROOT/bin/fm-remote-route-lib.sh" "$fake/bin/fm-remote-route-lib.sh"
+  ln -s "$ROOT/bin/fm-sandbox-reconcile-lib.sh" "$fake/bin/fm-sandbox-reconcile-lib.sh"
   cat > "$fake/bin/backends/tmux.sh" <<'SH'
 fm_backend_tmux_kill() { return 0; }
 SH
@@ -164,6 +165,7 @@ test_teardown_skips_gracefully_without_tasktmp() {
   ln -s "$TEARDOWN" "$fake/bin/fm-teardown.sh"
   ln -s "$ROOT/bin/fm-backend.sh" "$fake/bin/fm-backend.sh"
   ln -s "$ROOT/bin/fm-remote-route-lib.sh" "$fake/bin/fm-remote-route-lib.sh"
+  ln -s "$ROOT/bin/fm-sandbox-reconcile-lib.sh" "$fake/bin/fm-sandbox-reconcile-lib.sh"
   cat > "$fake/bin/backends/tmux.sh" <<'SH'
 fm_backend_tmux_kill() { return 0; }
 SH

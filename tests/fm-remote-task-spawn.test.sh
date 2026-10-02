@@ -583,7 +583,7 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   expect_code 0 "$RC" "a sandbox ship should launch"$'\n'"$OUT"
   assert_contains "$OUT" "spawned $ID harness=pi kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha,minimax" \
     "the success line names the placement, route, sandbox, profile, and credential names"
-  assert_contains "$OUT" "teardown, lifecycle control, and stale-pane supervision of a sandbox task are later stages" \
+  assert_contains "$OUT" "lifecycle control and stale-pane supervision of a sandbox task are later stages" \
     "success states the operational limitation"
   assert_line "adapter=remote-reply" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
     "the status mirror is armed at publish"

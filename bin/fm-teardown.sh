@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tear down a finished task: return the treehouse worktree, release the Orca
-# worktree, or retire a secondmate home; kill the recorded runtime endpoint,
+# worktree, destroy a task sandbox, or retire a secondmate home; kill the recorded runtime endpoint,
 # clear volatile state, and transition this home's backlog item for ship and
 # scout tasks before reporting success (a secondmate teardown transitions none,
 # since secondmates are not backlog items), then refresh/prune the project's
@@ -177,15 +177,17 @@
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
 # bin/fm-remote-route-lib.sh decides remote placement before anything else
-# reads the record: a remote secondmate takes the remote retirement above, and
-# a sandbox task record, or a record whose placement is malformed, is refused
-# with nothing touched, even under --force, because this version does not yet
-# route a sandbox task's teardown to its host's retire and landed-work gate.
+# reads the record: a remote secondmate takes the remote retirement above, a
+# record whose placement is malformed is refused with nothing touched, even
+# under --force, and a sandbox task takes the sandbox task branch, whose comment
+# (sandbox_task_teardown below) owns its landed-work-gated, label-confirmed
+# destroy of the task's sandbox.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
-#   checks, and discards secondmate child work for kind=secondmate. Only use it
-#   when the captain has explicitly said to discard the work.
-#   --legacy-record accepts a task record that predates the spawn_gen field:
+#   checks, skips a sandbox task's host retire, and discards secondmate child
+#   work for kind=secondmate. Only use it when the captain has explicitly said
+#   to discard the work.
+#   --legacy-record accepts a local task record that predates the spawn_gen field:
 #   teardown then proceeds only when the recorded endpoint is confirmed dead or
 #   agent-less (bin/fm-backend.sh's recovery-grade classifier), and without
 #   --force the worktree still passes the ordinary landed-work checks. The
@@ -330,6 +332,7 @@ for _teardown_source in \
   fm-timeout-lib.sh \
   fm-backend.sh \
   fm-remote-route-lib.sh \
+  fm-sandbox-reconcile-lib.sh \
   fm-control-lib.sh \
   fm-lock-lib.sh \
   fm-classify-lib.sh \
@@ -358,10 +361,11 @@ unset _teardown_source
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-backlog-transition-lib.sh
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
-# shellcheck source=bin/fm-backend.sh
-. "$SCRIPT_DIR/fm-backend.sh"
+# fm-remote-route-lib.sh loads fm-backend.sh; avoid sourcing its graph twice.
 # shellcheck source=bin/fm-remote-route-lib.sh
 . "$SCRIPT_DIR/fm-remote-route-lib.sh"
+# shellcheck source=bin/fm-sandbox-reconcile-lib.sh
+. "$SCRIPT_DIR/fm-sandbox-reconcile-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-lock-lib.sh
@@ -424,28 +428,31 @@ fm_lease_guard "$ID" "teardown (fm-teardown)"
 
 META="$STATE/$ID.meta"
 # Remote dispatch (bin/fm-remote-route-lib.sh) runs before anything reads the
-# record's worktree or endpoint as local. A sandbox task's worktree lives on
-# its VM, and this version does not yet route its teardown to that host's
-# retire and landed-work gate, so the task is refused with nothing touched; a
-# record whose placement is malformed is refused the same way. The remote
-# secondmate dispatch below resolves the route again under the task's locks.
-teardown_refuse_unroutable() {
+# record's worktree or endpoint as local. A record whose placement is malformed
+# is refused with nothing touched. A sandbox task's worktree and endpoint live
+# on its sandbox, so nothing here treats them as local: the sandbox task branch
+# (sandbox_task_teardown below) owns its teardown. The remote dispatch below
+# resolves the route again under the task's locks and refuses a placement that
+# changed in between.
+TEARDOWN_ROUTE_KIND=none
+teardown_resolve_route() {
   if ! fm_remote_route_resolve "$META" "$ID"; then
     echo "REFUSED: task $ID: $FM_REMOTE_ROUTE_ERROR; nothing was changed" >&2
     return 1
   fi
-  if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
-    echo "REFUSED: $(fm_remote_route_unsupported "$ID" "teardown"); nothing was changed" >&2
-    return 1
-  fi
 }
 if [ -f "$META" ] && [ ! -L "$META" ]; then
-  teardown_refuse_unroutable || exit 1
+  teardown_resolve_route || exit 1
+  TEARDOWN_ROUTE_KIND=$FM_REMOTE_ROUTE_KIND
+  if [ "$TEARDOWN_ROUTE_KIND" = task ] && [ "$LEGACY_RECORD_GIVEN" = 1 ]; then
+    echo "REFUSED: task $ID runs in a sandbox, and --legacy-record applies only to a local task record; nothing was changed" >&2
+    exit 1
+  fi
 fi
 TREEHOUSE_PROJECT_LOCK=
 TREEHOUSE_PROJECT_LOCK_HELD=0
 TREEHOUSE_SLOT_LOCK_REQUIRED=0
-if [ -f "$META" ] && [ ! -L "$META" ]; then
+if [ "$TEARDOWN_ROUTE_KIND" != task ] && [ -f "$META" ] && [ ! -L "$META" ]; then
   TEARDOWN_LOCK_KIND=$(fm_meta_get "$META" kind)
   [ -n "$TEARDOWN_LOCK_KIND" ] || TEARDOWN_LOCK_KIND=ship
   TEARDOWN_LOCK_BACKEND=$(fm_meta_get "$META" backend)
@@ -498,6 +505,10 @@ teardown_release_locks() {
   if [ -n "${LOCAL_REGISTRY_LOCK:-}" ]; then
     fm_lock_release "$LOCAL_REGISTRY_LOCK" || true
     LOCAL_REGISTRY_LOCK=
+  fi
+  if [ -n "${SANDBOX_REPLY_LOCK:-}" ]; then
+    fm_lock_release "$SANDBOX_REPLY_LOCK" || true
+    SANDBOX_REPLY_LOCK=
   fi
   if [ "$META_LOCK_HELD" = 1 ]; then
     fm_lock_release "$META_LOCK" || true
@@ -605,6 +616,13 @@ if [ "$TEARDOWN_CLEANUP_RECOVERY" != orca ]; then
 fi
 if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
   if ! fm_backlog_meta_spawn_gen "$META" "$STATE"; then
+    if [ "$TEARDOWN_ROUTE_KIND" = task ]; then
+      # Only a launch publishes a sandbox task's spawn_gen, and --legacy-record
+      # has no endpoint here to classify, so a record without one is a launch
+      # that never published its final record.
+      echo "error: sandbox task $ID's record has no spawn_gen that identifies one exact incarnation ($FM_BACKLOG_TRANSITION_ERROR), so its launch never published a final record; refusing teardown with nothing changed - reconcile that launch by hand (docs/remote-sandboxes.md)" >&2
+      exit 1
+    fi
     TEARDOWN_LEGACY_GEN_COUNT=$(LC_ALL=C awk -F= '$1 == "spawn_gen" { count++ } END { print count + 0 }' "$META" 2>/dev/null || printf '0\n')
     if [ "$TEARDOWN_LEGACY_GEN_COUNT" = 0 ] && [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
       # A tmux record with no window names no live endpoint, so there is no
@@ -636,7 +654,10 @@ if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
         # legacy record it was, and is treated as one: the dead-or-agent-less
         # endpoint gate runs again on the retry instead of being skipped by
         # the abandoned attempt's own stamp.
-        if [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
+        if [ "$TEARDOWN_ROUTE_KIND" = task ]; then
+          echo "error: sandbox task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN, which no sandbox launch publishes; refusing teardown with nothing changed - reconcile the record by hand (docs/remote-sandboxes.md)" >&2
+          exit 1
+        elif [ "$TEARDOWN_WINDOWLESS_SHAPE" = 1 ]; then
           TEARDOWN_WINDOWLESS=1
         elif [ "$LEGACY_RECORD_GIVEN" != 1 ]; then
           echo "error: task $ID's record carries the legacy incarnation stamp $FM_BACKLOG_META_SPAWN_GEN left by an abandoned --legacy-record teardown, not an incarnation published by a spawn; refusing automatic teardown - relaunch the task to publish an unambiguous incarnation, then retry teardown, or pass --legacy-record once its recorded endpoint is confirmed dead or agent-less" >&2
@@ -1101,7 +1122,11 @@ remote_secondmate_teardown() {
 
 remote_secondmate_teardown_locked() {
   local rc
-  teardown_refuse_unroutable || return 1
+  teardown_resolve_route || return 1
+  if [ "$FM_REMOTE_ROUTE_KIND" != "$TEARDOWN_ROUTE_KIND" ]; then
+    echo "REFUSED: task $ID's placement changed while teardown acquired its locks; nothing was changed" >&2
+    return 1
+  fi
   [ "$FM_REMOTE_ROUTE_KIND" = secondmate ] || return 3
   REMOTE_REGISTRY_LOCK=$(secondmate_registry_lock_path "$STATE")
   fm_lock_acquire_wait "$REMOTE_REGISTRY_LOCK" || return 1
@@ -1137,7 +1162,12 @@ fi
 WT=$(fm_meta_get "$META" worktree)
 PROJ=$(fm_meta_get "$META" project)
 T_ORCA=
-if [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
+if [ "$TEARDOWN_ROUTE_KIND" = task ]; then
+  # A sandbox task's recorded worktree and endpoint live on its sandbox, so
+  # neither is validated, probed, or closed here (sandbox_task_teardown).
+  BACKEND=
+  T="remote:$ID"
+elif [ "$TEARDOWN_WINDOWLESS" = 1 ]; then
   BACKEND=tmux
   T=
 else
@@ -1149,7 +1179,9 @@ fi
 # The recorded backend, including every sibling its adapter sources, has to
 # be readable before the first destructive step. --force does not override
 # this. A forced descendant is proved in validate_firstmate_home_children_removal.
-teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
+if [ "$TEARDOWN_ROUTE_KIND" != task ]; then
+  teardown_require_backend_prerequisites "$BACKEND" "$ID" || exit 1
+fi
 if [ "${FM_TEARDOWN_GUARD_DONE:-0}" != 1 ]; then
   "$FM_ROOT/bin/fm-guard.sh" || true
 fi
@@ -1168,7 +1200,7 @@ CLEANUP_RECOVERY=$TEARDOWN_CLEANUP_RECOVERY
 
 KIND=$TEARDOWN_META_KIND
 EXPECTED_TREEHOUSE_PROJECT_LOCK=
-if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
+if [ "$TEARDOWN_ROUTE_KIND" != task ] && [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ] \
    && fm_treehouse_pool_slot "$PROJ" "$WT"; then
   EXPECTED_TREEHOUSE_PROJECT_LOCK=$(fm_treehouse_project_lock_path "$PROJ") || {
     echo "REFUSED: cannot resolve the shared Treehouse project lock for ${PROJ:-<missing>}; nothing was changed" >&2
@@ -3356,6 +3388,288 @@ remove_secondmate_registry_entry() {
   return "$rc"
 }
 
+# The scout completion gate, for a local scout and a sandbox scout alike: the
+# report at data/<id>/report.md is the work product, and the shared
+# captain-call completion gate must verify its captain-held inventory.
+teardown_scout_completion_gate() {
+  local report="$DATA/$ID/report.md"
+  if [ ! -f "$report" ]; then
+    echo "REFUSED: scout task $ID has no report at $report." >&2
+    echo "The report is the work product. Have the crewmate write it, or use --force after explicit discard approval." >&2
+    return 1
+  fi
+  if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+      FM_CONFIG_OVERRIDE="$CONFIG" "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >/dev/null; then
+    echo "REFUSED: scout task $ID has not passed the captain-call completion gate." >&2
+    echo "Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown." >&2
+    return 1
+  fi
+}
+
+# A public commitment is not kept until its final reply lands in the ORIGINAL
+# thread, and this cleanup removes the task records that make the promise
+# reconcilable. Refuse while this home still owes a public reply for exactly this
+# work. Both gates live in bin/fm-public-followup-lib.sh, so a home that never
+# opted into the myfirstmate relay runs one [ -f ] test and nothing else here.
+# The two warnings after them never refuse.
+teardown_public_followup_checks() {
+  local blocking x_request
+  if [ "$FORCE" != "--force" ] && [ "$PUBLIC_FOLLOWUP_PARENT_UNRESOLVED" = 1 ]; then
+    echo "REFUSED: cannot resolve the primary home for marked secondmate $SECOND_MATE_ID; refusing cleanup without its durable parent binding." >&2
+    return 1
+  fi
+  if [ "$FORCE" != "--force" ] \
+    && [ -n "$PUBLIC_FOLLOWUP_STATE" ] \
+    && [ "$PUBLIC_FOLLOWUP_RELAY_ACTIVE" = 1 ] \
+    && fm_pf_has_registrations "$PUBLIC_FOLLOWUP_STATE"; then
+    if ! blocking=$(FM_HOME="$PUBLIC_FOLLOWUP_HOME" FM_STATE_OVERRIDE="$PUBLIC_FOLLOWUP_STATE" \
+        "$SCRIPT_DIR/fm-public-followup.sh" guard-work "$PUBLIC_FOLLOWUP_WORK_HOME" "$ID" 2>/dev/null); then
+      echo "REFUSED: task $ID still owes a public reply through the myfirstmate relay." >&2
+      printf '%s\n' "$blocking" >&2
+      echo "Deliver it with bin/fm-public-followup.sh deliver <obligation-id>, waive it with bin/fm-tasks-axi.sh public-followup waive, or use --force after explicit discard approval." >&2
+      return 1
+    fi
+  fi
+
+  # Non-blocking: a delivered public loop is not a teardown refusal (guard-work
+  # already passed), but tearing down a ship whose PR merged while a loop is still
+  # open with nothing owed is the moment the drop is detectable.
+  if [ "$KIND" = ship ] && [ -n "$PR_URL" ] \
+      && [ -n "$PUBLIC_FOLLOWUP_STATE" ] \
+      && [ "${PUBLIC_FOLLOWUP_RELAY_ACTIVE:-0}" = 1 ] \
+      && fm_pf_has_delivered_open_loops "$PUBLIC_FOLLOWUP_STATE"; then
+    echo "warning: an open public loop with nothing owed is still recorded in the consent-holding home while cleaning up ship task $ID. Hand it on with bin/fm-public-followup.sh rechain or close it with retire --reason." >&2
+  fi
+
+  # Non-blocking: the legacy Relay link is not guarded as a refusal.
+  x_request=$(grep '^x_request=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+  if [ -n "$x_request" ]; then
+    echo "warning: task $ID still carries an unreconciled Relay request link ($x_request) on its task record." >&2
+  fi
+}
+
+# --- sandbox task ---------------------------------------------------------------
+# A sandbox task's worktree is its sandbox, so destroying the sandbox is its
+# teardown, and the landed-work gate stands in front of that destroy exactly as
+# it stands in front of a local `treehouse return`. bin/fm-remote-route-lib.sh
+# selects this branch, and nothing in it reads the recorded worktree or
+# endpoint as local. In order:
+#   1. The record must name one sandbox, and this home's provider inventory
+#      (bin/fm-sandbox-reconcile-lib.sh) must list it as running or stopped
+#      under this task's fm_task label. An unreadable inventory, or a sandbox
+#      labelled for another task, refuses even under --force.
+#      If the inventory omits it, only --force plus a successful provider status
+#      confirming state=absent permits records-only cleanup; an unknown status
+#      or a sandbox belonging to another home still refuses.
+#   2. A scout's report must be local - fetched through its status mirror's
+#      path-confined reader when it is missing - and the scout completion gate
+#      must pass. No host-side teardown runs, because a scout's worktree is
+#      declared scratch.
+#   3. A ship runs its host's retire (bin/fm-remote-task-control.sh), which is
+#      that host's own fm-teardown.sh with the full landed-work test and its
+#      conclusion of a parked no-mistakes run. The status mirror is quiesced
+#      first, so retirement on the host never reads here as a broken stream. A
+#      refusal is relayed, the mirror re-armed, and the sandbox, its hold label,
+#      and every record kept. SSH exit 255 is unknown completion: everything is
+#      preserved, mirror quiesced, for a rerun, which the host's retirement
+#      record makes safe.
+#   4. On a pass the destroy-pending record is written, the mirror's cursor
+#      retired, and this home's records removed with the backlog transition;
+#      only then is the sandbox destroyed, once, with --expect-task label
+#      confirmation. A failed destroy keeps the destroy-pending record, which
+#      session start retries, and exits 1.
+# --force is the captain's explicit discard: it skips the scout gate and the
+# host's retire, because destroying the sandbox discards everything on it,
+# but never the inventory's identity checks.
+SANDBOX_REPLY_LOCK=
+SANDBOX_MIRROR_ERROR=
+
+# One call of the status mirror's adapter for this home. It runs as this
+# process's direct child, because its *-locked verbs require the reply
+# lifecycle lock to be held by their parent.
+sandbox_mirror() { # <verb> [args...]
+  local out rc=0
+  SANDBOX_MIRROR_ERROR=
+  out=$(mktemp "${TMPDIR:-/tmp}/fm-teardown-mirror.XXXXXX") || {
+    SANDBOX_MIRROR_ERROR="cannot create a temporary file"
+    return 1
+  }
+  FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+    "$SCRIPT_DIR/fm-procevent-remote-reply.sh" "$@" > "$out" 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || SANDBOX_MIRROR_ERROR=$(fm_sandbox_reason "$(cat "$out" 2>/dev/null || true)")
+  rm -f -- "$out"
+  return "$rc"
+}
+
+# The host's output is untrusted data about its own task: relayed bounded,
+# with control bytes made visible.
+sandbox_relay_host_text() { # <text>
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1" | LC_ALL=C tr '\000-\010\013-\037\177' '?' | head -n 50 >&2
+}
+
+sandbox_task_teardown() {
+  local name present=1 out rc=0 lookup_rc=0 destroyed=0 reminder_rc=0
+  # The route as the task's locks see it now.
+  teardown_resolve_route || exit 1
+  if [ "$FM_REMOTE_ROUTE_KIND" != task ]; then
+    echo "REFUSED: task $ID's placement changed while teardown acquired its locks; nothing was changed" >&2
+    exit 1
+  fi
+  name=$(fm_backend_meta_exact_value "$META" sandbox_name) || name=
+  if ! fm_sandbox_name_valid "$name"; then
+    echo "REFUSED: sandbox task $ID's record does not name exactly one valid sandbox; nothing was changed" >&2
+    exit 1
+  fi
+  validate_pr_poll_cleanup "$STATE" "$ID" || exit 1
+  teardown_public_followup_checks || exit 1
+
+  if ! fm_sandbox_inventory_read; then
+    echo "REFUSED: this home's sandbox inventory could not be read ($FM_SANDBOX_ERROR), so sandbox $name cannot be confirmed as task $ID's; nothing was changed" >&2
+    exit 1
+  fi
+  fm_sandbox_inventory_lookup "$name" || lookup_rc=$?
+  case "$lookup_rc" in
+    0)
+      if [ "$FM_SANDBOX_INV_TASK" != "$ID" ]; then
+        echo "REFUSED: sandbox $name is labelled for task ${FM_SANDBOX_INV_TASK:-(none)}, not $ID, so it is not this task's to destroy; nothing was changed, and --force does not override this" >&2
+        exit 1
+      fi
+      ;;
+    1)
+      if [ "$FORCE" != "--force" ]; then
+        echo "REFUSED: sandbox $name is not in this home's sandbox inventory (absent, or labelled for another home), so task $ID's work on it cannot be checked; nothing was changed." >&2
+        echo "Reconcile the record against bin/fm-sandbox.sh status $name, or use --force after explicit discard approval." >&2
+        exit 1
+      fi
+      if ! fm_sandbox_capture status "$name"; then
+        echo "REFUSED: sandbox $name's status could not be confirmed ($(fm_sandbox_reason "$FM_SANDBOX_ERR")); nothing was changed, and --force does not override this" >&2
+        exit 1
+      fi
+      if [ "$(fm_sandbox_record_field "$FM_SANDBOX_OUT" state)" != absent ]; then
+        echo "REFUSED: sandbox $name is not in this home's inventory and its provider status does not confirm absence; nothing was changed, and --force does not override this" >&2
+        exit 1
+      fi
+      present=0
+      ;;
+    *)
+      echo "REFUSED: this home's sandbox inventory lists sandbox $name more than once, so it cannot be confirmed as task $ID's; nothing was changed" >&2
+      exit 1
+      ;;
+  esac
+
+  SANDBOX_REPLY_LOCK=$(secondmate_reply_lifecycle_lock_path "$STATE" "$ID")
+  if ! fm_lock_acquire_wait "$SANDBOX_REPLY_LOCK"; then
+    SANDBOX_REPLY_LOCK=
+    echo "error: sandbox task $ID's status mirror could not be locked; nothing was changed" >&2
+    exit 1
+  fi
+  if [ "$FORCE" != "--force" ] && [ "$KIND" = scout ]; then
+    if [ ! -f "$DATA/$ID/report.md" ] && ! sandbox_mirror fetch-report "$ID"; then
+      echo "warning: scout task $ID's report could not be fetched from its sandbox: $SANDBOX_MIRROR_ERROR" >&2
+    fi
+    teardown_scout_completion_gate || exit 1
+  fi
+  if ! sandbox_mirror retire-quiesce-locked "$ID" "$FORCE"; then
+    echo "REFUSED: sandbox task $ID's status mirror could not be stopped ($SANDBOX_MIRROR_ERROR); apply any capture it still holds, then retry; nothing else was changed" >&2
+    exit 1
+  fi
+  if [ "$FORCE" != "--force" ] && [ "$KIND" != scout ]; then
+    out=$(FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+      "$SCRIPT_DIR/fm-on.sh" "$ID" "$FM_REMOTE_ROUTE_CONTROL" retire "$ID" < /dev/null 2>&1) || rc=$?
+    if [ "$rc" -eq 255 ]; then
+      sandbox_relay_host_text "$out"
+      echo "error: sandbox task $ID's retirement on $FM_REMOTE_ROUTE_HOST has unknown completion (SSH exit 255); its sandbox $name, hold label, task record, and backlog item are preserved - rerun teardown once the host is reachable" >&2
+      exit 255
+    elif [ "$rc" -ne 0 ]; then
+      sandbox_relay_host_text "$out"
+      echo "REFUSED: sandbox task $ID's host refused its teardown, so its sandbox $name and hold label are kept and nothing here was changed" >&2
+      sandbox_mirror arm-locked "$ID" \
+        || echo "error: sandbox task $ID's status mirror could not be re-armed ($SANDBOX_MIRROR_ERROR); rerun bin/fm-procevent-remote-reply.sh arm $ID" >&2
+      exit "$rc"
+    fi
+  fi
+
+  # Pass. The destroy-pending record comes first, so no later failure can leave
+  # a released sandbox that nothing names.
+  if [ "$present" = 1 ] && ! fm_sandbox_destroy_pending_write "$ID" "$name"; then
+    echo "error: the pending destroy of sandbox $name could not be recorded; retaining every durable task record" >&2
+    exit 1
+  fi
+  BACKLOG_CLOSED=0
+  BACKLOG_TRANSITION=$TEARDOWN_BACKLOG_TRANSITION
+  BACKLOG_TRANSITION_FLAGS=()
+  [ "$BACKLOG_TRANSITION" = close ] || BACKLOG_TRANSITION_FLAGS=(--retain)
+  BACKLOG_SKIP_REASON=
+  if [ "$TEARDOWN_BACKLOG_APPLIES" = 1 ]; then
+    backlog_done_args || {
+      echo "error: the pending backlog $BACKLOG_TRANSITION for $ID is not replayable; refusing destructive teardown" >&2
+      exit 1
+    }
+    BACKLOG_CLOSED=1
+    if ! fm_backlog_close_marker_write "$STATE" "$ID" "$DATA" "$TEARDOWN_META_SPAWN_GEN" \
+        "${BACKLOG_TRANSITION_FLAGS[@]+"${BACKLOG_TRANSITION_FLAGS[@]}"}" \
+        "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+      echo "error: the pending backlog $BACKLOG_TRANSITION for $ID could not be recorded ($FM_BACKLOG_TRANSITION_ERROR); retaining every durable task record" >&2
+      exit 1
+    fi
+  else
+    BACKLOG_SKIP_REASON=$TEARDOWN_BACKLOG_SKIP_REASON
+  fi
+  if ! sandbox_mirror retire-finalize-locked "$ID" "$FORCE"; then
+    echo "error: sandbox task $ID's status mirror cursor could not be retired ($SANDBOX_MIRROR_ERROR); retaining its task record so a rerun can finish" >&2
+    exit 1
+  fi
+  if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
+      "$SCRIPT_DIR/fm-inactive-reconcile.sh" report "$ID"; then
+    echo "error: $ID's final outcome has not reached the parent channel; retaining every durable task record so a rerun can retry the delivery" >&2
+    exit 1
+  fi
+  remove_pr_poll_artifacts "$STATE" "$ID" || exit 1
+  [ ! -e "$CONFIG/fleet-ledger" ] || FM_HOME=$FM_HOME FM_STATE_OVERRIDE=$STATE FM_CONFIG_OVERRIDE=$CONFIG "$SCRIPT_DIR/fm-fleet-ledger.sh" cleaned_up "$ID" || true
+  status_retire_presentation_task "$STATE" "$ID" || exit 1
+  fm_wake_queue_prune_task "$STATE" "$ID" "$T" 2>/dev/null || true
+  rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
+    "$(fm_wake_signal_seen_path "$STATE" "$STATE/$ID.turn-ended")" "$STATE/$ID.reconcile-nudged"
+  if [ "$BACKLOG_CLOSED" = 1 ]; then
+    BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
+    if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
+        "$DATA" "$ID" "$STATE" "${BACKLOG_DONE_ARGS[@]+"${BACKLOG_DONE_ARGS[@]}"}"; then
+      echo "error: $ID passed its teardown gate, but its backlog item could not be moved atomically ($FM_BACKLOG_TRANSITION_ERROR); the pending $BACKLOG_TRANSITION is recorded, and the next session start finishes it and any sandbox destroy still owed" >&2
+      exit 1
+    fi
+  elif ! fm_backlog_atomic_transition remove "$STATE/$ID.meta" "task record" "$STATE"; then
+    echo "error: $ID passed its teardown gate, but its task record could not be removed ($FM_BACKLOG_TRANSITION_ERROR); rerun teardown to finish" >&2
+    exit 1
+  fi
+  fm_lock_release "$META_LOCK"
+  META_LOCK_HELD=0
+
+  if [ "$present" = 1 ]; then
+    if fm_sandbox_destroy "$ID" "$name"; then
+      destroyed=1
+    else
+      destroyed=failed
+      echo "error: task $ID's records are closed, but its sandbox $name could not be destroyed ($FM_SANDBOX_ERROR); state/$ID.sandbox-destroy-pending keeps that destroy, and the next session start retries it" >&2
+    fi
+  fi
+  if [ "$KIND" = ship ] && [ "$MODE" != local-only ]; then
+    "$FM_ROOT/bin/fm-fleet-sync.sh" "$PROJ" || true
+  fi
+  "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
+  case "$destroyed" in
+    1) echo "teardown $ID complete (sandbox $name destroyed)" ;;
+    0) echo "teardown $ID complete (sandbox $name was confirmed absent, so nothing was destroyed)" ;;
+  esac
+  backlog_refresh_reminder || reminder_rc=$?
+  [ "$destroyed" != failed ] || exit 1
+  exit "$reminder_rc"
+}
+
+if [ "$TEARDOWN_ROUTE_KIND" = task ]; then
+  sandbox_task_teardown
+fi
+
 require_exclusive_task_worktree_slot || exit 1
 require_owned_task_worktree_slot || exit 1
 
@@ -3405,57 +3719,10 @@ if [ "$KIND" = secondmate ] && [ "$FORCE" = "--force" ]; then
 fi
 
 if [ "$KIND" = scout ] && [ "$FORCE" != "--force" ]; then
-  REPORT="$DATA/$ID/report.md"
-  if [ ! -f "$REPORT" ]; then
-    echo "REFUSED: scout task $ID has no report at $REPORT." >&2
-    echo "The report is the work product. Have the crewmate write it, or use --force after explicit discard approval." >&2
-    exit 1
-  fi
-  if ! FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" \
-      FM_CONFIG_OVERRIDE="$CONFIG" "$SCRIPT_DIR/fm-captain-hold.sh" verify "$ID" >/dev/null; then
-    echo "REFUSED: scout task $ID has not passed the captain-call completion gate." >&2
-    echo "Inventory its report and any visual review through bin/fm-captain-hold.sh before teardown." >&2
-    exit 1
-  fi
+  teardown_scout_completion_gate || exit 1
 fi
 
-# A public commitment is not kept until its final reply lands in the ORIGINAL
-# thread, and this cleanup removes the task records that make the promise
-# reconcilable. Refuse while this home still owes a public reply for exactly this
-# work. Both gates live in bin/fm-public-followup-lib.sh, so a home that never
-# opted into the myfirstmate relay runs one [ -f ] test and nothing else here.
-if [ "$FORCE" != "--force" ] && [ "$PUBLIC_FOLLOWUP_PARENT_UNRESOLVED" = 1 ]; then
-  echo "REFUSED: cannot resolve the primary home for marked secondmate $SECOND_MATE_ID; refusing cleanup without its durable parent binding." >&2
-  exit 1
-fi
-if [ "$FORCE" != "--force" ] \
-  && [ -n "$PUBLIC_FOLLOWUP_STATE" ] \
-  && [ "$PUBLIC_FOLLOWUP_RELAY_ACTIVE" = 1 ] \
-  && fm_pf_has_registrations "$PUBLIC_FOLLOWUP_STATE"; then
-  if ! PUBLIC_FOLLOWUP_BLOCKING=$(FM_HOME="$PUBLIC_FOLLOWUP_HOME" FM_STATE_OVERRIDE="$PUBLIC_FOLLOWUP_STATE" \
-      "$SCRIPT_DIR/fm-public-followup.sh" guard-work "$PUBLIC_FOLLOWUP_WORK_HOME" "$ID" 2>/dev/null); then
-    echo "REFUSED: task $ID still owes a public reply through the myfirstmate relay." >&2
-    printf '%s\n' "$PUBLIC_FOLLOWUP_BLOCKING" >&2
-    echo "Deliver it with bin/fm-public-followup.sh deliver <obligation-id>, waive it with bin/fm-tasks-axi.sh public-followup waive, or use --force after explicit discard approval." >&2
-    exit 1
-  fi
-fi
-
-# Non-blocking: a delivered public loop is not a teardown refusal (guard-work
-# already passed), but tearing down a ship whose PR merged while a loop is still
-# open with nothing owed is the moment the drop is detectable.
-if [ "$KIND" = ship ] && [ -n "$PR_URL" ] \
-    && [ -n "$PUBLIC_FOLLOWUP_STATE" ] \
-    && [ "${PUBLIC_FOLLOWUP_RELAY_ACTIVE:-0}" = 1 ] \
-    && fm_pf_has_delivered_open_loops "$PUBLIC_FOLLOWUP_STATE"; then
-  echo "warning: an open public loop with nothing owed is still recorded in the consent-holding home while cleaning up ship task $ID. Hand it on with bin/fm-public-followup.sh rechain or close it with retire --reason." >&2
-fi
-
-# Non-blocking: the legacy Relay link is not guarded as a refusal.
-X_REQUEST=$(grep '^x_request=' "$META" 2>/dev/null | tail -1 | cut -d= -f2- || true)
-if [ -n "$X_REQUEST" ]; then
-  echo "warning: task $ID still carries an unreconciled Relay request link ($X_REQUEST) on its task record." >&2
-fi
+teardown_public_followup_checks || exit 1
 
 if [ "$BACKEND" = orca ] && [ "$KIND" != scout ] && [ "$KIND" != secondmate ] && [ "$FORCE" != "--force" ]; then
   if ! inspectable_git_worktree "$WT"; then

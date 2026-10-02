@@ -5,7 +5,8 @@
 # BEFORE the digest printed, on a hook that blocks session initialization: `gh
 # auth status`, the secondmate liveness and convergence sweeps (per-secondmate
 # remote probes, which bootstrap runs concurrently), pending remote
-# handoff delivery, and the fleet-sync fetch of every project clone. None of
+# handoff delivery, the fleet-sync fetch of every project clone, and sandbox
+# reconciliation through the sandbox provider. None of
 # those calls is individually bounded, so one unreachable host could consume the
 # whole FM_SESSION_START_TIMEOUT budget and truncate the digest outright, turning
 # a slow network into a startup that never printed the work queue at all.
@@ -96,7 +97,8 @@
 #                             bin/fm-timing-lib.sh's tab-separated format: the
 #                             stage total, one record per network phase (gh auth,
 #                             secondmate liveness, secondmate convergence, handoff
-#                             delivery, fleet sync), one per secondmate for the
+#                             delivery, sandbox reconciliation, fleet sync), one
+#                             per secondmate for the
 #                             remote-touching steps (id and host), and one per
 #                             project clone. Published for a timed-out or failed
 #                             run too, where a partial record is the answer.
@@ -224,7 +226,7 @@ worker_alive() {
 phase_label() {  # <phases>
   case "$1" in
     probe) printf 'GitHub authentication' ;;
-    probe,sweeps) printf 'GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, project clone refresh with its drift reporting, and inactive terminal-outcome reconciliation' ;;
+    probe,sweeps) printf 'GitHub authentication, dead-secondmate relaunch, secondmate convergence, pending handoff delivery, sandbox reconciliation, project clone refresh with its drift reporting, and inactive terminal-outcome reconciliation' ;;
     *) printf 'the deferred network checks' ;;
   esac
 }

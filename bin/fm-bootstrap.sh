@@ -22,7 +22,14 @@
 #                 "BOOTSTRAP_INFO: nudged fm-<id> with '<message>'",
 #                 "SECONDMATE_LIVENESS: secondmate <id>: skipped: <reason>|respawn failed after <cause>: <reason>",
 #                 "SECONDMATE_HANDOFF: secondmate <id>: pending delivery: <n> item(s)",
+#                 "SANDBOX_DESTROY_PENDING: <id>: sandbox <name> <why its destroy is still owed>",
+#                 "BOOTSTRAP_INFO: destroyed sandbox <name> for <id>, which an earlier teardown left pending",
+#                 "SANDBOX_TTL: <id>: sandbox <name> <why its TTL was not renewed>",
+#                 "SANDBOX_ORPHAN: sandbox <name> (task <id>, <state>) has no task record in this home; ...",
+#                 "SANDBOX_ORPHAN: this home's sandbox inventory could not be read (<reason>), ...",
 #                 "FMX: X mode on ..." or "FMX: X mode off ...".
+#          The SANDBOX_ lines come from sandbox_reconcile below, which owns
+#          when each prints.
 #          When a RUNNING secondmate home is fast-forwarded, its target is
 #          firstmate's own current default-branch commit. A local worktree uses
 #          a purely local fast-forward with no origin fetch; a remote route hands
@@ -101,18 +108,18 @@
 #          The `code-root <file>` variant is a detect-only local check that runs
 #          even in a read-only session; detect_code_root_backlog_fork owns what
 #          it reports.
-#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the six MUTATING sweeps
+#          Set FM_BOOTSTRAP_DETECT_ONLY=1 to skip the seven MUTATING sweeps
 #          (backlog_record_reconcile, secondmate_sync,
 #          secondmate_liveness_sweep, secondmate_handoff_resume, x_mode_setup,
-#          fleet_sync) while still
+#          fleet_sync, sandbox_reconcile) while still
 #          printing every read-only detect line
 #          above; the TANGLE line switches to advisory-only wording with no
 #          checkout command. Used by
 #          fm-session-start.sh's read-only path when another live session holds
 #          the fleet lock, so a second concurrent session never race-mutates
 #          secondmate homes, pending handoff outboxes and receiver wakes,
-#          X-mode artifacts, project clones, or repair instructions.
-#          Unset/0 (the default) runs all six sweeps - this flag is purely
+#          X-mode artifacts, project clones, sandboxes, or repair instructions.
+#          Unset/0 (the default) runs all seven sweeps - this flag is purely
 #          additive.
 #          Set FM_BOOTSTRAP_NETWORK to split this run by whether a step talks to
 #          the network, so a session start can print its digest from local reads
@@ -122,7 +129,7 @@
 #                 must never silently skip a safety sweep.
 #            skip - every LOCAL step, and none of the network ones. Skips
 #                 `gh auth status`, secondmate_liveness_sweep, secondmate_sync,
-#                 secondmate_handoff_resume, and fleet_sync.
+#                 secondmate_handoff_resume, fleet_sync, and sandbox_reconcile.
 #            only - ONLY those network steps and nothing else. No tool detection,
 #                 no version floors, no tangle check, no backlog
 #                 reconciliation, no x_mode_setup: those already ran on the
@@ -199,6 +206,10 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 . "$SCRIPT_DIR/fm-x-lib.sh"
 # shellcheck source=bin/fm-backend.sh disable=SC1091
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
+# shellcheck source=bin/fm-sandbox-reconcile-lib.sh disable=SC1091
+. "$SCRIPT_DIR/fm-sandbox-reconcile-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh disable=SC1091
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
 # Shared secondmate endpoint probe + guarded relaunch; the watcher's poll tick
@@ -1307,6 +1318,139 @@ backlog_record_reconcile() {
   done
 }
 
+# Sandbox reconciliation (docs/remote-sandboxes.md, "Teardown, TTL, and
+# orphans") through bin/fm-sandbox-reconcile-lib.sh. Every step is a provider
+# call, so it runs in the deferred network phase, and it changes sandboxes, so a
+# detect-only session skips it. A home with no config/sandbox-provider, no
+# sandbox task record, and no pending destroy makes no provider call and prints
+# nothing. In order:
+#   - A destroy a landed teardown left pending is retried under the task's
+#     lifecycle lock, skipped while a lifecycle action holds it. The sandbox is
+#     kept, and SANDBOX_DESTROY_PENDING printed, while the task's record still
+#     names it, which only a rerun of teardown may finish, or while the task's
+#     backlog transition is still pending in state/<id>.backlog-close, which
+#     backlog_record_reconcile replays first. Otherwise the destroy runs, and a
+#     success prints a BOOTSTRAP_INFO fact and a failure SANDBOX_DESTROY_PENDING.
+#   - Each sandbox a task record names has its TTL renewed with the provider's
+#     default once the inventory lists it under that task's label; anything
+#     else prints SANDBOX_TTL.
+#   - Each running or stopped sandbox in this home's inventory that no task
+#     record or pending destroy names, and that no live spawn is still
+#     publishing, prints SANDBOX_ORPHAN. An orphan is never destroyed here,
+#     because a crash between launch and publication can leave real work in it.
+sandbox_reconcile() {
+  local meta marker id name task state line shown control_lock close_marker spawn_pid inventory_error='' i lookup_rc
+  local -a record_ids=() record_names=() markers=()
+  [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
+  for meta in "$STATE"/*.meta; do
+    [ -f "$meta" ] && [ ! -L "$meta" ] || continue
+    LC_ALL=C grep -q '^placement=sandbox$' "$meta" 2>/dev/null || continue
+    id=$(basename "$meta" .meta)
+    fm_remote_route_resolve "$meta" "$id" || continue
+    [ "$FM_REMOTE_ROUTE_KIND" = task ] || continue
+    name=$(fm_backend_meta_exact_value "$meta" sandbox_name) || continue
+    fm_sandbox_name_valid "$name" || continue
+    record_ids+=("$id")
+    record_names+=("$name")
+  done
+  for marker in "$STATE"/*.sandbox-destroy-pending; do
+    [ -e "$marker" ] || [ -L "$marker" ] || continue
+    markers+=("$marker")
+  done
+  [ -f "$CONFIG/sandbox-provider" ] || [ "${#record_ids[@]}" -gt 0 ] || [ "${#markers[@]}" -gt 0 ] || return 0
+  network_sweep_authorized 'sandbox reconciliation' || return 0
+  # Locks and process liveness come from the wake library, whose source-time
+  # state-directory creation stays inside this mutating sweep.
+  # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
+  . "$SCRIPT_DIR/fm-wake-lib.sh"
+
+  for marker in "${markers[@]+"${markers[@]}"}"; do
+    if ! fm_sandbox_destroy_pending_read "$marker"; then
+      echo "SANDBOX_DESTROY_PENDING: ${marker##*/}: this destroy-pending record is unusable ($FM_SANDBOX_ERROR); inspect it before acting on it"
+      continue
+    fi
+    id=$FM_SANDBOX_PENDING_TASK
+    name=$FM_SANDBOX_PENDING_NAME
+    control_lock="$STATE/.control-$id.lock"
+    fm_lock_try_acquire "$control_lock" || continue
+    close_marker=$(fm_backlog_close_marker_path "$STATE" "$id")
+    if [ "$(fm_meta_get "$STATE/$id.meta" sandbox_name)" = "$name" ]; then
+      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name still has its task record, so its destroy waits for a rerun of bin/fm-teardown.sh $id"
+    elif [ -e "$close_marker" ] || [ -L "$close_marker" ]; then
+      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name waits for the task's backlog transition still pending in state/$id.backlog-close, so it was kept; session start retries both"
+    elif fm_sandbox_destroy "$id" "$name"; then
+      echo "BOOTSTRAP_INFO: destroyed sandbox $name for $id, which an earlier teardown left pending"
+    else
+      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name is still not destroyed ($FM_SANDBOX_ERROR); session start retries it"
+    fi
+    fm_lock_release "$control_lock"
+  done
+
+  if ! fm_sandbox_inventory_read; then
+    inventory_error=$FM_SANDBOX_ERROR
+  fi
+  i=0
+  while [ "$i" -lt "${#record_ids[@]}" ]; do
+    id=${record_ids[$i]}
+    name=${record_names[$i]}
+    i=$((i + 1))
+    if [ -n "$inventory_error" ]; then
+      echo "SANDBOX_TTL: $id: sandbox $name: TTL not renewed, because this home's sandbox inventory could not be read ($inventory_error)"
+      continue
+    fi
+    lookup_rc=0
+    fm_sandbox_inventory_lookup "$name" || lookup_rc=$?
+    case "$lookup_rc" in
+      0) ;;
+      1)
+        echo "SANDBOX_TTL: $id: sandbox $name is not in this home's sandbox inventory (absent, or labelled for another home), so its TTL was not renewed"
+        continue
+        ;;
+      *)
+        echo "SANDBOX_TTL: $id: sandbox $name is listed more than once in this home's sandbox inventory, so its TTL was not renewed"
+        continue
+        ;;
+    esac
+    if [ "$FM_SANDBOX_INV_TASK" != "$id" ]; then
+      echo "SANDBOX_TTL: $id: sandbox $name is labelled for task ${FM_SANDBOX_INV_TASK:-(none)}, so its TTL was not renewed"
+      continue
+    fi
+    fm_sandbox_renew "$name" \
+      || echo "SANDBOX_TTL: $id: sandbox $name: TTL renewal failed ($FM_SANDBOX_ERROR)"
+  done
+
+  if [ -n "$inventory_error" ]; then
+    echo "SANDBOX_ORPHAN: this home's sandbox inventory could not be read ($inventory_error), so sandboxes without a task record were not checked"
+    return 0
+  fi
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    name=$(fm_sandbox_record_field "$line" name) || continue
+    state=$(fm_sandbox_record_field "$line" state) || state=
+    case "$state" in running|stopped) ;; *) continue ;; esac
+    task=$(fm_sandbox_record_field "$line" fm_task) || task=
+    shown=$(printf '%s' "$name" | LC_ALL=C tr -c '[:print:]' '?')
+    case "$task" in
+      ''|.*|*[!A-Za-z0-9._-]*)
+        echo "SANDBOX_ORPHAN: sandbox $shown carries no usable fm_task label, so no task record in this home can name it; it is never destroyed automatically - preserve any work in it before removing it"
+        continue
+        ;;
+    esac
+    [ "$(fm_meta_get "$STATE/$task.meta" sandbox_name)" != "$name" ] || continue
+    if fm_sandbox_destroy_pending_read "$(fm_sandbox_destroy_pending_path "$task")" \
+      && [ "$FM_SANDBOX_PENDING_NAME" = "$name" ]; then
+      continue
+    fi
+    spawn_pid=$(cat "$STATE/.spawn-$task.lock/pid" 2>/dev/null || true)
+    if [ -n "$spawn_pid" ] && fm_pid_alive "$spawn_pid"; then
+      continue
+    fi
+    echo "SANDBOX_ORPHAN: sandbox $shown (task $task, $state) has no task record in this home; it is never destroyed automatically - preserve any work in it, then destroy it with bin/fm-sandbox.sh destroy $shown --expect-task $task"
+  done <<EOF
+$FM_SANDBOX_INVENTORY
+EOF
+}
+
 startup_memory_budget_setup() {
   # Primary bootstrap owns default publication. A secondmate is deliberately
   # passive here because its setting must converge from the primary through the
@@ -1600,6 +1744,11 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
       secondmate_handoff_resume
       fm_timing_record phase handoff-delivery "$__fm_timing_stamp"
     fi
+    # sandbox_reconcile checks fleet-lock ownership itself, once it knows this
+    # home has sandbox work, so a home without any stays silent.
+    __fm_timing_stamp=$(fm_timing_now_ms)
+    sandbox_reconcile
+    fm_timing_record phase sandbox-reconcile "$__fm_timing_stamp"
   fi
   # x_mode_setup writes local Relay artifacts only and never leaves the machine.
   local_phase && x_mode_setup

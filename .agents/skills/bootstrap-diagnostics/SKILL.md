@@ -2,7 +2,7 @@
 name: bootstrap-diagnostics
 description: >-
   Agent-only handling playbook for session-start bootstrap diagnostics.
-  Use whenever the session-start digest's bootstrap or network-checks section prints an actionable diagnostic line - MISSING, MISSING_MANUAL, PRESENTATION_UNAVAILABLE, BACKEND_INVALID, NEEDS_GH_AUTH, TANGLE, STARTUP_MEMORY_BUDGET, CREW_DISPATCH invalid, FLEET_SYNC, NETWORK_CHECKS, HOME_SUMMARY, BACKLOG_RECONCILE, SECONDMATE_SYNC, SECONDMATE_LIVENESS, SECONDMATE_HANDOFF, NUDGE_SECONDMATES, or FMX - or reports that an interrupted backlog cleanup may have left an endpoint or local copy, or when a standalone bin/fm-bootstrap.sh or bin/fm-startup-network.sh run prints one of those lines.
+  Use whenever the session-start digest's bootstrap or network-checks section prints an actionable diagnostic line - MISSING, MISSING_MANUAL, PRESENTATION_UNAVAILABLE, BACKEND_INVALID, NEEDS_GH_AUTH, TANGLE, STARTUP_MEMORY_BUDGET, CREW_DISPATCH invalid, FLEET_SYNC, NETWORK_CHECKS, HOME_SUMMARY, BACKLOG_RECONCILE, SECONDMATE_SYNC, SECONDMATE_LIVENESS, SECONDMATE_HANDOFF, NUDGE_SECONDMATES, SANDBOX_DESTROY_PENDING, SANDBOX_TTL, SANDBOX_ORPHAN, or FMX - or reports that an interrupted backlog cleanup may have left an endpoint or local copy, or when a standalone bin/fm-bootstrap.sh or bin/fm-startup-network.sh run prints one of those lines.
   A silent bootstrap section, or any other BOOTSTRAP_INFO fact, means no skill load.
 user-invocable: false
 metadata:
@@ -71,6 +71,19 @@ When any diagnostic needs captain attention, report the plain consequence and re
 - `SECONDMATE_HANDOFF: secondmate <id>: pending delivery: <n> item(s)` - queued work has already left the main dispatchable backlog and remains safe in the named remote route's backlog-format outbox because backlog receipt or local outbox cleanup has not completed; [`bin/fm-backlog-handoff.sh`](../../../bin/fm-backlog-handoff.sh) owns the release contract.
   Preserve that outbox and rerun `bin/fm-backlog-handoff.sh --resume-pending` after the route, receipt, or cleanup problem is resolved; never re-add or dispatch the items from the main backlog.
   An unsafe-outbox variant requires path and file-type inspection before any retry.
+- `SANDBOX_DESTROY_PENDING: <id>: sandbox <name> ...` - a sandbox task's teardown passed its landed-work gate, or was a captain-authorized `--force` discard, but the label-confirmed destroy of its sandbox has not happened yet; `state/<id>.sandbox-destroy-pending` keeps that destroy, and every session start retries it.
+  Read the printed reason: a provider outage clears on its own, while a label mismatch means the sandbox no longer belongs to that task and must not be destroyed.
+  The `still has its task record` variant means that teardown stopped before its records were closed, so rerun `bin/fm-teardown.sh <id>`, which finishes it safely.
+  The `backlog transition still pending` variant means the task's backlog close or captain-call retention has not landed yet, so the sandbox is kept: resolve the `BACKLOG_RECONCILE` line that names the same task, and the next session start replays the transition and then the destroy.
+  Remove the record by hand only after `bin/fm-sandbox.sh status <name>` shows the sandbox absent or labelled for another task, and never destroy a sandbox the record does not name.
+  An `unusable` record is inert until inspected: read it as data, and never act on a name in it that failed validation.
+- `SANDBOX_TTL: <id>: sandbox <name> ...` - session start could not renew the TTL of a sandbox a live task record names.
+  The sandbox keeps its hold label, so the provider's reaper still leaves it alone, and a renewal failure alone loses nothing.
+  A sandbox `not in this home's sandbox inventory` or `labelled for task <other>` contradicts its record: the task's work may already be gone or the record may name the wrong sandbox, so reconcile that task before its teardown, which refuses the same contradiction.
+  `could not be read` means the provider itself is unreachable or misconfigured; fix that and rerun session start.
+- `SANDBOX_ORPHAN: sandbox <name> (task <id>, <state>) has no task record in this home; ...` - a sandbox labelled for this home exists that no task record or pending destroy names, typically a spawn that stopped between creating it and publishing its record.
+  It may hold real work, so it is never destroyed automatically: tell the captain, preserve anything unlanded in it, and run the printed destroy only with the captain's word, because destroying it discards whatever it holds.
+  The `could not be read` variant means the orphan check did not run this time.
 - `NUDGE_SECONDMATES: secondmate <id>: send failed: <reason>` - secondmate convergence changed a running home's loaded instructions or inherited config, but the deterministic `fm-send.sh fm-<id>` re-read nudge failed.
   Inspect the reason, keep the pending marker under `state/.secondmate-nudge-pending/` intact, and rerun session start after the endpoint or metadata issue is fixed so bootstrap can retry the exact same marked send on the same local or remote route.
 - `FMX: X mode on ...` / `FMX: X mode off ...` - bootstrap confirmed or removed the local Relay poll artifacts (`docs/configuration.md` "Relay (.env)"); the emitted line still carries Relay's former `X mode` wording.

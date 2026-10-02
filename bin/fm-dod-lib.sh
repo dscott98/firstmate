@@ -17,6 +17,9 @@
 # bin/fm-pr-check.sh (PR registration), and bin/fm-inactive-reconcile.sh
 # (secondmate ledger-first publish of a child done). A ship `done:` is not
 # accepted while the named head exists only in the worker's disposable copy.
+# A sandbox task's copy is on its sandbox, so bin/fm-pr-check.sh gates it
+# through fm_dod_accept_sandbox_ship_done, which reads the named head with the
+# host's `head` verb and never a local path.
 # The check tests that head, not whether some branch moved. In no-mistakes
 # mode the pre-validation `done: {summary}` is the pipeline handoff and is
 # not gated; only the later CI-ready `done: PR <url> checks green` is, or on a
@@ -682,5 +685,108 @@ fm_dod_accept_ship_done() {  # <kind> <mode> <worktree> <project> <line> [<state
     return 0
   fi
   printf '%s\n' "named head $sha is unreachable outside the worker copy"
+  return 1
+}
+
+# The named head of a sandbox task's worker copy, which lives on its sandbox:
+# the HEAD its host's `head` verb (bin/fm-remote-task-control.sh) reports
+# through bin/fm-on.sh's task route, read within bin/fm-remote-receive.sh's
+# bounds of 20 seconds and 64 KiB per stream. The block is untrusted input
+# about its own task, so it must hold exactly schema, branch, head, and dirty,
+# once each, with a full commit id for head. Prints that head; 1 when it cannot
+# be read, with stdout holding a one-line reason.
+fm_dod_sandbox_named_head() {  # <id> <control-script>
+  local id=$1 control=$2 dir tmp status out line key value seen=' ' schema='' head='' dirty='' defect=''
+  dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/fm-dod-head.XXXXXX") || {
+    printf '%s\n' "named head cannot be verified: no temporary directory for the sandbox head read"
+    return 1
+  }
+  if ! FM_HOME="${FM_HOME:-}" bash "$dir/fm-remote-receive.sh" 20 65536 65536 "$tmp/status" \
+      "$dir/fm-on.sh" "$id" "$control" head "$id" < /dev/null > "$tmp/out" 2>/dev/null \
+    || [ "$(cat "$tmp/status" 2>/dev/null)" != exit:0 ]; then
+    status=$(cat "$tmp/status" 2>/dev/null || true)
+    rm -rf -- "$tmp"
+    printf '%s\n' "named head cannot be verified: the sandbox host's head read did not complete (${status:-no receiver status})"
+    return 1
+  fi
+  out=$(cat "$tmp/out" 2>/dev/null || true)
+  rm -rf -- "$tmp"
+  while IFS= read -r line; do
+    case "$line" in *=*) ;; *) defect="a line that is not key=value"; break ;; esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$seen" in *" $key "*) defect="field $key appears more than once"; break ;; esac
+    seen="$seen$key "
+    case "$value" in *[[:cntrl:]]*) defect="field $key holds a control character"; break ;; esac
+    case "$key" in
+      schema) schema=$value ;;
+      branch) ;;
+      head) head=$value ;;
+      dirty) dirty=$value ;;
+      *) defect="an unknown field"; break ;;
+    esac
+  done <<EOT
+$out
+EOT
+  for key in schema branch head dirty; do
+    [ -z "$defect" ] || break
+    case "$seen" in *" $key "*) ;; *) defect="field $key is missing" ;; esac
+  done
+  if [ -z "$defect" ]; then
+    if [ "$schema" != fm-remote-task-control.v1 ]; then
+      defect="schema is not fm-remote-task-control.v1"
+    elif ! fm_pr_head_valid "$head"; then
+      defect="head is not a commit id"
+    else
+      case "$dirty" in yes|no) ;; *) defect="dirty is not yes or no" ;; esac
+    fi
+  fi
+  if [ -n "$defect" ]; then
+    printf '%s\n' "named head cannot be verified: the sandbox host's head block is unusable ($defect)"
+    return 1
+  fi
+  printf '%s\n' "$head"
+}
+
+# The ship done gate for a sandbox task, used by bin/fm-pr-check.sh. A line
+# that is not a ship done: to gate, or that names the task's recorded PR whose
+# head the forge holds, passes exactly as in fm_dod_accept_ship_done. Otherwise
+# the named head is the sandbox copy's HEAD (fm_dod_sandbox_named_head), and it
+# passes when it is <forge-head> - the head the forge reports for the PR the
+# line names, so it is stored outside the disposable sandbox - or when a
+# remote-tracking ref in this home's project clone contains it. A published
+# Gerrit change is refused, because its published-tree check needs the copy's
+# objects, which only the sandbox holds, and a published-for-review report
+# naming no Gerrit change is refused as the local gate refuses it. 1 when the
+# claim is refused; stdout then holds a one-line reason and no other output.
+fm_dod_accept_sandbox_ship_done() {  # <kind> <mode> <project> <line> <state> <id> <meta> <control-script> <forge-head>
+  local kind=$1 mode=$2 project=$3 line=$4 state=$5 id=$6 meta=$7 control=$8 forge_head=$9 note url sha gerrit=0
+  fm_dod_should_gate_ship_done "$kind" "$mode" "$line" || return 0
+  note=$(status_line_note "$line")
+  url=$(fm_dod_pr_url_from_done_note "$note") || url=
+  if [ -n "$url" ] && fm_dod_recorded_pr_on_forge "$state" "$id" "$meta" "$mode" "$url"; then
+    return 0
+  fi
+  [ -n "$url" ] && fm_pr_url_parse "$url" && [ "$FM_PR_PROVIDER" = gerrit ] && gerrit=1
+  if [ "$gerrit" = 0 ] && fm_dod_note_reports_published_change "$note"; then
+    printf '%s\n' "the published-for-review report does not name a Gerrit change in the canonical https://<host>/c/<project>/+/<number> form"
+    return 1
+  fi
+  if [ "$gerrit" = 1 ]; then
+    printf '%s\n' "a published Gerrit change cannot be verified for a sandbox task: its published-tree check needs the worker copy, which only the sandbox holds"
+    return 1
+  fi
+  if ! sha=$(fm_dod_sandbox_named_head "$id" "$control"); then
+    printf '%s\n' "$sha"
+    return 1
+  fi
+  if [ -n "$forge_head" ] && [ "$forge_head" = "$sha" ]; then
+    return 0
+  fi
+  if fm_dod_ref_contains "$project" refs/remotes "$sha"; then
+    return 0
+  fi
+  printf '%s\n' "named head $sha on the sandbox is unreachable outside the worker copy: the forge reports ${forge_head:-no head} for ${url:-the PR}"
   return 1
 }
