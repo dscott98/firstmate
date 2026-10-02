@@ -35,7 +35,7 @@
 # command, then prints the settings a caller needs as key=value lines -
 # provider (the provider command's file name, which must be a safe token),
 # default_profile, ttl, remote_root, and remote_home (the sandbox template's
-# Firstmate code root and one-task home, defaulted when absent). It is how
+# Firstmate code root /opt/firstmate and one-task home /home/agent/fm-home). It is how
 # bin/fm-spawn.sh reads this file without parsing it a second time.
 #
 # HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
@@ -125,6 +125,10 @@ FM_SANDBOX_DEFAULT_PROFILE=
 FM_SANDBOX_TTL=
 FM_SANDBOX_REMOTE_ROOT=/opt/firstmate
 FM_SANDBOX_REMOTE_HOME=/home/agent/fm-home
+if [ "${FM_TEST_SEAM:-}" = 1 ]; then
+  FM_SANDBOX_REMOTE_ROOT=${FM_TEST_SANDBOX_ROOT:-$FM_SANDBOX_REMOTE_ROOT}
+  FM_SANDBOX_REMOTE_HOME=${FM_TEST_SANDBOX_HOME:-$FM_SANDBOX_REMOTE_HOME}
+fi
 FM_SANDBOX_OUT=
 FM_SANDBOX_RC=0
 
@@ -209,7 +213,7 @@ fm_sandbox_read_config() {
         fm_sandbox_valid_duration "$value" || refuse "ttl '$value' in $CONFIG must be one integer plus one unit of s, m, h, d, or w, for example 4h"
         FM_SANDBOX_TTL=$value
         ;;
-      ssh_include|remote_root|remote_home)
+      ssh_include)
         case "$value" in
           /*) ;;
           *) refuse "$key '$value' in $CONFIG must be an absolute path" ;;
@@ -217,13 +221,9 @@ fm_sandbox_read_config() {
         case "$value" in
           *[[:space:]]*|*[[:cntrl:]]*) refuse "$key '$value' in $CONFIG must not contain whitespace or control characters" ;;
         esac
-        case "$key" in
-          remote_root) FM_SANDBOX_REMOTE_ROOT=$value ;;
-          remote_home) FM_SANDBOX_REMOTE_HOME=$value ;;
-        esac
         ;;
       *)
-        refuse "unknown key '$key' in $CONFIG: accepted keys are default_profile, ttl, ssh_include, remote_root, and remote_home"
+        refuse "unknown key '$key' in $CONFIG: accepted keys are default_profile, ttl, and ssh_include"
         ;;
     esac
     seen="$seen$key "

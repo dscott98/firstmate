@@ -548,17 +548,15 @@ The first line holds the provider command's absolute path, then `key=value` line
 | `default_profile=<name>` | Network profile used when `create` omits `--profile`; `open` is refused as a default and requires explicit per-task `--profile open`. |
 | `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
 | `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into; whitespace is refused. |
-| `remote_root=<absolute path>` | The Firstmate code root in the provider's sandbox template, optional with default `/opt/firstmate`. |
-| `remote_home=<absolute path>` | The one-task Firstmate home a sandbox's task runs in, optional with default `/home/agent/fm-home`. |
 
-`default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative or whitespace-bearing provider path, `ssh_include`, `remote_root`, or `remote_home`, and a malformed duration are refused with the concrete problem named.
+`default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative or whitespace-bearing provider path, `ssh_include`, and a malformed duration are refused with the concrete problem named.
 Blank lines and `#` comments are accepted after the first line.
 The provider path may contain spaces and must name an executable file.
 `default_profile` must be a non-empty printable token without whitespace, `=`, or a leading `-`.
 The adapter validates `ssh_include` but does not write it, pass it to the provider, or install an SSH `Include` directive; configure the provider and SSH client consistently with that path.
 
 `bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its [header](../bin/fm-sandbox.sh) owns the verb, record framing, ownership-label validation, and exit contracts the provider must satisfy.
-`bin/fm-sandbox.sh config` prints the validated settings, including the code root and home a sandbox brief is rendered for, without invoking the provider.
+`bin/fm-sandbox.sh config` prints the validated settings and the fixed template paths `/opt/firstmate` and `/home/agent/fm-home` without invoking the provider.
 Firstmate never holds the provider's API token and never calls the provider's API.
 
 Configuring a provider does not by itself place any task in a sandbox: only a spawn with an explicit `--placement sandbox` does, as [`docs/remote-sandboxes.md`](remote-sandboxes.md#placement) describes.

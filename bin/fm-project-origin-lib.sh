@@ -19,7 +19,7 @@
 # here, and there must never be one.
 #
 # Accepted forms:
-#   https://[userinfo@]host[:port]/path, http://…, ssh://…, git://…
+#   https://[user@]host[:port]/path, http://…, ssh://…, git://…
 #                                 a non-option-shaped plain host or bracketed
 #                                 IPv6 literal, an optional numeric port, and
 #                                 any path
@@ -63,7 +63,7 @@ fm_project_origin_safe() { # <url>; 0 when the URL is an accepted clone URL
           userpart=${authority%@*}
           hostpart=${authority##*@}
           case $userpart in
-            '' | -* | *'['* | *']'*) return 1 ;;
+            '' | -* | *:* | *@* | *'['* | *']'*) return 1 ;;
           esac
           ;;
       esac

@@ -31,7 +31,8 @@ What is wired today:
 - [Host-side task control](#host-side-task-control): everything a sandbox host runs for its one task, from provisioning its home to retiring it, and briefs rendered for that home.
 - [Placement](#placement): `bin/fm-spawn.sh --placement sandbox` creates a sandbox, converges and gates it, provisions its home with the task's credentials, launches the task, and records its route.
 
-Status mirroring, peek, steering, lifecycle control, current-state reads, teardown, and supervision of a placed task land in later stages of the plan.
+Status mirroring arrives in PR4b; sandbox placement is not for real use until then.
+Peek, steering, lifecycle control, current-state reads, teardown, and supervision of a placed task land in later stages of the plan.
 Until then a placed task's status lines stay on its host, and cleaning one up is a manual operator step: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
 
 ## Principles
@@ -60,6 +61,7 @@ Until then a placed task's status lines stay on its host, and cleaning one up is
 ## Credentials
 
 Sandbox credentials are Pi API-key providers plus per-repository GitHub tokens only.
+Project origins containing embedded passwords are refused before sandbox creation.
 They reach a sandbox only in its provisioning manifest, are written only on the sandbox host with mode 0600, and never appear in output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
 The local, captain-owned `config/sandbox-credentials` selects which of them each task receives, by harness, model provider, delivery mode, and project; [the configuration reference](configuration.md#sandbox-credentials-configsandbox-credentials) owns its format.
 Host keys are pinned by the provider, not trusted on first use, and the SSH configuration the sandbox aliases live in is provider-managed.
@@ -88,17 +90,19 @@ The provider command must satisfy the invocation, record framing, ownership-labe
 
 `bin/fm-spawn.sh <task-id> <project> --mode <mode> --yolo <on|off> --placement sandbox` places a ship in a sandbox, and `--scout --placement sandbox` places a scout; [the spawn header](../bin/fm-spawn.sh) owns the exact refusals, sequence, and record fields.
 
-- Placement is chosen per task and passed explicitly; nothing infers it, and a refusal or an unavailable provider is a blocker, never a local fallback.
+- Placement is chosen per task, recorded with its reason in the task's backlog note, and passed explicitly; nothing infers it, and a refusal or an unavailable provider is a blocker, never a local fallback.
 - Render the brief for the sandbox home with `bin/fm-brief.sh ... --for-home <remote_home> --for-root <remote_root>`, using the values `bin/fm-sandbox.sh config` prints; spawn refuses a brief that does not name that home's status file.
 - `--sandbox-profile <name>` defaults to the provider's default profile.
   Any other profile, such as `open`, needs an explicit captain instruction for that exact task, recorded in its brief with `fm-brief.sh --sandbox-profile <name>`; spawn refuses it otherwise.
-- Second mates, `local-only` ships, backends other than tmux, raw harness commands, and briefs carrying the `--herdr-lab` contract are refused.
+- Claude (pending the PR7 real-host smoke test), second mates, `local-only` ships, backends other than tmux, raw harness commands, and briefs carrying the `--herdr-lab` contract are refused.
 - A sandboxed Pi worker needs `--model <provider>/<id>` and a [credential](#credentials) for that provider.
   This home's worker account pins do not apply, because a sandbox's credentials come only from `config/sandbox-credentials`.
 
 Spawn checks the backlog item before anything exists, then creates the sandbox and publishes a provisional task record carrying its [route](#task-routes).
 One provider `exec` fast-forwards the sandbox's Firstmate code root to this home's default-branch commit before any `bin/fm-on.sh` call, and the [task readiness](#task-readiness) gate checks the host.
-The template's code root must therefore be a clean clone whose `origin` serves that commit; a code root that cannot fast-forward to it refuses the spawn.
+Read-only provider exec calls then verify exact HEAD equality and clean tracked files before readiness or launch.
+The template must use `/opt/firstmate` for its code root and `/home/agent/fm-home` for its task home.
+A mismatched or dirty code root refuses the spawn without resetting, checking out, or discarding changes.
 [Host-side task control](#host-side-task-control) then provisions the home and launches the task, and spawn checks the route block it returns field by field before it publishes the final record and moves the backlog item to In flight.
 
 A failure before launch destroys the sandbox, which holds no work yet, and removes the provisional record.
@@ -134,6 +138,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 
 Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
 Provision requires gh when a GitHub token is supplied, passes the token to `gh auth login --insecure-storage --with-token` on stdin, and restores the previous gh configuration if provisioning fails.
+Storing the repository token in gh deliberately replaces passing `GH_TOKEN`: gh and git authenticate with the stored token exactly as they would with `GH_TOKEN`.
 Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees; the token never enters command arguments or the launch environment.
 
 A sandbox brief is rendered with `bin/fm-brief.sh --for-home <remote-home> --for-root <remote-root>`, which names the sandbox's status file, inbox, and report while writing the brief in the supervising home.

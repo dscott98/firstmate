@@ -143,6 +143,17 @@ case "${1:-}" in
     shift 3
     printf '%s\n' "$*" >> "$d/exec.log"
     [ ! -f "$d/fail-exec" ] || { echo "fatal: Not possible to fast-forward, aborting." >&2; exit 128; }
+    if [ -f "$d/code-root" ]; then
+      root=$(cat "$d/code-root")
+      args=()
+      for arg in "$@"; do
+        [ "$arg" != "$FM_TEST_SANDBOX_ROOT" ] || arg=$root
+        args+=("$arg")
+      done
+      exec "${args[@]}"
+    fi
+    case "$*" in *' pull '*) exit 0 ;; esac
+    exec "$@"
     ;;
   destroy)
     printf '%s\n' "$2" >> "$d/destroyed.log"
@@ -158,6 +169,14 @@ chmod +x "$PROVIDER"
 HOST_BIN="$TMP_ROOT/host-bin"
 mkdir -p "$HOST_BIN"
 fm_fake_exit0 "$HOST_BIN" treehouse
+cat > "$HOST_BIN/pi" <<'SH'
+#!/usr/bin/env bash
+case "${1:-}" in
+  --help) printf '%s\n' '--approve' ;;
+  --version) printf 'fake-pi\n' ;;
+esac
+SH
+chmod +x "$HOST_BIN/pi"
 cat > "$HOST_BIN/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -246,7 +265,12 @@ case "${1:-}" in
   send-keys)
     case "$*" in
       *'/exit'*) printf 'bash\n' > "$d/pane-command" ;;
-      *"/launch."*) printf 'claude\n' > "$d/pane-command" ;;
+      *"/launch."*)
+        printf 'pi\n' > "$d/pane-command"
+        if [[ "$*" =~ (/tmp/fm-[^\'[:space:]]+)/launch\.([^\'[:space:]]+)\.sh ]]; then
+          printf 'agent-start\n' > "${BASH_REMATCH[1]}/pi-start.${BASH_REMATCH[2]}.ready"
+        fi
+        ;;
     esac
     ;;
 esac
@@ -351,7 +375,7 @@ EOF
 
 write_provider_config() {
   printf '%s\n' "$PROVIDER" default_profile=default ttl=4h "ssh_include=$TMP_ROOT/ssh-include" \
-    "remote_root=$CODE_ROOT" "remote_home=$HOST_HOME" > "$PRIMARY/config/sandbox-provider"
+    > "$PRIMARY/config/sandbox-provider"
 }
 
 # render_brief [fm-brief args...]: the real scaffold for this case's sandbox
@@ -376,7 +400,8 @@ sandbox_brief() { # [fm-brief args...]: a brief rendered for the sandbox home
 run_spawn() { # <spawn args...>; sets OUT and RC, with stderr in OUT
   OUT=$(env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE \
     -u FM_BACKEND -u FM_ROOT_OVERRIDE -u TRACEPARENT -u TMUX -u TMUX_PANE \
-    FM_HOME="$PRIMARY" FM_SPAWN_NO_GUARD=1 PATH="$LOCAL_BIN:$PATH" \
+    FM_HOME="$PRIMARY" FM_SPAWN_NO_GUARD=1 FM_TEST_SEAM=1 \
+    FM_TEST_SANDBOX_ROOT="$CODE_ROOT" FM_TEST_SANDBOX_HOME="$HOST_HOME" PATH="$LOCAL_BIN:$PATH" \
     FM_SSH_BIN="$LOCAL_BIN/fake-ssh" FM_FAKE_SSH_HOST="alias-$ID" FM_FAKE_SSH_LOG="$CASE/ssh.log" \
     FM_FAKE_SSH_MODE="${SSH_MODE:-normal}" FM_FAKE_HOST_DIR="$HOST_DIR" FM_FAKE_HOST_BIN="$HOST_BIN" \
     FM_FAKE_STUB_HARNESS="${STUB_HARNESS:-claude}" FM_FAKE_STUB_MODEL="${STUB_MODEL:-default}" \
@@ -439,16 +464,25 @@ test_refusals_happen_before_any_sandbox_exists() {
   new_case refuse
   sandbox_brief --mode direct-PR
 
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  assert_refused_before_any_sandbox "Claude" "Claude in sandboxes waits for the PR7 real-host smoke test"
+
+  git -C "$PRIMARY/projects/alpha" remote set-url origin "https://user:$GH_SECRET@github.com/org/repo.git"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "embedded password" "embedded passwords are forbidden"
+  git -C "$PRIMARY/projects/alpha" remote set-url origin "file://$ORIGIN"
+  assert_no_secret_anywhere "an embedded origin password"
+
   run_spawn "$ID" --secondmate --placement sandbox
   assert_refused_before_any_sandbox "secondmate" "--placement sandbox refuses --secondmate"
 
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode local-only --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode local-only --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "local-only" "--placement sandbox refuses --mode local-only"
 
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox --backend herdr
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox --backend herdr
   assert_refused_before_any_sandbox "non-tmux backend" "runs its worker only on the tmux backend in this version, not 'herdr'"
 
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --sandbox-profile open
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --sandbox-profile open
   assert_refused_before_any_sandbox "profile without sandbox placement" "--sandbox-profile applies only to --placement sandbox"
 
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness 'claude --yolo' --placement sandbox
@@ -460,21 +494,21 @@ test_refusals_happen_before_any_sandbox_exists() {
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model qwen/q3 --placement sandbox
   assert_refused_before_any_sandbox "Pi without a credential" "supplies Pi provider qwen"
 
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox --sandbox-profile open
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox --sandbox-profile open
   assert_refused_before_any_sandbox "unauthorized profile" "sandbox profile open is not authorized for $ID"
 
   mv "$PRIMARY/config/sandbox-provider" "$CASE/sandbox-provider.off"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "no provider" "no sandbox provider configured"
   assert_contains "$OUT" "default-off" "the no-provider refusal says sandbox placement is default-off"
   # A batch hands its placement to every pair rather than launching one locally.
-  run_spawn "$ID=$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID=$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "batch pair" "no sandbox provider configured"
   mv "$CASE/sandbox-provider.off" "$PRIMARY/config/sandbox-provider"
 
   sed 's/^ttl=4h$/ttl=forever/' "$PRIMARY/config/sandbox-provider" > "$CASE/sandbox-provider.bad"
   mv "$CASE/sandbox-provider.bad" "$PRIMARY/config/sandbox-provider"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "invalid provider config" "ttl 'forever'"
   write_provider_config
 
@@ -483,28 +517,28 @@ test_refusals_happen_before_any_sandbox_exists() {
   FM_HOME="$CASE/lab-home" "$BRIEF" lab-source alpha --mode direct-PR --herdr-lab >/dev/null \
     || fail "fm-brief.sh could not render a Herdr-lab brief"
   sed -n '/^# Herdr isolation/,/^# Setup/p' "$CASE/lab-home/data/lab-source/brief.md" | sed '$d' >> "$PRIMARY/data/$ID/brief.md"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "Herdr-lab brief" "carries the fm-brief.sh --herdr-lab isolation contract"
 
   rm -rf "$PRIMARY/data/$ID"
   render_brief --mode direct-PR
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "brief for this home" "must tell its worker to append status to the sandbox home's $HOST_HOME/state/$ID.status"
 
   rm -rf "$PRIMARY/data/$ID"
   sandbox_brief --mode direct-PR --sandbox-profile open
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "profile disagreement" "the brief records sandbox profile open but this spawn selected default"
 
   rm -rf "$PRIMARY/data/$ID"
   sandbox_brief --mode no-mistakes
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "delivery disagreement" "the brief says mode=no-mistakes but this spawn passed --mode direct-PR"
 
   rm -rf "$PRIMARY/data/$ID"
   sandbox_brief --mode direct-PR
   tasks-axi "done" "$ID" --file "$PRIMARY/data/backlog.md" >/dev/null 2>&1 || fail "could not close the fixture item"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "a closed backlog item dispatched a sandbox"
   assert_contains "$OUT" "is not dispatchable" "the backlog gate names the item's state"
   [ ! -s "$CASE/provider/argv.log" ] || fail "the backlog gate ran after the provider: $(cat "$CASE/provider/argv.log")"
@@ -538,17 +572,18 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   local tag spawn_gen key
   new_case ship
   sandbox_brief --mode direct-PR
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 0 "$RC" "a sandbox ship should launch"$'\n'"$OUT"
-  assert_contains "$OUT" "spawned $ID harness=claude kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha" \
+  assert_contains "$OUT" "spawned $ID harness=pi kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha,minimax" \
     "the success line names the placement, route, sandbox, profile, and credential names"
+  assert_contains "$OUT" "status mirroring arrives in PR4b; sandbox placement is not for real use until then" "success states the operational limitation"
 
   tag=$(sed -n "s/^create $ID --home \([^ ]*\) .*/\1/p" "$CASE/provider/argv.log")
   [ -n "$tag" ] || fail "the provider never received create for $ID: $(cat "$CASE/provider/argv.log")"
   assert_line "create $ID --home $tag --profile default --ttl 4h" "$CASE/provider/argv.log" "create carries the task, home tag, profile, and TTL"
   assert_line "git -C $CODE_ROOT pull --quiet --ff-only --no-rebase --no-tags origin $CODE_COMMIT" "$CASE/provider/exec.log" \
     "the one provider exec fast-forwards the code root to this home's default-branch commit"
-  assert_equals 1 "$(grep -c . "$CASE/provider/exec.log")" "convergence is one provider exec"
+  assert_equals 3 "$(grep -c . "$CASE/provider/exec.log")" "convergence is followed by two read-only checks"
   assert_absent "$CASE/provider/destroyed.log" "a launched sandbox is never destroyed by its spawn"
   assert_equals "alias-$ID fm-remote-doctor.sh --profile" "$(head -n 1 "$CASE/ssh.log" | awk '{print $1, $4, $5}')" \
     "the readiness gate is the first transport call, after convergence"
@@ -556,7 +591,7 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   grep -q " fm-remote-task-control.sh launch$" "$CASE/ssh.log" || fail "launch never reached the host"
 
   for key in window=remote:$ID endpoint_task_id=$ID worktree=$HOST_DIR/wt project=$PRIMARY/projects/alpha \
-    harness=claude kind=ship mode=direct-PR yolo=off branch=fm/$ID tasktmp= model=default effort=default \
+    harness=pi kind=ship mode=direct-PR yolo=off branch=fm/$ID tasktmp= model=minimax/m2 effort=default \
     placement=sandbox remote_kind=task remote_host=alias-$ID remote_root=$CODE_ROOT remote_home=$HOST_HOME \
     remote_backend=tmux remote_target=firstmate:fm-$ID sandbox_provider=pve-sandbox sandbox_name=sbx-$ID \
     sandbox_profile=default; do
@@ -579,7 +614,7 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   assert_equals auto "$(cat "$HOST_HOME/config/claude-permission-mode")" "launch configuration reaches the sandbox"
   assert_equals manual "$(cat "$HOST_HOME/config/backlog-backend")" "the sandbox home's backlog is manual"
   assert_equals "$GH_SECRET" "$(cat "$HOST_ACCOUNT/.config/gh/hosts.yml")" "the project's GitHub token reaches the sandbox account"
-  assert_absent "$HOST_ACCOUNT/.pi/agent/auth.json" "no Pi credential is sent for a Claude worker"
+  assert_equals "$PI_SECRET" "$(jq -r .minimax.key "$HOST_ACCOUNT/.pi/agent/auth.json")" "the Pi credential reaches the ship"
   assert_absent "$CASE/local-tmux.log" "a sandbox spawn never touches local tmux"
   assert_no_secret_anywhere "a launched ship"
   pass "fm-spawn --placement sandbox creates, converges, gates, provisions, launches, and records a ship"
@@ -616,7 +651,7 @@ test_scout_sends_only_its_providers_credential_on_an_authorized_profile() {
 test_failures_before_launch_destroy_the_sandbox() {
   new_case doctor
   sandbox_brief --mode direct-PR
-  SSH_MODE=doctor-human run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  SSH_MODE=doctor-human run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "an unready sandbox host launched"
   assert_contains "$OUT" "sandbox host alias-$ID is not ready for task $ID" "the readiness refusal names the host"
   assert_contains "$OUT" "check harness=human" "the doctor's own report is relayed"
@@ -631,7 +666,7 @@ test_failures_before_launch_destroy_the_sandbox() {
   new_case converge
   sandbox_brief --mode direct-PR
   : > "$CASE/provider/fail-exec"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "a sandbox whose code root could not converge launched"
   assert_contains "$OUT" "could not fast-forward to this home's default-branch commit $CODE_COMMIT" "the convergence refusal names the commit"
   assert_contains "$OUT" "Not possible to fast-forward" "the host's own reason is relayed"
@@ -641,7 +676,7 @@ test_failures_before_launch_destroy_the_sandbox() {
 
   new_case provision
   sandbox_brief --mode direct-PR
-  SSH_MODE=provision-unreachable run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  SSH_MODE=provision-unreachable run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 255 "$RC" "an SSH 255 during provisioning is returned unchanged"
   assert_contains "$OUT" "did not complete over SSH (exit 255)" "the unknown provision is named"
   assert_line "sbx-$ID" "$CASE/provider/destroyed.log" "nothing launched, so the sandbox is destroyed"
@@ -653,7 +688,7 @@ test_failures_before_launch_destroy_the_sandbox() {
   new_case capacity
   sandbox_brief --mode direct-PR
   : > "$CASE/provider/no-capacity"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "a spawn without capacity succeeded"
   assert_contains "$OUT" "blocked: the sandbox provider has no capacity for task $ID" "a capacity refusal is a named blocker"
   assert_contains "$OUT" "never fall back to local placement" "the blocker rules out a local fallback"
@@ -664,7 +699,7 @@ test_failures_before_launch_destroy_the_sandbox() {
   new_case profile-drift
   sandbox_brief --mode direct-PR
   printf 'open' > "$CASE/provider/applied-profile"
-  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "a sandbox on an unrequested profile launched"
   assert_contains "$OUT" "runs profile 'open', not the requested default" "the profile drift is named"
   assert_line "sbx-$ID" "$CASE/provider/destroyed.log" "a sandbox on the wrong profile is destroyed"
@@ -675,7 +710,7 @@ test_failures_before_launch_destroy_the_sandbox() {
 test_launch_failures_hold_the_sandbox_and_its_route() {
   new_case lost
   sandbox_brief --mode direct-PR
-  SSH_MODE=launch-lost run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  SSH_MODE=launch-lost run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 255 "$RC" "an SSH 255 at launch is preserved as unknown completion"$'\n'"$OUT"
   assert_contains "$OUT" "launch on sandbox host alias-$ID has unknown completion (SSH exit 255)" "the unknown launch is named"
   assert_contains "$OUT" "is held and its task record kept for reconciliation" "the spawn reports the hold"
@@ -691,14 +726,14 @@ test_launch_failures_hold_the_sandbox_and_its_route() {
 
   new_case unreachable
   sandbox_brief --mode direct-PR
-  SSH_MODE=launch-unreachable run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  SSH_MODE=launch-unreachable run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   expect_code 255 "$RC" "an unreachable launch keeps SSH's exit 255"
   assert_absent "$CASE/provider/destroyed.log" "an unreachable launch holds its sandbox"
   assert_present "$PRIMARY/state/$ID.meta" "an unreachable launch keeps its route"
 
   new_case bad-route
   sandbox_brief --mode direct-PR
-  SSH_MODE=launch-wrong-backend run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
+  SSH_MODE=launch-wrong-backend run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
   [ "$RC" -ne 0 ] || fail "a malformed route block was accepted"
   assert_contains "$OUT" "returned malformed route metadata: backend 'herdr', expected tmux" "the route defect is named"
   assert_contains "$OUT" "is held and its task record kept" "a malformed route holds"
@@ -709,6 +744,38 @@ test_launch_failures_hold_the_sandbox_and_its_route() {
   pass "fm-spawn --placement sandbox holds the sandbox and its route once launch may have started, preserving SSH 255"
 }
 
+test_code_root_verification() {
+  local kind actual before after content
+  for kind in ahead dirty staged; do
+    new_case "$kind"
+    sandbox_brief --mode direct-PR
+    git clone -q "$CODE_ROOT" "$CASE/template"
+    printf '%s\n' "$CASE/template" > "$CASE/provider/code-root"
+    printf 'template change\n' >> "$CASE/template/README.md"
+    if [ "$kind" = ahead ] || [ "$kind" = staged ]; then
+      git -C "$CASE/template" add README.md
+    fi
+    if [ "$kind" = ahead ]; then
+      git -C "$CASE/template" -c user.name=Tests -c user.email=tests@example.invalid commit -qm ahead
+    fi
+    content=$(git -C "$CASE/template" hash-object README.md)
+    actual=$(git -C "$CASE/template" rev-parse HEAD)
+    before=$(git -C "$CASE/template" status --porcelain --untracked-files=no)
+    run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+    [ "$RC" -ne 0 ] || fail "$kind code root launched"
+    assert_contains "$OUT" "expected $CODE_COMMIT, actual $actual" "$kind refusal names both commits"
+    assert_absent "$CASE/ssh.log" "$kind code root must refuse before readiness"
+    assert_line "sbx-$ID" "$CASE/provider/destroyed.log" "$kind sandbox is destroyed before launch"
+    assert_absent "$PRIMARY/state/$ID.meta" "$kind provisional record is removed"
+    assert_equals "$actual" "$(git -C "$CASE/template" rev-parse HEAD)" "$kind HEAD is preserved"
+    after=$(git -C "$CASE/template" status --porcelain --untracked-files=no)
+    assert_equals "$before" "$after" "$kind tracked changes are preserved"
+    assert_equals "$content" "$(git -C "$CASE/template" hash-object README.md)" "$kind content is preserved"
+  done
+  pass "sandbox bootstrap refuses ahead and dirty code roots without discarding changes"
+}
+
+test_code_root_verification
 test_refusals_happen_before_any_sandbox_exists
 test_ship_launches_in_a_sandbox_and_records_its_route
 test_scout_sends_only_its_providers_credential_on_an_authorized_profile

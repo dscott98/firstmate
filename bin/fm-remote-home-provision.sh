@@ -242,7 +242,7 @@ EOF
   MODE=$(cat "$TMP/mode")
   safe_id "$NAME" || die "project name is unsafe: $NAME"
   [ -n "$ORIGIN" ] || die "project $NAME has no origin"
-  fm_project_origin_safe "$ORIGIN" || die "project $NAME origin is not an accepted clone URL: $ORIGIN"
+  fm_project_origin_safe "$ORIGIN" || die "project $NAME origin is not an accepted clone URL"
   case "$MODE" in no-mistakes|direct-PR) ;; *) die "project $NAME has unsupported remote mode: $MODE" ;; esac
   case "$REGISTRY_LINE" in "- $NAME "*) ;; *) die "project $NAME registry line is malformed" ;; esac
   DEST="$FM_HOME/projects/$NAME"

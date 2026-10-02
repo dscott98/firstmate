@@ -282,12 +282,12 @@
 #   (bin/fm-remote-task-control.sh); docs/remote-sandboxes.md owns the operator
 #   view. Before anything exists it refuses, each by name, --secondmate, --mode
 #   local-only, an explicit --backend other than tmux, a raw or unverified
-#   harness, a Pi harness whose --model names no provider or no credential for
-#   it, a brief carrying the --herdr-lab isolation contract or not naming the
+#   harness, Claude pending the PR7 real-host smoke test, a Pi harness whose
+#   --model names no provider or no credential for it, a brief carrying the --herdr-lab isolation contract or not naming the
 #   sandbox home's status file, an unregistered project or one with no clonable
 #   origin, an existing task record, a missing or invalid config/sandbox-provider
 #   (read through bin/fm-sandbox.sh config, whose remote_root and remote_home are
-#   the host's code root and home), and an unauthorized profile:
+#   fixed at /opt/firstmate and /home/agent/fm-home), and an unauthorized profile:
 #   --sandbox-profile <name> defaults to the provider's default_profile, any
 #   other profile must be the one the brief records (fm-brief.sh
 #   --sandbox-profile), and a recorded profile must match the spawn's. A sandbox
@@ -296,7 +296,8 @@
 #   a provisional task record carrying the route, one provider exec that
 #   fast-forwards the host's code root to this home's default-branch commit
 #   (`git -C <remote_root> pull --quiet --ff-only --no-rebase --no-tags origin
-#   <commit>`), the task readiness gate, provision, launch, a strict check of the
+#   <commit>`), read-only provider exec checks of exact HEAD and tracked-file
+#   cleanliness, the task readiness gate, provision, launch, a strict check of the
 #   returned route block, then the final record and the backlog transition under
 #   the task's meta lock. The provisioning manifest carries the brief's exact
 #   bytes, the project's origin and registry line, the harness profile, this
@@ -1566,7 +1567,7 @@ EOF
   fi
   if ! fm_remote_route_check_path_shape "$SBX_REMOTE_ROOT" "$SBX_REMOTE_HOME" ||
     ! fm_remote_route_check_disjoint "$SBX_REMOTE_ROOT" "$SBX_REMOTE_HOME"; then
-    echo "error: --placement sandbox refused: config/sandbox-provider's remote_root and remote_home do not form a task route: $FM_REMOTE_ROUTE_ERROR" >&2
+    echo "error: --placement sandbox refused: the sandbox code root and home do not form a task route: $FM_REMOTE_ROUTE_ERROR" >&2
     exit 1
   fi
 }
@@ -1768,7 +1769,11 @@ spawn_sandbox_task() {
     SBX_HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
   fi
   case "$SBX_HARNESS" in
-  claude | codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
+  claude)
+    echo "error: Claude in sandboxes waits for the PR7 real-host smoke test" >&2
+    exit 1
+    ;;
+  codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
   *)
     echo "error: --placement sandbox needs a verified harness adapter, not '$SBX_HARNESS'; a raw launch command cannot run in a sandbox" >&2
     exit 1
@@ -1838,7 +1843,7 @@ spawn_sandbox_task() {
   }
   SBX_ORIGIN=$(git -C "$PROJ_ABS" remote get-url origin 2>/dev/null || true)
   fm_project_origin_safe "$SBX_ORIGIN" || {
-    echo "error: project $SBX_PROJECT has no origin a sandbox can clone (found '${SBX_ORIGIN:-none}')" >&2
+    echo "error: project $SBX_PROJECT has no credential-free origin a sandbox can clone; embedded passwords are forbidden" >&2
     exit 1
   }
   SBX_COMMIT=$(primary_head_commit "$FM_ROOT") || {
@@ -1975,6 +1980,23 @@ spawn_sandbox_task() {
     exit 1
   fi
 
+  local sandbox_head sandbox_status
+  if ! sandbox_head=$("$SCRIPT_DIR/fm-sandbox.sh" exec "$SANDBOX_NAME" -- \
+    git -C "$SBX_REMOTE_ROOT" rev-parse --verify HEAD </dev/null 2>/dev/null); then
+    echo "error: sandbox $SANDBOX_NAME code root verification failed: expected $SBX_COMMIT, actual HEAD unavailable" >&2
+    exit 1
+  fi
+  if [ "$sandbox_head" != "$SBX_COMMIT" ]; then
+    echo "error: sandbox $SANDBOX_NAME code root mismatch: expected $SBX_COMMIT, actual $sandbox_head" >&2
+    exit 1
+  fi
+  if ! sandbox_status=$("$SCRIPT_DIR/fm-sandbox.sh" exec "$SANDBOX_NAME" -- \
+    git --no-optional-locks -C "$SBX_REMOTE_ROOT" status --porcelain --untracked-files=no </dev/null 2>/dev/null) ||
+    [ -n "$sandbox_status" ]; then
+    echo "error: sandbox $SANDBOX_NAME tracked code root is dirty or unreadable: expected $SBX_COMMIT, actual $sandbox_head" >&2
+    exit 1
+  fi
+
   # Gate the host on the task readiness profile.
   rc=0
   fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" task || rc=$?
@@ -2069,7 +2091,7 @@ spawn_sandbox_task() {
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: this version does not yet mirror a sandbox task's status lines or route peek, steering, lifecycle control, or cleanup to its host (docs/remote-sandboxes.md, Current status)" >&2
+  echo "notice: status mirroring arrives in PR4b; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
   echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$SBX_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 

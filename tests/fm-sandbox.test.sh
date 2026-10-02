@@ -215,20 +215,17 @@ run config
 printf '%s\n' provider=fake-provider.sh default_profile=default ttl=4h remote_root=/opt/firstmate remote_home=/home/agent/fm-home \
   | cmp -s - "$OUT" || fail "config must print the provider name, profile, ttl, and the default code root and home, got: $(cat "$OUT")"
 [ ! -s "$ARGV_LOG" ] || fail "config must never invoke the provider"
-printf '%s\n' remote_root=/srv/firstmate remote_home=/srv/fm-home >> "$HOME_DIR/config/sandbox-provider"
-run config
-[ "$RC" -eq 0 ] || fail "config must accept a configured code root and home, got $RC (stderr: $(cat "$ERR"))"
-grep -qx remote_root=/srv/firstmate "$OUT" || fail "config must print the configured code root"
-grep -qx remote_home=/srv/fm-home "$OUT" || fail "config must print the configured home"
+for key in remote_root remote_home; do
+  write_config
+  printf '%s=/srv/override\n' "$key" >> "$HOME_DIR/config/sandbox-provider"
+  run config
+  [ "$RC" -eq 3 ] || fail "$key configuration must be refused, got $RC"
+  grep -q "unknown key '$key'" "$ERR" || fail "the refusal must name $key"
+done
 write_config
-printf 'remote_home=relative/home\n' >> "$HOME_DIR/config/sandbox-provider"
-run config
-[ "$RC" -eq 3 ] || fail "a relative remote_home must be refused, got $RC"
-grep -q "remote_home 'relative/home'" "$ERR" || fail "the refusal must name the relative remote_home"
-write_config
-printf 'remote_root=/srv/fire mate\n' >> "$HOME_DIR/config/sandbox-provider"
-run config
-[ "$RC" -eq 3 ] || fail "a remote_root with whitespace must be refused, got $RC"
+FM_TEST_SEAM=0 FM_TEST_SANDBOX_ROOT=/srv/ignored FM_TEST_SANDBOX_HOME=/srv/ignored-home run config
+grep -qx remote_root=/opt/firstmate "$OUT" || fail "test paths must be ignored outside the test seam"
+grep -qx remote_home=/home/agent/fm-home "$OUT" || fail "test home must be ignored outside the test seam"
 SPACED="$PROVIDER_DIR/spaced provider.sh"
 cp "$PROVIDER" "$SPACED"
 printf '%s\n' "$SPACED" default_profile=default ttl=4h ssh_include=/abs > "$HOME_DIR/config/sandbox-provider"
