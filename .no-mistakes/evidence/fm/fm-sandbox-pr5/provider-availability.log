@@ -1,0 +1,5 @@
+pve-sandbox: absent from PATH (command -v)
+Worktree config/sandbox-provider: absent
+Disposable lab: fm-sandbox.sh config
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Z8R2PSNWD9Z53SPHC3NW5C/.fm-lab-test.wqrgesox/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=3
