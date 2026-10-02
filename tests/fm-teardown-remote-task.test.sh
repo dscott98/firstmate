@@ -577,7 +577,7 @@ test_identity_refusals_hold_under_force() {
   assert_equals 0 "$(destroy_calls)" "a sandbox missing from the inventory was destroyed anyway"
   assert_absent "$PRIMARY/state/$ID.meta" "the forced teardown left the task record"
   assert_absent "$PRIMARY/state/$ID.sandbox-destroy-pending" "a missing sandbox was recorded as owed a destroy"
-  assert_equals done "$(row_state)" "confirmed absence did not close the backlog item"
+  assert_equals "done" "$(row_state)" "confirmed absence did not close the backlog item"
   assert_equals 0 "$(host_retires)" "identity checks or forced cleanup reached the host"
   assert_absent "$PRIMARY/state/procevent/$SID.source" "confirmed absence left the mirror source"
   pass "--force preserves unknown or foreign sandboxes and clears records only after confirmed absence"
