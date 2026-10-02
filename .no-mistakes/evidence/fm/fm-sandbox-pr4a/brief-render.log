@@ -1,0 +1,2 @@
+COMMAND: bin/fm-brief.sh lab-brief alpha --scout --for-home /home/agent/fm-home --for-root /opt/firstmate --sandbox-profile open
+scaffolded: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-brief-lab.maaytdif/data/lab-brief/brief.md (scout, for sandbox home /home/agent/fm-home, profile open; replace {TASK} and {FIRSTMATE_SPEC})

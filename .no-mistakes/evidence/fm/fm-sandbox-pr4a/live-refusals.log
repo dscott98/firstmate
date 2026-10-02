@@ -1,0 +1,58 @@
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+
+SCENARIO: No configured provider
+COMMAND: bin/fm-spawn.sh lab-refusal /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB/projects/alpha --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+error: --placement sandbox refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+exit=1
+Verified: named refusal and no task record.
+
+SCENARIO: Claude remains disabled
+COMMAND: bin/fm-spawn.sh lab-refusal /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB/projects/alpha --mode direct-PR --yolo off --harness claude --placement sandbox
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+error: Claude in sandboxes waits for the PR7 real-host smoke test
+exit=1
+Verified: named refusal and no task record.
+
+SCENARIO: Local-only task cannot be placed remotely
+COMMAND: bin/fm-spawn.sh lab-refusal /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB/projects/alpha --mode local-only --yolo off --placement sandbox
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+error: --placement sandbox refuses --mode local-only: its landing fast-forwards this home's own clone, which a sandbox's branch never reaches
+exit=1
+Verified: named refusal and no task record.
+
+SCENARIO: Persistent home cannot be disposable
+COMMAND: bin/fm-spawn.sh lab-refusal --secondmate --placement sandbox
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+error: --placement sandbox refuses --secondmate: a persistent home belongs on an agent host as a remote second mate, never on a disposable sandbox
+exit=1
+Verified: named refusal and no task record.
+
+SCENARIO: Non-tmux backend refuses sandbox placement
+COMMAND: bin/fm-spawn.sh lab-refusal /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB/projects/alpha --mode direct-PR --yolo off --backend herdr --placement sandbox
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3Y633SKAAZ8PJ9M1KP9NKXT/.fm-validation-lab.FVw1xB
+error: --placement sandbox runs its worker only on the tmux backend in this version, not 'herdr'
+exit=1
+Verified: named refusal and no task record.
+
+BACKLOG AFTER REFUSALS
+task:
+  id: lab-refusal
+  title: Exercise sandbox refusal guards
+  state: queued
+  blocked: no
+  blocked_by: none
+  held: no
+  hold_reason: "-"
+  hold_kind: "-"
+  hold_until: "-"
+  kind: ship
+  repo: "-"
+  priority: "-"
+  created: 2026-10-02
+  closed: "-"
+  deps: none
+  links: none
+  body: ""
+
+STATE AFTER REFUSALS
