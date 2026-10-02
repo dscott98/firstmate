@@ -1,0 +1,5 @@
+ok - fm-peek remote: the capture routes over the remote transport, local adapters untouched
+ok - fm-peek remote: an unreachable host fails loudly without a false death claim
+ok - fm-peek sandbox: a task selected by id or label reads its host pane, local adapters untouched
+ok - fm-peek sandbox: an unreachable host fails loudly, and the recorded window is refused
+all fm-peek-remote tests passed

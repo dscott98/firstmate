@@ -1,0 +1,13 @@
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YS92NJXFFND9QSJQCR0MR9/.validation-lab.SZvQXm
+Sandbox provider readiness:
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YS92NJXFFND9QSJQCR0MR9/.validation-lab.SZvQXm/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
+Provider executable: pve-sandbox unavailable
+Honest report fetch:
+# Scout report
+Completed isolated reader check.
+Oversize report fetch:
+error: file exceeds max-bytes: data/scout/report.md
+exit=1 emitted_bytes=0
+Traversal fetch:
+error: path traversal is not allowed: ../report.md
+exit=1 emitted_bytes=0
