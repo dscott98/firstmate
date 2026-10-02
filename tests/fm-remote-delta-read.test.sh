@@ -125,44 +125,54 @@ assert_contains "$OUT" 'reason=prefix-changed' 'the same-size rewrite was not na
 assert_contains "$OUT" 'to_offset=11' 'the break did not report the current size'
 pass 'a same-size in-place rewrite breaks continuity as prefix-changed'
 
-# A same-size rewrite of the same inode within the snapshot's own second leaves
-# size, inode, device, and whole-second mtime and ctime unchanged: only the
-# subsecond stat key can tell it moved. Each attempt starts on a second
-# boundary, rewrites once the first capture ran, and is retried only if the
-# rewrite still crossed into the next ctime second.
-ctime_second() { perl -e 'print +(stat shift)[10]' "$1"; }
-SAME_SECOND=
-for _ in 1 2 3; do
-  perl -MTime::HiRes=time,sleep -e 'sleep(1 - (time - int(time)))'
-  printf 'alpha\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
-  BEFORE_SECOND=$(ctime_second "$DELTA_HOME/$DELTA_LOG_REL")
-  : > "$EXEC_LOG"
-  FM_TEST_EXEC_LOG="$EXEC_LOG" PATH="$DELTA_SHIM:/usr/bin:/bin" \
-    run_reader 11 "$PREFIX_SHA" 2 > "$TMP_ROOT/same-second.out" &
-  READER_PID=$!
-  for _ in $(seq 1 50); do grep -qx perl "$EXEC_LOG" && break; sleep 0.01; done
-  sleep 0.15
-  printf 'OMEGA\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
-  AFTER_SECOND=$(ctime_second "$DELTA_HOME/$DELTA_LOG_REL")
-  RC=0
-  wait "$READER_PID" || RC=$?
-  [ "$BEFORE_SECOND" = "$AFTER_SECOND" ] || continue
-  SAME_SECOND=1
-  [ "$RC" -eq 0 ] || fail "the same-second rewrite read exited $RC instead of 0"
-  OUT=$(<"$TMP_ROOT/same-second.out")
-  assert_contains "$OUT" 'reason=prefix-changed' 'a same-second same-size rewrite was not detected'
-  break
-done
-[ -n "$SAME_SECOND" ] || fail 'no attempt landed the rewrite in the same ctime second'
+# Keep the stat protocol's whole-second fields fixed while changing only its
+# fractions. The sleep shim rewrites the real log after the first snapshot has
+# completed, so this exercises the stat gate and real prefix hashing without
+# requiring the scheduler to fit setup and capture inside one wall-clock second.
+TRANSITION_SHIM="$TMP_ROOT/transition-shim"
+mkdir -p "$TRANSITION_SHIM"
+REAL_STAT=$(command -v stat)
+export REAL_STAT
+cat > "$TRANSITION_SHIM/stat" <<'SH'
+#!/bin/sh
+if [ "$3" = "$FM_TEST_DELTA_LOG" ]; then
+  fraction=100000000
+  [ ! -e "$FM_TEST_DELTA_CHANGED" ] || fraction=200000000
+  printf '11:1700000000.%s:1700000000.%s:123:456\n' "$fraction" "$fraction"
+else
+  exec "$REAL_STAT" "$@"
+fi
+SH
+cat > "$TRANSITION_SHIM/sleep" <<'SH'
+#!/bin/sh
+if [ ! -e "$FM_TEST_DELTA_CHANGED" ]; then
+  case "$FM_TEST_DELTA_TRANSITION" in
+    rewrite) printf 'OMEGA\nbeta\n' > "$FM_TEST_DELTA_LOG" ;;
+    remove) rm -f -- "$FM_TEST_DELTA_LOG" ;;
+  esac
+  : > "$FM_TEST_DELTA_CHANGED"
+fi
+exec /bin/sleep "$@"
+SH
+chmod +x "$TRANSITION_SHIM/stat" "$TRANSITION_SHIM/sleep"
+printf 'alpha\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
+FM_TEST_DELTA_LOG="$DELTA_HOME/$DELTA_LOG_REL" \
+  FM_TEST_DELTA_CHANGED="$TMP_ROOT/rewritten" FM_TEST_DELTA_TRANSITION=rewrite \
+  PATH="$TRANSITION_SHIM:$PATH" run_reader 11 "$PREFIX_SHA" 30 \
+  > "$TMP_ROOT/same-second.out" || fail 'the same-second rewrite read did not exit 0'
+assert_present "$TMP_ROOT/rewritten" 'the rewrite did not run after the initial snapshot'
+assert_contains "$(<"$TMP_ROOT/same-second.out")" 'reason=prefix-changed' \
+  'a same-second same-size rewrite was not detected'
 pass 'a same-second same-size rewrite of the same inode breaks continuity'
 
-# A log that disappears mid-wait breaks as missing only for a nonzero cursor.
+# Remove the log only after its initial capture, at the poll sleep boundary.
+# A fixed delay can instead remove it between stat and snapshot on a busy host.
 printf 'alpha\nbeta\n' > "$DELTA_HOME/$DELTA_LOG_REL"
-run_reader 11 "$PREFIX_SHA" 4 > "$TMP_ROOT/missing.out" &
-READER_PID=$!
-sleep 0.3
-rm -f -- "$DELTA_HOME/$DELTA_LOG_REL"
-wait "$READER_PID" || fail 'the missing-file read did not exit 0'
+FM_TEST_DELTA_LOG="$DELTA_HOME/$DELTA_LOG_REL" \
+  FM_TEST_DELTA_CHANGED="$TMP_ROOT/removed" FM_TEST_DELTA_TRANSITION=remove \
+  PATH="$TRANSITION_SHIM:$PATH" run_reader 11 "$PREFIX_SHA" 30 \
+  > "$TMP_ROOT/missing.out" || fail 'the missing-file read did not exit 0'
+assert_present "$TMP_ROOT/removed" 'the removal did not run after the initial snapshot'
 OUT=$(<"$TMP_ROOT/missing.out")
 assert_contains "$OUT" 'status=continuity-broken' 'a removed log did not produce a break'
 assert_contains "$OUT" 'reason=missing' 'the removed log was not named missing'
