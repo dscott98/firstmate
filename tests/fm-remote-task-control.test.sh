@@ -311,7 +311,7 @@ test_provision_builds_a_private_marked_home() {
   # A Pi configuration directory provision creates is private.
   new_case provision-fresh-pi
   write_manifest "$CASE/manifest" scout pi
-  pi_auth_field >> "$CASE/manifest"
+  printf 'pi_auth_b64=%s\n' "$(printf '{"minimax":{"type":"api_key","key":"%s","env":{"REGION":"test"}}}' "$PI_SECRET" | b64)" >> "$CASE/manifest"
   out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1) || fail "a scout manifest should provision: $out"
   assert_equals 700 "$(mode_of "$ACCOUNT_HOME/.pi")" "a created .pi directory is private"
   assert_equals 700 "$(mode_of "$ACCOUNT_HOME/.pi/agent")" "a created .pi/agent directory is private"
@@ -466,6 +466,67 @@ ROWS
 
 # --- launch and the read verbs -----------------------------------------------
 
+test_provision_refuses_non_api_key_credentials() {
+  local entry reason out rc
+  new_case credential-boundary
+  write_manifest "$CASE/base" ship pi
+  while IFS='|' read -r entry reason; do
+    cp "$CASE/base" "$CASE/manifest"
+    printf 'pi_auth_b64=%s\n' "$(printf '%s' "$entry" | b64)" >> "$CASE/manifest"
+    out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "invalid Pi credential was accepted"
+    assert_contains "$out" "$reason" "the credential refusal names its provider, type, and reason"
+    assert_no_secret_text "credential refusal" "$out"
+    assert_absent "$TASK_HOME" "invalid credentials created no task home"
+    assert_absent "$ACCOUNT_HOME/.pi" "invalid credentials created no Pi auth"
+    [ -z "$(find "$CASE/tmp" -mindepth 1 -print)" ] || fail "invalid credentials left staging files"
+  done <<ROWS
+{"minimax":{"type":"oauth","access":"$PI_SECRET"}}|provider=minimax type=oauth reason=oauth-forbidden
+{"minimax":{"type":"future","key":"$PI_SECRET"}}|provider=minimax type=future reason=unsupported-type
+{"minimax":{"key":"$PI_SECRET"}}|provider=minimax type=<missing> reason=unsupported-type
+{"minimax":{"type":"api_key","key":"$PI_SECRET","refresh":"$GH_SECRET"}}|provider=minimax type=api_key reason=unknown-field
+{"minimax":{"type":"api_key","key":""}}|provider=minimax type=api_key reason=invalid-key
+{"minimax":{"type":"api_key","key":"$PI_SECRET","env":{"TOKEN":false}}}|provider=minimax type=api_key reason=invalid-env
+ROWS
+  cp "$CASE/base" "$CASE/manifest"
+  printf 'claude_auth_b64=%s\n' "$(printf '%s' "$PI_SECRET" | b64)" >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "unknown credential field was accepted"
+  assert_contains "$out" "unknown field: claude_auth_b64" "unknown credential field is named"
+  assert_no_secret_text "unknown credential field" "$out"
+  assert_absent "$TASK_HOME" "unknown credential field created no task home"
+  assert_absent "$ACCOUNT_HOME/.pi" "unknown credential field created no Pi auth"
+  [ -z "$(find "$CASE/tmp" -mindepth 1 -print)" ] || fail "unknown credential field left staging files"
+  pass "provision refuses credentials outside the API-key and GitHub boundary before writing"
+}
+
+test_git_credentials_are_repository_and_host_scoped() {
+  local repo out rc
+  new_case git-credentials
+  provision_ship pi
+  launch_ready
+  for repo in "$TASK_HOME/projects/alpha" "$WT"; do
+    out=$(printf 'protocol=https\nhost=github.com\n\n' |
+      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GH_TOKEN="$GH_SECRET" \
+      git -C "$repo" credential fill 2>"$CASE/credential.err"); rc=$?
+    expect_code 0 "$rc" "GitHub credential fill should succeed"
+    assert_contains "$out" "username=x-access-token" "Git receives the token username"
+    assert_contains "$out" "password=$GH_SECRET" "Git reads the task token from the environment"
+    out=$(printf 'protocol=https\nhost=github.com\n\n' |
+      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GH_TOKEN=changed-token \
+      git -C "$repo" credential fill 2>"$CASE/credential.err") || fail "replacement token lookup failed"
+    assert_contains "$out" "password=changed-token" "Git resolves the token at call time"
+    out=$(printf 'protocol=https\nhost=example.com\n\n' |
+      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GH_TOKEN="$GH_SECRET" \
+      git -C "$repo" credential fill 2>"$CASE/credential.err"); rc=$?
+    [ "$rc" -ne 0 ] || fail "another host received credentials"
+    assert_equals "" "$out" "another host receives no credential output"
+    assert_no_secret_text "other host error" "$(cat "$CASE/credential.err")"
+    assert_no_secret_text "repository Git configuration" "$(git -C "$repo" config --local --list)"
+  done
+  pass "Git authenticates the clone and worktree using only the current GitHub environment token"
+}
+
 test_launch_reports_the_route_and_hands_the_worker_its_credentials() {
   local out rc meta spawn_gen
   new_case launch
@@ -584,8 +645,18 @@ test_read_verbs_report_the_endpoint() {
 
   printf 'bash\n' > "$TMUX_DIR/pane-command"
   assert_equals dead "$(run_control state "$ID" 2>/dev/null)" "state reads an exited agent as dead"
+  out=$(run_control observe "$ID" 2>&1) || fail "observe of an exited agent failed"
+  assert_equals dead "$(route_value "$out" busy)" "an exited agent cannot remain busy"
+  assert_equals endpoint-gone "$(route_value "$out" busy_source)" "observe identifies the exited agent"
   rm -f "$TMUX_DIR/window"
   assert_equals missing "$(run_control state "$ID" 2>/dev/null)" "state reads a vanished window as missing"
+  out=$(run_control observe "$ID" 2>&1) || fail "observe of a vanished window failed"
+  assert_equals missing "$(route_value "$out" agent)" "observe sees the vanished endpoint"
+  assert_equals dead "$(route_value "$out" busy)" "a vanished worker cannot remain busy"
+  assert_equals endpoint-gone "$(route_value "$out" busy_source)" "observe attributes death to the endpoint"
+  out=$(run_control crew-state "$ID" 2>&1) || fail "crew-state of a vanished window failed"
+  assert_equals dead "$(route_value "$out" busy)" "crew-state ignores the stale busy record"
+  assert_equals endpoint-gone "$(route_value "$out" busy_source)" "crew-state attributes death to the endpoint"
   pass "state, observe, capture, head, and crew-state read the host-local endpoint"
 }
 
@@ -740,6 +811,8 @@ test_provision_builds_a_private_marked_home
 test_provision_is_idempotent_and_refuses_another_task_or_manifest
 test_provision_rolls_back_a_failed_attempt
 test_provision_refuses_unsafe_manifests
+test_provision_refuses_non_api_key_credentials
+test_git_credentials_are_repository_and_host_scoped
 test_launch_reports_the_route_and_hands_the_worker_its_credentials
 test_launch_refuses_a_tmux_server_without_the_credentials
 test_read_verbs_report_the_endpoint

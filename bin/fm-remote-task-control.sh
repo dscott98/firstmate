@@ -128,8 +128,8 @@
 # and relays its output and status unchanged, so a refusal reaches the
 # primary's teardown as written; --force passes through only as the captain's
 # explicit discard. A scout is refused, because its worktree is scratch and its
-# completion gate runs in the supervising home. A pass records
-# state/<id>.retired, so a retry after an unknown transport outcome prints
+# completion gate runs in the supervising home. Only a passing teardown writes
+# state/<id>.retired, so a retry after SSH exit 255 (unknown completion) prints
 # already-retired.
 set -eu
 
@@ -346,7 +346,7 @@ provision_cleanup() {
 # staging directory changes. Errors never quote a manifest value that could
 # carry a secret.
 provision_read() { # <id>
-  local id=$1 bytes line key value name encoded
+  local id=$1 bytes line key value name encoded credential_error
   umask 077
   PROVISION_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-task-provision.XXXXXX") \
     || die "cannot create private provisioning state"
@@ -467,6 +467,19 @@ provision_read() { # <id>
       and all(to_entries[]; (.key | test("^[A-Za-z0-9._-]+$")) and (.value | type == "object"))' \
       "$PROVISION_TMP/pi-auth" >/dev/null 2>&1 \
       || die "the Pi credential entries must be a JSON object of provider objects"
+    credential_error=$(jq -r '
+      to_entries[] | .key as $provider | .value |
+      (if .type == "api_key" then
+        if (keys - ["type", "key", "env"] | length) > 0 then "unknown-field"
+        elif (.key | type != "string") or .key == "" then "invalid-key"
+        elif has("env") and (.env | if type == "object" then any(.[]; type != "string") else true end) then "invalid-env"
+        else empty end
+      elif .type == "oauth" then "oauth-forbidden"
+      else "unsupported-type" end) as $reason |
+      "provider=\($provider) type=\(if has("type") then (.type | if type == "string" and test("^[A-Za-z0-9._-]+$") then . else "<invalid>" end) else "<missing>" end) reason=\($reason)"
+    ' "$PROVISION_TMP/pi-auth" 2>/dev/null) \
+      || die "the Pi credential entries are unreadable"
+    [ -z "$credential_error" ] || die "Pi credential refused: $credential_error"
     P_PI_PROVIDERS=$(jq -r 'keys | join(",")' "$PROVISION_TMP/pi-auth" 2>/dev/null) \
       || die "the Pi credential provider names are unreadable"
   fi
@@ -545,7 +558,8 @@ pi_auth_merge() {
 }
 
 provision_apply() { # <id>
-  local id=$1 marker owner digest name dest foreign allowlist separator
+  local id=$1 marker owner digest name dest foreign allowlist separator helper
+  local -a git_auth=()
   PROVISION_LOCK="$PROVISION_LOCK_ROOT/.remote-task-provision-$(printf '%s' "$TARGET_HOME" | cksum | awk '{print $1}').lock"
   fm_lock_acquire_wait "$PROVISION_LOCK"
   PROVISION_LOCK_HELD=1
@@ -610,8 +624,17 @@ provision_apply() { # <id>
   task_credentials_export
 
   dest="$TARGET_HOME/projects/$P_FIELD_project"
-  git clone --no-local --quiet -- "$(cat "$PROVISION_TMP/origin")" "$dest" \
+  if provision_has gh_token_b64; then
+    helper='!f() { [ "$1" = get ] || return 0; protocol= host=; while IFS= read -r line && [ -n "$line" ]; do case "$line" in protocol=*) protocol=${line#protocol=} ;; host=*) host=${line#host=} ;; esac; done; [ "$protocol" = https ] && [ "$host" = github.com ] && [ -n "${GH_TOKEN:-}" ] || return 0; printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
+    git_auth=(-c credential.https://github.com.helper= -c "credential.https://github.com.helper=$helper")
+  fi
+  git ${git_auth[@]+"${git_auth[@]}"} clone --no-local --quiet -- "$(cat "$PROVISION_TMP/origin")" "$dest" \
     || die "could not clone project $P_FIELD_project from its origin"
+  if provision_has gh_token_b64; then
+    git -C "$dest" config --local --add credential.https://github.com.helper "" \
+      && git -C "$dest" config --local --add credential.https://github.com.helper "$helper" \
+      || die "could not configure GitHub authentication for project $P_FIELD_project"
+  fi
   journal "clone project=$P_FIELD_project"
   if [ "$P_FIELD_kind" = ship ] && [ "$P_FIELD_mode" = no-mistakes ]; then
     command -v no-mistakes >/dev/null 2>&1 || die "no-mistakes is unavailable for project $P_FIELD_project"
@@ -680,7 +703,11 @@ print_route() { # <id>
 }
 
 busy_verdict() { # <id> <tail40>; prints "<state> <source>"
-  local verdict
+  local verdict agent
+  agent=$(fm_backend_agent_state "$EP_BACKEND" "$EP_TARGET" 2>/dev/null) || agent=
+  case "$agent" in
+    dead|missing) printf 'dead endpoint-gone\n'; return 0 ;;
+  esac
   verdict=$(fm_busy_classify_meta "$EP_META" "$1" "$TARGET_HOME/state" "$2" 2>/dev/null) || verdict=
   case "$verdict" in
     *' '*) printf '%s\n' "$verdict" ;;
