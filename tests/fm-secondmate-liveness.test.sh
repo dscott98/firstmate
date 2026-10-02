@@ -639,6 +639,15 @@ printf '%s\n' "$*" >> "${FM_FAKE_SSH_LOG:?}"
 exit "${FM_FAKE_REMOTE_RC:-0}"
 SH
   chmod +x "$fakebin/ssh"
+  # The poll-mode alive probe saves the host as a local herdr machine, so the
+  # world carries its own fake herdr: the runner's real Herdr and its saved
+  # machines are never read or changed by this suite. The list starts with the
+  # host already saved, the converged shape every steady-state probe sees.
+  fm_fake_saved_herdr "$fakebin" "$w/machines.json" "$w/herdr.log"
+  cat > "$w/machines.json" <<'EOF'
+[{"id":"one","label":"lab-host","target":"lab-host","session":"fm-remote","enabled":true,"selected":false}]
+EOF
+  : > "$w/herdr.log"
   printf '%s\n' "$w"
 }
 
@@ -647,7 +656,8 @@ probe_remote() {
   local w=$1 mode=$2; shift 2
   # shellcheck disable=SC2016 # positional params expand in the child shell.
   env STATE="$w/home/state" FM_HOME="$w/home" FM_DATA_OVERRIDE="$w/home/data" \
-    FM_SSH_BIN="$w/fakebin/ssh" FM_FAKE_SSH_LOG="$w/ssh.log" "$@" \
+    FM_SSH_BIN="$w/fakebin/ssh" FM_FAKE_SSH_LOG="$w/ssh.log" \
+    PATH="$w/fakebin:/usr/bin:/bin" "$@" \
     bash -c '
       . "$0/bin/fm-secondmate-liveness-lib.sh"
       fm_secondmate_liveness_probe "$1" rsm1 "$2"
@@ -703,6 +713,45 @@ test_remote_poll_probe_unreachable_preserves_route() {
   pass "poll probe: unreachable or inconclusive remote reads preserve the route"
 }
 
+test_remote_alive_probe_saves_missing_machine() {
+  local w out
+  w=$(make_remote_probe_world probe-save-missing)
+  printf '[]\n' > "$w/machines.json"
+  out=$(probe_remote "$w" poll FM_FAKE_REMOTE_REPLY=alive)
+  printf '%s\n' "$out" | grep -q '^alive|alive|0|||$' \
+    || fail "a saving probe changed its verdict line, got: $out"
+  printf '%s\n' "$out" | grep -q '^saved herdr machine lab-host (remote session fm-remote)$' \
+    || fail "an alive poll probe did not save the missing local machine, got: $out"
+  assert_grep 'machine add --label lab-host --remote-session fm-remote lab-host' "$w/herdr.log" \
+    "the poll-mode save did not run the exact machine add command"
+  pass "poll probe: an alive remote route saves its missing local herdr machine"
+}
+
+test_remote_alive_probe_skips_non_herdr_route() {
+  local w out
+  w=$(make_remote_probe_world probe-non-herdr)
+  sed -i 's/^remote_backend=herdr$/remote_backend=tmux/' "$w/home/state/rsm1.meta"
+  printf '[]\n' > "$w/machines.json"
+  out=$(probe_remote "$w" poll FM_FAKE_REMOTE_REPLY=alive)
+  [ "$out" = 'alive|alive|0|||' ] \
+    || fail "a non-herdr alive route was not a quiet no-op, got: $out"
+  [ ! -s "$w/herdr.log" ] || fail "a non-herdr route still consulted herdr: $(cat "$w/herdr.log")"
+  pass "poll probe: a route not recorded on the herdr backend saves no machine"
+}
+
+test_remote_full_probe_saves_route_session() {
+  local w out reply
+  w=$(make_remote_probe_world probe-full-save)
+  printf '[]\n' > "$w/machines.json"
+  reply=$(printf 'backend=herdr\nherdr_session=fm-remote\nalive')
+  out=$(probe_remote "$w" full FM_FAKE_REMOTE_REPLY="$reply")
+  printf '%s\n' "$out" | grep -q '^alive|alive|0|||$' \
+    || fail "a saving full probe changed its verdict line, got: $out"
+  assert_grep 'machine add --label lab-host --remote-session fm-remote lab-host' "$w/herdr.log" \
+    "the route-revalidated save did not run the exact machine add command"
+  pass "full probe: a revalidated herdr route saves its local machine under the live session"
+}
+
 test_tmux_agent_state_classifies
 test_tmux_agent_state_rejects_malformed_targets_before_probe
 test_herdr_agent_state_preserves_husk_classifier
@@ -722,5 +771,8 @@ test_sweep_skips_mate_whose_liveness_lock_is_held
 test_sweep_refuses_relaunch_on_ledger_errors
 test_remote_poll_probe_maps_states
 test_remote_poll_probe_unreachable_preserves_route
+test_remote_alive_probe_saves_missing_machine
+test_remote_alive_probe_skips_non_herdr_route
+test_remote_full_probe_saves_route_session
 
 echo "# all fm-secondmate-liveness tests passed"

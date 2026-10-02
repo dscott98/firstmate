@@ -58,6 +58,8 @@ FM_SM_LIVE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 . "$FM_SM_LIVE_LIB_DIR/fm-remote-readiness-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$FM_SM_LIVE_LIB_DIR/fm-timeout-lib.sh"
+# shellcheck source=bin/fm-herdr-machine-lib.sh
+. "$FM_SM_LIVE_LIB_DIR/fm-herdr-machine-lib.sh"
 
 # Per-task probe+kill+relaunch serialization. A busy lock means another
 # supervisor (the other sweep, or a racing tick) is mid-episode on this mate;
@@ -79,6 +81,22 @@ fm_secondmate_liveness_lock() {  # <id>
 fm_secondmate_liveness_unlock() {  # <id>
   fm_sm_live_require_locks || return 0
   fm_lock_release "$STATE/.secondmate-liveness-$1.lock" 2>/dev/null || true
+}
+
+# fm_sm_live_herdr_machine_ensure <meta> <host>: the poll-mode saved-machine
+# save. The watcher tick validates no live route, so the endpoint's own record
+# decides: only a route the launch contract recorded on the herdr backend is
+# saved, under its recorded remote session. The startup sweep instead saves
+# through the route-revalidated full-mode path below, and every save itself is
+# best-effort and idempotent (bin/fm-herdr-machine-lib.sh owns the contract).
+fm_sm_live_herdr_machine_ensure() { # <meta> <host>
+  local meta=$1 host=$2 session backend
+  backend=$(fm_meta_get "$meta" remote_backend)
+  [ "$backend" = herdr ] || return 0
+  session=$(fm_meta_get "$meta" remote_herdr_session)
+  [ -n "$session" ] || session=fm-remote
+  fm_herdr_machine_saved_ensure "$host" "$session"
+  return 0
 }
 
 fm_sm_live_first_line() {
@@ -127,13 +145,17 @@ fm_secondmate_liveness_recent_attempts() {  # <id> <window-secs>
 # `silent` means the meta records no endpoint at all - that shape is owned by
 # secondmate-provisioning recovery, not liveness.
 #
+# The probe stays read-only toward the endpoint itself. Its one local write is
+# the saved-machine save above, which runs only on an alive remote route and
+# never touches the remote host or its recorded endpoint.
+#
 # The caller must hold fm_secondmate_liveness_lock for <id> whenever a
 # relaunchable verdict could be acted on.
 fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local meta=$1 id=$2 mode=$3
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
-  local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
+  local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend remote_route_session
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || { FM_SM_LIVE_STATUS=silent; return 0; }
   harness=$(fm_meta_get "$meta" harness)
@@ -191,6 +213,13 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
             FM_SM_LIVE_REASON="alive remote endpoint is recorded on backend '${remote_backend:-missing}'; migrate or retire it explicitly"
             return 0
           fi
+          # The route is revalidated on herdr, so keep this host visible in the
+          # local Herdr as a saved machine pointing at its live remote session.
+          remote_route_session=$(printf '%s\n' "$route_out" | sed -n 's/^herdr_session=//p' | tail -1)
+          [ -n "$remote_route_session" ] || remote_route_session=fm-remote
+          fm_herdr_machine_saved_ensure "$remote_host" "$remote_route_session"
+        else
+          fm_sm_live_herdr_machine_ensure "$meta" "$remote_host"
         fi
         FM_SM_LIVE_STATUS=alive
         FM_SM_LIVE_LINE="remote secondmate $id already live (host=$remote_host)"

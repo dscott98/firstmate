@@ -51,7 +51,9 @@
 # wrapper for a required tool it can discover under nvm, asdf, or mise. It never
 # installs packages, creates a login session, writes an auto-login password,
 # changes FileVault, stores an account password, or replaces a non-Firstmate
-# wrapper; those remain reported gaps.
+# wrapper; those remain reported gaps. A herdr release below the saved-machine
+# floor is one of those reported gaps: --fix names the needed
+# `herdr update --handoff` and never runs the update itself.
 set -eu
 
 # Resolve this script's directory with builtins only: a host missing a required
@@ -75,6 +77,15 @@ LAUNCH_AGENT_LABEL=dev.firstmate.herdr.fm-remote
 # remains in the separate default session, which this readiness check never
 # requires or changes.
 HERDR_SESSION_NAME=fm-remote
+# The first herdr release verified to serve saved machines. The primary's
+# local Herdr can save this host as a machine pointing at its fm-remote
+# session only while the server here advertises the surface_interest and
+# health_check capabilities, and releases before this floor refuse that save
+# with "remote server is not ready for saved machines". Upgrading is a person's
+# call, so the gap is always human: --fix reports the needed
+# `herdr update --handoff` (which upgrades the live fm-remote server without
+# killing the second-mate panes) and never runs it.
+HERDR_MIN_SAVED_MACHINE_VERSION=0.9.3
 LAUNCH_AGENT_DIR="${HOME:-}/Library/LaunchAgents"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/$LAUNCH_AGENT_LABEL.plist"
 LAUNCH_AGENT_LOG_DIR="${HOME:-}/Library/Logs"
@@ -580,6 +591,65 @@ check_herdr() {
     "install herdr from https://herdr.dev on that account, or add a ~/.local/bin wrapper for it; a remote second mate always runs on the Herdr backend"
 }
 
+check_herdr_version() {
+  local status client_version server_version running verdict evidence
+  if ! herdr_cli_available; then
+    record herdr-version "skip: the herdr release cannot be read without both herdr and jq on the runtime PATH"
+    return 0
+  fi
+  if ! herdr_adapter_load; then
+    record herdr-version "human: the herdr adapter could not be loaded, so this host's herdr release cannot be verified" \
+      "rerun this command from an intact Firstmate checkout"
+    return 0
+  fi
+  status=$(herdr_server_status_json) || status=
+  client_version=$(printf '%s' "$status" | jq -r '.client.version // empty' 2>/dev/null) || client_version=
+  if [ -z "$client_version" ]; then
+    client_version=$("$(command -v herdr)" --version 2>/dev/null | sed -n '1s/^herdr //p')
+    client_version=${client_version%%[[:space:]]*}
+  fi
+  fm_backend_herdr_version_at_least "$client_version" "$HERDR_MIN_SAVED_MACHINE_VERSION" || verdict=$?
+  case "${verdict:-0}" in
+    1)
+      record herdr-version "human: herdr ${client_version:-unknown} is older than $HERDR_MIN_SAVED_MACHINE_VERSION, the first release that serves saved machines" \
+        "run 'herdr update --handoff' on that host to upgrade herdr to $HERDR_MIN_SAVED_MACHINE_VERSION or newer (it upgrades the live fm-remote server without killing the second-mate panes), then rerun this command"
+      return 0
+      ;;
+    2)
+      record herdr-version "human: the herdr release on this host could not be read, so the $HERDR_MIN_SAVED_MACHINE_VERSION saved-machine floor cannot be verified" \
+        "run 'herdr --version' and 'herdr status' on that account and fix what they report, then rerun this command"
+      return 0
+      ;;
+  esac
+  running=$(printf '%s' "$status" | jq -r '.server.running // false' 2>/dev/null) || running=
+  if [ "$running" = true ]; then
+    server_version=$(printf '%s' "$status" | jq -r '.server.version // empty' 2>/dev/null) || server_version=
+    if [ -z "$server_version" ]; then
+      record herdr-version "human: the running session $HERDR_SESSION_NAME server does not report its herdr release, so the saved-machine floor cannot be verified for it" \
+        "run 'herdr status' on that host and upgrade herdr with 'herdr update --handoff' unless the server release is $HERDR_MIN_SAVED_MACHINE_VERSION or newer, then rerun this command"
+      return 0
+    fi
+    verdict=0
+    fm_backend_herdr_version_at_least "$server_version" "$HERDR_MIN_SAVED_MACHINE_VERSION" || verdict=$?
+    case "$verdict" in
+      1)
+        record herdr-version "human: the running session $HERDR_SESSION_NAME server is herdr $server_version, older than $HERDR_MIN_SAVED_MACHINE_VERSION, the first release that serves saved machines" \
+          "run 'herdr update --handoff' on that host to upgrade the live fm-remote server without killing the second-mate panes, then rerun this command"
+        return 0
+        ;;
+      2)
+        record herdr-version "human: the running session $HERDR_SESSION_NAME server reports an unreadable release ($server_version)" \
+          "run 'herdr status' on that host and fix what it reports, then rerun this command"
+        return 0
+        ;;
+    esac
+    evidence="client $client_version and server $server_version are at or above $HERDR_MIN_SAVED_MACHINE_VERSION, the saved-machine floor"
+  else
+    evidence="client $client_version is at or above $HERDR_MIN_SAVED_MACHINE_VERSION, the saved-machine floor; the server reports its own release once the server check starts it"
+  fi
+  record herdr-version "ok: $evidence"
+}
+
 check_gui_session() {
   if [ "$PLATFORM" != darwin ]; then
     record gui-session "skip: no Aqua login session applies on $PLATFORM"
@@ -724,6 +794,7 @@ run_checks() { # <resolved-login-shell>
   CHECK_VALUES=()
   CHECK_ACTIONS=()
   check_herdr
+  check_herdr_version
   check_gui_session
   check_remote_job_worker
   check_launch_agent "$shell"

@@ -35,7 +35,22 @@ TOOLS="$TMP_ROOT/tools"
 mkdir -p "$TOOLS"
 ln -sf "$(command -v git)" "$TOOLS/git"
 ln -sf "$(command -v jq)" "$TOOLS/jq"
-BASE_PATH="$TOOLS:/usr/bin:/bin:/usr/sbin:/sbin"
+# Keep system-installed required tools and harnesses out of missing-tool cases.
+# They must not suppress the fixture's wrapper repair or missing-tool reports.
+SYSTEM_TOOLS="$TMP_ROOT/system-tools"
+mkdir -p "$SYSTEM_TOOLS"
+for system_dir in /usr/bin /bin /usr/sbin /sbin; do
+  for system_tool in "$system_dir"/*; do
+    tool_name=${system_tool##*/}
+    case "$tool_name" in
+      herdr|tasks-axi|treehouse|claude|codex|opencode|pi|pi-signed|grok|kimi) continue ;;
+    esac
+    [ -x "$system_tool" ] && [ ! -d "$system_tool" ] || continue
+    [ ! -e "$SYSTEM_TOOLS/$tool_name" ] || continue
+    ln -s "$system_tool" "$SYSTEM_TOOLS/$tool_name"
+  done
+done
+BASE_PATH="$TOOLS:$SYSTEM_TOOLS"
 
 # Real socket-owner holders for the Darwin birth check: jq blocked on a fifo
 # this test keeps open, with exactly the marker environment each birth needs.
@@ -76,6 +91,8 @@ new_case() {
   unset CASE_SECOND_LOGIN_SHELL
   unset CASE_ENV_SHELL
   unset CASE_RESOLVE_DSCL
+  unset CASE_HERDR_CLIENT_VERSION
+  unset CASE_HERDR_SERVER_VERSION
   CASE_N=$((CASE_N + 1))
   CASE_LOGIN_SHELL=${4:-/bin/sh}
   CASE_DIR="$TMP_ROOT/case$CASE_N"
@@ -247,6 +264,14 @@ SH
 #!/usr/bin/env bash
 set -u
 running=$(cat "$FM_FAKE_HERDR_RUNNING" 2>/dev/null || printf 'false')
+client_version=${FM_FAKE_HERDR_CLIENT_VERSION:-0.9.3}
+server_version=${FM_FAKE_HERDR_SERVER_VERSION:-0.9.3}
+case "${1:-}" in
+  --version)
+    printf 'herdr %s\n' "$client_version"
+    exit 0
+    ;;
+esac
 case "${1:-} ${2:-}" in
   "status --json")
     if [ -f "$FM_FAKE_STATE/herdr-delay" ]; then
@@ -260,7 +285,11 @@ case "${1:-} ${2:-}" in
         running=true
       fi
     fi
-    printf '{"client":{"version":"0.7.5","protocol":16},"server":{"running":%s,"socket":"%s"}}\n' "$running" "$FM_FAKE_HERDR_SOCKET"
+    server_json=
+    if [ "$running" = true ] && [ "$server_version" != absent ]; then
+      server_json="\"version\":\"$server_version\",\"protocol\":16,"
+    fi
+    printf '{"client":{"version":"%s","protocol":16},"server":{%s"running":%s,"socket":"%s"}}\n' "$client_version" "$server_json" "$running" "$FM_FAKE_HERDR_SOCKET"
     ;;
   "server "*|"server ")
     printf 'true\n' > "$FM_FAKE_HERDR_RUNNING"
@@ -308,6 +337,8 @@ doctor() {
     FM_FAKE_HERDR_RUNNING="$CASE_HERDR_RUNNING" \
     FM_FAKE_HERDR_BIN="$CASE_BIN/herdr" \
     FM_FAKE_HERDR_SOCKET="$CASE_STATE/herdr.sock" \
+    FM_FAKE_HERDR_CLIENT_VERSION="${CASE_HERDR_CLIENT_VERSION-}" \
+    FM_FAKE_HERDR_SERVER_VERSION="${CASE_HERDR_SERVER_VERSION-}" \
     FM_FAKE_GUARD="$GUARD" \
     FM_FAKE_AQUA_PID="$AQUA_HOLDER_PID" \
     FM_FAKE_PLIST="$CASE_PLIST" \
@@ -400,6 +431,7 @@ doctor
 expect_code 1 "$DOCTOR_RC" "a host without herdr was reported ready"
 assert_contains "$DOCTOR_OUT" 'check herdr=human:' "a missing herdr CLI was not tagged as a human gap"
 assert_contains "$DOCTOR_OUT" 'action: herdr:' "a missing herdr CLI came with no operator action"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=skip:' "a missing herdr CLI still claimed a version verdict"
 doctor --fix
 expect_code 1 "$DOCTOR_RC" "--fix reported a host without herdr as ready"
 assert_contains "$DOCTOR_OUT" 'check herdr=human:' "--fix stopped reporting the missing herdr CLI"
@@ -453,6 +485,7 @@ assert_contains "$DOCTOR_OUT" 'check launchagent-scope=ok: LimitLoadToSessionTyp
   "the installed launch agent was not Aqua-scoped"
 assert_contains "$DOCTOR_OUT" 'check launchagent-loaded=ok:' "--fix did not load the launch agent"
 assert_contains "$DOCTOR_OUT" 'check herdr-server=ok:' "--fix did not leave the herdr server running"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=ok:' "--fix left a floor-compliant herdr unverified"
 assert_contains "$DOCTOR_OUT" 'check remote-job-worker=ok:' "--fix did not install the remote job worker contract"
 assert_contains "$DOCTOR_OUT" 'check remote-job-worker-loaded=ok:' "--fix did not load the remote job worker"
 assert_present "$CASE_PLIST" "--fix reported success without writing the plist"
@@ -484,6 +517,52 @@ assert_not_contains "$DOCTOR_OUT" 'fix launchagent-loaded=applied:' "a second --
 [ ! -s "$CASE_LAUNCHCTL_LOG" ] || assert_not_contains "$(cat "$CASE_LAUNCHCTL_LOG")" bootstrap \
   "a second --fix re-bootstrapped a loaded launch agent"
 pass "--fix is idempotent once the host is ready"
+
+# --- a herdr release below the saved-machine floor is a human gap -----------
+
+new_case Darwin with-herdr gui
+CASE_HERDR_CLIENT_VERSION=0.9.2
+doctor
+expect_code 1 "$DOCTOR_RC" "a host with herdr 0.9.2 below the saved-machine floor was reported ready"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=human: herdr 0.9.2 is older than 0.9.3' \
+  "a below-floor client was not tagged as a human gap"
+assert_contains "$DOCTOR_OUT" "action: herdr-version: run 'herdr update --handoff'" \
+  "a below-floor client came without the upgrade action"
+doctor --fix
+expect_code 1 "$DOCTOR_RC" "--fix reported a below-floor herdr host as ready"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=human:' "--fix stopped reporting the below-floor herdr"
+assert_not_contains "$DOCTOR_OUT" 'fix herdr-version=' "--fix touched the herdr release itself"
+pass "a herdr release below the saved-machine floor is a human gap --fix never closes"
+
+new_case Darwin with-herdr gui
+CASE_HERDR_CLIENT_VERSION=0.9.3
+CASE_HERDR_SERVER_VERSION=0.9.1
+printf 'true\n' > "$CASE_HERDR_RUNNING"
+doctor
+expect_code 1 "$DOCTOR_RC" "a host serving saved machines from a 0.9.1 server was reported ready"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=human: the running session fm-remote server is herdr 0.9.1, older than 0.9.3' \
+  "a below-floor running server was not tagged as a human gap"
+assert_contains "$DOCTOR_OUT" "action: herdr-version: run 'herdr update --handoff'" \
+  "a below-floor server came without the upgrade action"
+pass "a below-floor running fm-remote server is its own human gap"
+
+new_case Darwin with-herdr gui
+CASE_HERDR_CLIENT_VERSION=0.9.3
+CASE_HERDR_SERVER_VERSION=absent
+printf 'true\n' > "$CASE_HERDR_RUNNING"
+doctor
+expect_code 1 "$DOCTOR_RC" "a server that hides its release was reported ready"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=human: the running session fm-remote server does not report its herdr release' \
+  "a release-less server was not tagged as a human gap"
+pass "a running server that does not report its release is a human gap"
+
+new_case Darwin with-herdr gui
+CASE_HERDR_CLIENT_VERSION=0.9.3
+doctor --fix
+expect_code 0 "$DOCTOR_RC" "a host exactly at the saved-machine floor was reported unready"
+assert_contains "$DOCTOR_OUT" 'check herdr-version=ok: client 0.9.3 and server 0.9.3' \
+  "the exact-floor release was not verified"
+pass "herdr exactly at the 0.9.3 saved-machine floor is ready"
 
 # --- a loaded, running launch agent with contract drift is repaired ----------
 

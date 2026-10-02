@@ -407,6 +407,35 @@ fm_fakebin() {
   printf '%s\n' "$fakebin"
 }
 
+# fm_fake_saved_herdr <dir> <machines-json> <log-file>: a fake local herdr for
+# the parent-side saved-machine save (bin/fm-herdr-machine-lib.sh). Every argv
+# is logged to <log-file>, machine list serves <machines-json> (or [] when
+# absent), and machine add succeeds without changing the list. It exists so
+# suites can exercise or isolate the save without ever touching the runner's
+# real Herdr or its saved machines.
+fm_fake_saved_herdr() {  # <dir> <machines-json> <log-file>
+  local dir=$1 machines=$2 log=$3
+  mkdir -p "$dir"
+  ln -sf "$(command -v jq)" "$dir/jq"
+  cat > "$dir/herdr" <<SH
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "\$*" >> '$log'
+case "\${1:-} \${2:-}" in
+  "machine list")
+    cat '$machines' 2>/dev/null || printf '[]\n'
+    exit 0
+    ;;
+  "machine add")
+    printf 'machine saved\n'
+    exit 0
+    ;;
+esac
+exit 0
+SH
+  chmod +x "$dir/herdr"
+}
+
 fm_fake_exit0() {
   local fakebin=$1 tool
   shift

@@ -15,6 +15,7 @@ Firstmate does not support placing an individual worker remotely or failing a re
 | Check whether a host is ready, or repair it | [Readiness, repair, and the human steps](#readiness-repair-and-the-human-steps) |
 | Create the route and the remote home | [Provision a route](#provision-a-route) |
 | Launch, recover, message, and read a remote second mate | [Normal operation](#normal-operation) |
+| See remote agents in the local Herdr | [Saved machines in the local Herdr](#saved-machines-in-the-local-herdr) |
 | Move queued work to the remote home | [Backlog handoff](#backlog-handoff) |
 | Push configuration, relaunch, update, or retire | [Sync, update, and retirement](#sync-update-and-retirement) |
 | Run the tests or a real-host smoke test | [Verification](#verification) |
@@ -234,6 +235,11 @@ Every gap is followed by an `action:` line naming the exact step.
 Any remaining gap exits non-zero.
 The script's own header owns the full line protocol.
 
+One readiness check is a herdr release floor: the host's herdr client and, while it is running, its `fm-remote` server must be herdr 0.9.3 or newer, the first release verified to serve the primary's saved machines (see [Saved machines in the local Herdr](#saved-machines-in-the-local-herdr)).
+This check imposes no version floor on the primary's local Herdr client.
+Below the floor the gap is `human:`, because only a person chooses when to upgrade a host.
+The action names `herdr update --handoff`, which upgrades the live `fm-remote` server without killing the second-mate panes, and `--fix` reports that step without ever running it.
+
 ### Repair with --fix
 
 `--fix` repairs only the automatable gaps and is safe to rerun:
@@ -429,6 +435,26 @@ All remote secondmates on one host share `fm-remote` and retain separate `2ndmat
 - A launch after a host has drifted out of readiness fails with the doctor's own gap text instead of leaving a half-created endpoint.
 - Raw launch commands are not accepted for remote secondmates.
 - Backends that already refuse secondmate launch, currently Orca and cmux, remain unsupported on the remote host.
+
+### Saved machines in the local Herdr
+
+Automatic saving is specific to the `dscott98/firstmate` fork and is not an upstream Firstmate feature.
+After a remote second mate is launched, and again whenever a liveness probe finds its route alive, the primary saves the host as a machine in this machine's local Herdr:
+
+```sh
+herdr machine add --label <ssh-alias> --remote-session fm-remote <ssh-alias>
+```
+
+That saved machine is what makes the remote agent's activity visible in the local Herdr sidebar, so a rebuilt or reinstalled local Herdr converges again on the next supervision pass.
+
+- The save is idempotent: an enabled machine targeting the alias and required remote session is left alone silently.
+  Firstmate never removes or rewrites any existing saved machine.
+  A mismatched or disabled pre-existing entry is left untouched and reported with the host, mismatch, and exact manual removal and add commands an operator can run.
+  Both launch and liveness report these warnings without failing.
+- A primary with no local herdr or jq skips the save silently.
+- A refused save, for example a remote server too old to serve saved machines, is reported as a warning and never fails the launch or the probe around it.
+  The readiness floor above is the durable fix for that refusal.
+- Each save is bounded, so an unreachable host cannot stall a launch or a supervision pass indefinitely, and mates that share one host serialize behind one per-host save.
 
 ### Liveness recovery
 
@@ -683,6 +709,7 @@ It carries Bitbucket, self-hosted, and scp-like origins through to the remote cl
 The portable tests run with these commands:
 
 ```sh
+bin/fm-test-run.sh tests/fm-herdr-machine.test.sh
 bin/fm-test-run.sh tests/fm-on.test.sh
 bin/fm-test-run.sh tests/fm-send-remote-delivery.test.sh
 bin/fm-test-run.sh tests/fm-secondmate-reconcile.test.sh

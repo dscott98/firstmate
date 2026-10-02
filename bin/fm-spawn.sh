@@ -639,6 +639,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-trace-context-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
+# shellcheck source=bin/fm-herdr-machine-lib.sh
+. "$SCRIPT_DIR/fm-herdr-machine-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
@@ -1174,6 +1176,11 @@ spawn_remote_secondmate() {
   fm_lock_release "$remote_lock" || true
   fm_lock_release "$registry_lock" || true
   fm_lock_release "$SPAWN_TASK_LOCK" || true
+  # The endpoint exists and is recorded, so make the remote host visible in
+  # this machine's local Herdr as a saved machine. Best-effort and idempotent:
+  # it never fails the launch
+  # (bin/fm-herdr-machine-lib.sh owns the contract).
+  fm_herdr_machine_saved_ensure "$host" "$remote_herdr_session"
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
   if ! "$SCRIPT_DIR/fm-procevent-remote-reply.sh" arm "$id" >/dev/null; then
     echo "error: remote secondmate $id launched, but its reply source could not be armed; endpoint metadata is preserved" >&2
