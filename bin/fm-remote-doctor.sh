@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
-# Check, and optionally repair, one remote account's second-mate readiness.
+# Check, and optionally repair, one remote account's readiness for a profile.
 #
 # Usage:
-#   bin/fm-on.sh <secondmate-id|ssh-alias> fm-remote-doctor.sh [--fix]
+#   bin/fm-on.sh <route> fm-remote-doctor.sh [--profile secondmate|task] [--fix]
 #
 # Run it through fm-on.sh so the fixed entrypoint invokes this readiness owner
 # over its plain SSH bootstrap. The command reports the same filesystem-composed
 # PATH used by worker jobs while retaining authority to inspect and repair the
 # worker itself.
+#
+# Profiles. The default secondmate profile is everything below about Herdr. The
+# task profile readies a sandbox task's one-task home, whose worker runs on
+# tmux: it requires git, jq, tmux, treehouse, and one harness, treats tasks-axi
+# as optional because a task home's backlog is manual, and reports every Herdr
+# check (herdr, launchagent, launchagent-scope, launchagent-loaded, and
+# herdr-server) as skip, so it never inspects, starts, or writes a Herdr
+# session or launch agent. Both profiles keep the remote job worker, its login
+# session on darwin, and the entrypoint symlink, because every non-doctor
+# fm-on command runs through that worker.
 #
 # A remote second mate always runs on the Herdr backend in the dedicated
 # fm-remote session. Its account therefore needs the Firstmate-owned Aqua Herdr
@@ -43,7 +53,7 @@
 # Every check line is authoritative for the moment it printed: under --fix it is
 # the state after the repair attempt, so a human gap is never presented as
 # fixed. Any remaining fixable or human gap, and any missing required tool,
-# exits non-zero.
+# exits non-zero. The closing ok: or error: line names the profile it judged.
 #
 # --fix is idempotent and closes only automatable gaps: it writes and reloads
 # both Firstmate-owned Aqua agents, starts the Linux workers where no Aqua agent
@@ -67,9 +77,7 @@ FM_ROOT="${FM_ROOT_OVERRIDE:-$(CDPATH='' cd "$SCRIPT_DIR/.." && pwd -P)}"
 . "$SCRIPT_DIR/fm-tasks-axi-lib.sh"
 # shellcheck source=bin/fm-remote-herdr-owner-lib.sh
 . "$SCRIPT_DIR/fm-remote-herdr-owner-lib.sh"
-REQUIRED_TOOLS=(git jq herdr tasks-axi treehouse)
 HARNESS_TOOLS=(claude codex opencode pi pi-signed grok kimi)
-OPTIONAL_TOOLS=(tmux no-mistakes gh)
 LAUNCH_AGENT_LABEL=dev.firstmate.herdr.fm-remote
 # The dedicated remote-secondmate session. The user's interactive Herdr work
 # remains in the separate default session, which this readiness check never
@@ -84,17 +92,42 @@ ENTRYPOINT_LINK="${HOME:-}/.local/bin/fm-remote-entrypoint.sh"
 usage() { sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 MODE=check
-case "${1:-}" in
-  '') ;;
-  --fix) MODE=fix; shift ;;
-  --worker-tool-probe)
-    [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
-    MODE='worker-tool-probe'
-    shift
-    ;;
-  *) usage ;;
-esac
-[ "$#" -eq 0 ] || usage
+PROFILE=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --fix)
+      [ "$MODE" = check ] || usage
+      MODE=fix
+      ;;
+    --worker-tool-probe)
+      [ "$MODE" = check ] || usage
+      [ "${FM_REMOTE_JOB_ACTIVE:-}" = 1 ] || { printf 'error: worker tool probe requires the remote job worker\n' >&2; exit 64; }
+      MODE='worker-tool-probe'
+      ;;
+    --profile)
+      [ "$#" -ge 2 ] && [ -z "$PROFILE" ] || usage
+      case "$2" in
+        secondmate|task) PROFILE=$2 ;;
+        *) printf 'error: unknown readiness profile: %s (expected secondmate or task)\n' "$2" >&2; exit 2 ;;
+      esac
+      shift
+      ;;
+    *) usage ;;
+  esac
+  shift
+done
+PROFILE=${PROFILE:-secondmate}
+if [ "$PROFILE" = task ]; then
+  REQUIRED_TOOLS=(git jq tmux treehouse)
+  OPTIONAL_TOOLS=(tasks-axi no-mistakes gh)
+  READY_SUBJECT='a remote task'
+  READY_NOUN='remote task'
+else
+  REQUIRED_TOOLS=(git jq herdr tasks-axi treehouse)
+  OPTIONAL_TOOLS=(tmux no-mistakes gh)
+  READY_SUBJECT='a remote second mate'
+  READY_NOUN='remote second-mate'
+fi
 
 PLATFORM=$(fm_remote_job_platform)
 UID_NUM=$(id -u 2>/dev/null) || UID_NUM=
@@ -451,9 +484,12 @@ report_required_tools() {
 
 report_required_tools_from_worker() {
   local job_id probe_stdout probe_stderr probe_exit line fact name value
-  local expected=6 count=0 valid=1 seen=' '
+  local expected=$((${#REQUIRED_TOOLS[@]} + 1)) count=0 valid=1 seen=' ' known
+  local probe_args=(--worker-tool-probe)
+  [ "$PROFILE" = secondmate ] || probe_args+=(--profile "$PROFILE")
+  known=" ${REQUIRED_TOOLS[*]} harness "
   if ! job_id=$(fm_remote_job_stage "${HOME:-}" "$FM_ROOT" "${FM_HOME:-}" \
-    fm-remote-doctor.sh --worker-tool-probe </dev/null); then
+    fm-remote-doctor.sh "${probe_args[@]}" </dev/null); then
     set_check remote-job-probe "fixable: the remote job worker could not accept the required-tool probe" \
       "rerun this command with --fix to restart the worker"
     report_required_tools
@@ -475,7 +511,7 @@ report_required_tools_from_worker() {
     fact=${line#required }
     name=${fact%%=*}
     value=${fact#*=}
-    case "$name" in git|jq|herdr|tasks-axi|treehouse|harness) ;; *) valid=0; continue ;; esac
+    case "$known" in *" $name "*) ;; *) valid=0; continue ;; esac
     case "$seen" in *" $name "*) valid=0; continue ;; esac
     seen="$seen$name "
     count=$((count + 1))
@@ -718,16 +754,32 @@ check_entrypoint_link() {
     "rerun this command with --fix to create it"
 }
 
+# A skip line is never a gap, so --fix, which acts only on fixable checks,
+# never reaches a Herdr repair under the task profile either.
+skip_herdr_checks() { # <check>...
+  local name
+  for name in "$@"; do
+    record "$name" "skip: the task profile runs its worker on tmux with no Herdr session"
+  done
+}
+
 run_checks() { # <resolved-login-shell>
   local shell=$1
   CHECK_NAMES=()
   CHECK_VALUES=()
   CHECK_ACTIONS=()
-  check_herdr
-  check_gui_session
-  check_remote_job_worker
-  check_launch_agent "$shell"
-  check_herdr_server
+  if [ "$PROFILE" = task ]; then
+    skip_herdr_checks herdr
+    check_gui_session
+    check_remote_job_worker
+    skip_herdr_checks launchagent launchagent-scope launchagent-loaded herdr-server
+  else
+    check_herdr
+    check_gui_session
+    check_remote_job_worker
+    check_launch_agent "$shell"
+    check_herdr_server
+  fi
   check_entrypoint_link
 }
 
@@ -896,7 +948,7 @@ fi
 printf 'platform=%s\n' "$PLATFORM"
 
 LAUNCH_AGENT_SHELL=
-if [ "$PLATFORM" = darwin ]; then
+if [ "$PLATFORM" = darwin ] && [ "$PROFILE" = secondmate ]; then
   LAUNCH_AGENT_SHELL=$(resolve_launch_agent_shell)
 fi
 run_checks "$LAUNCH_AGENT_SHELL"
@@ -943,7 +995,7 @@ if [ "${#MISSING[@]}" -gt 0 ] || [ "${#GAPS[@]}" -gt 0 ]; then
   for i in ${GAPS[@]+"${GAPS[@]}"}; do
     NAMES="${NAMES:+$NAMES }${CHECK_NAMES[$i]}"
   done
-  printf 'error: this host is not ready for a remote second mate%s\n' "${NAMES:+; unresolved: $NAMES}" >&2
+  printf 'error: this host is not ready for %s%s\n' "$READY_SUBJECT" "${NAMES:+; unresolved: $NAMES}" >&2
   exit 1
 fi
-printf 'ok: remote second-mate readiness confirmed on this host\n'
+printf 'ok: %s readiness confirmed on this host\n' "$READY_NOUN"

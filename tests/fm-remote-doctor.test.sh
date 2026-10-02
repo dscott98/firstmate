@@ -887,3 +887,148 @@ assert_contains "$DOCTOR_OUT" 'check entrypoint-link=human:' "an operator-owned 
 unset FM_ROOT_OVERRIDE
 pass "the entrypoint symlink is recreated when absent and never overwritten when operator-owned"
 
+# --- the task profile readies a sandbox task home with no Herdr session -------
+
+add_fake_tmux() {
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$CASE_BIN/tmux"
+  chmod +x "$CASE_BIN/tmux"
+}
+
+new_case Linux no-herdr no-gui
+rm -f "$CASE_BIN/tasks-axi"
+add_fake_tmux
+# Hide any host-installed copies too, so the host really lacks both tools.
+TASK_SANS_PATH=$(fm_test_base_path_sans "$BASE_PATH" tasks-axi herdr)
+BASE_PATH=$TASK_SANS_PATH doctor
+expect_code 1 "$DOCTOR_RC" "the default profile accepted a host with neither herdr nor tasks-axi"
+assert_contains "$DOCTOR_OUT" 'check herdr=human:' "the default profile stopped requiring herdr"
+assert_contains "$DOCTOR_OUT" 'required tasks-axi=MISSING' "the default profile stopped requiring tasks-axi"
+assert_contains "$DOCTOR_OUT" 'not ready for a remote second mate' "the default profile stopped naming the second mate"
+BASE_PATH=$TASK_SANS_PATH doctor --profile task
+expect_code 0 "$DOCTOR_RC" "the task profile refused a host holding its whole tool set"
+assert_contains "$DOCTOR_OUT" "required tmux=$CASE_BIN/tmux" "the task profile did not require tmux"
+assert_contains "$DOCTOR_OUT" "required treehouse=$CASE_BIN/treehouse" "the task profile did not require treehouse"
+assert_contains "$DOCTOR_OUT" "required git=$TASK_SANS_PATH/git" "the task profile did not require git"
+assert_contains "$DOCTOR_OUT" "required jq=$TASK_SANS_PATH/jq" "the task profile did not require jq"
+assert_contains "$DOCTOR_OUT" "required harness=claude:$CASE_BIN/claude" "the task profile did not require a harness"
+assert_contains "$DOCTOR_OUT" 'optional tasks-axi=absent' "the task profile did not treat tasks-axi as optional"
+assert_not_contains "$DOCTOR_OUT" 'required herdr' "the task profile required herdr"
+assert_not_contains "$DOCTOR_OUT" 'required tasks-axi' "the task profile required tasks-axi"
+for check in herdr launchagent launchagent-scope launchagent-loaded herdr-server; do
+  assert_contains "$DOCTOR_OUT" "check $check=skip: the task profile runs its worker on tmux with no Herdr session" \
+    "the task profile did not skip the $check check"
+done
+assert_contains "$DOCTOR_OUT" 'check remote-job-worker=ok:' "the task profile dropped the remote job worker check"
+assert_contains "$DOCTOR_OUT" 'ok: remote task readiness confirmed on this host' "the task profile did not name its verdict"
+pass "the task profile requires git, jq, tmux, treehouse, and one harness, with tasks-axi optional and no Herdr session"
+
+new_case Linux no-herdr no-gui
+BASE_PATH=$(fm_test_base_path_sans "$BASE_PATH" tmux) doctor --profile task
+expect_code 1 "$DOCTOR_RC" "the task profile accepted a host without tmux"
+assert_contains "$DOCTOR_OUT" 'required tmux=MISSING' "the task profile did not report the missing tmux"
+assert_contains "$DOCTOR_OUT" 'required tools do not resolve on the remote runtime PATH: tmux' \
+  "the task profile did not name the missing tool"
+assert_contains "$DOCTOR_OUT" 'error: this host is not ready for a remote task' "the task profile did not name its refusal"
+pass "a task host without tmux is not ready"
+
+new_case Darwin with-herdr gui
+add_fake_tmux
+cat > "$CASE_BIN/herdr" <<'SH'
+#!/usr/bin/env bash
+printf 'herdr %s\n' "$*" >> "$FM_FAKE_STATE/herdr-calls.log"
+exit 0
+SH
+chmod +x "$CASE_BIN/herdr"
+doctor --profile task --fix
+expect_code 0 "$DOCTOR_RC" "--fix left a repairable task host unready"
+assert_contains "$DOCTOR_OUT" 'fix remote-job-worker=applied:' "--fix did not repair the remote job worker under the task profile"
+assert_contains "$DOCTOR_OUT" 'check remote-job-worker=ok:' "the task profile did not re-check the repaired worker"
+assert_contains "$DOCTOR_OUT" 'check herdr-server=skip: the task profile' "the task profile checked the Herdr server"
+assert_present "$CASE_JOB_PLIST" "--fix did not write the remote job worker under the task profile"
+assert_absent "$CASE_PLIST" "the task profile wrote the fm-remote Herdr launch agent"
+assert_no_grep "$LABEL" "$CASE_LAUNCHCTL_LOG" "the task profile reached the fm-remote Herdr launch agent"
+assert_absent "$CASE_STATE/herdr-calls.log" "the task profile invoked herdr"
+assert_not_contains "$DOCTOR_OUT" 'fix herdr-server' "the task profile repaired a Herdr server"
+assert_not_contains "$DOCTOR_OUT" 'fix launchagent' "the task profile repaired the Herdr launch agent"
+assert_no_dangerous_calls "the task profile reached for auto-login, FileVault, or the keychain"
+pass "task-profile --fix repairs only the job worker and never touches a Herdr session or launch agent"
+
+new_case Linux no-herdr no-gui
+doctor --profile sandbox
+expect_code 2 "$DOCTOR_RC" "an unknown readiness profile was accepted"
+assert_contains "$DOCTOR_OUT" 'unknown readiness profile: sandbox' "an unknown profile was not named"
+doctor --profile
+expect_code 2 "$DOCTOR_RC" "a profile flag without a value was accepted"
+doctor --profile task --profile task
+expect_code 2 "$DOCTOR_RC" "a repeated profile flag was accepted"
+pass "the doctor refuses an unknown, empty, or repeated profile"
+
+new_case Linux no-herdr no-gui
+CASE_REMOTE_JOB_ACTIVE=
+CASE_PLATFORM_OVERRIDE=Linux
+rm -f "$CASE_BIN/sleep" "$CASE_BIN/uname" "$CASE_BIN/tasks-axi"
+add_fake_tmux
+mkdir -p "$CASE_HOME/.local/bin"
+for tool in tmux treehouse claude; do
+  ln -s "$CASE_BIN/$tool" "$CASE_HOME/.local/bin/$tool"
+done
+HOME="$CASE_HOME" FM_ROOT_OVERRIDE="$ROOT" FM_REMOTE_JOB_PLATFORM_OVERRIDE=Linux \
+  "$ROOT/bin/fm-remote-job-worker.sh" > "$CASE_STATE/worker.out" 2> "$CASE_STATE/worker.err" &
+DOCTOR_WORKER_PID=$!
+for _ in $(seq 1 100); do
+  [ -f "$CASE_HOME/.firstmate/remote-job/worker.ready" ] && break
+  sleep 0.05
+done
+assert_present "$CASE_HOME/.firstmate/remote-job/worker.ready" "the task-profile probe fixture worker did not start"
+doctor --profile task
+expect_code 0 "$DOCTOR_RC" "the task profile was not ready through a healthy worker"
+assert_contains "$DOCTOR_OUT" 'check remote-job-probe=ok: the remote job worker completed the required-tool probe' \
+  "the worker's required-tool probe did not run under the task profile"
+assert_contains "$DOCTOR_OUT" "required tmux=$CASE_HOME/.local/bin/tmux" "the worker probe did not report the task profile's tools"
+assert_not_contains "$DOCTOR_OUT" 'required herdr' "the worker probe ran the second-mate profile"
+DOCTOR_WORKER_PID=$(cat "$CASE_HOME/.firstmate/remote-job/worker.pid")
+kill -TERM "$DOCTOR_WORKER_PID"
+for _ in $(seq 1 100); do
+  kill -0 "$DOCTOR_WORKER_PID" 2>/dev/null || break
+  sleep 0.05
+done
+if kill -0 "$DOCTOR_WORKER_PID" 2>/dev/null; then
+  kill -KILL "$DOCTOR_WORKER_PID" 2>/dev/null || true
+fi
+DOCTOR_WORKER_PID=
+pass "the worker's required-tool probe runs under the requested profile"
+
+# --- the readiness gate passes the profile through ---------------------------
+
+GATE_DIR="$TMP_ROOT/readiness-gate"
+mkdir -p "$GATE_DIR"
+cat > "$GATE_DIR/fm-on.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FM_FAKE_GATE_LOG"
+count=$(wc -l < "$FM_FAKE_GATE_LOG" | tr -d ' ')
+[ "$count" -ne 1 ] || { printf 'check herdr=human: fixture gap\n'; exit 1; }
+printf 'ok: fixture ready\n'
+SH
+chmod +x "$GATE_DIR/fm-on.sh"
+run_gate() { # <log> <route> [profile]
+  (
+    export FM_FAKE_GATE_LOG=$1
+    shift
+    # shellcheck source=/dev/null
+    . "$ROOT/bin/fm-remote-readiness-lib.sh"
+    fm_remote_readiness_ensure "$GATE_DIR" "$@"
+  )
+}
+run_gate "$GATE_DIR/task.log" sbx1 task || fail "the readiness gate refused a task host its repair readied"
+[ "$(cat "$GATE_DIR/task.log")" = "$(printf '%s\n' \
+  'sbx1 fm-remote-doctor.sh --profile task' \
+  'sbx1 fm-remote-doctor.sh --profile task --fix' \
+  'sbx1 fm-remote-doctor.sh --profile task')" ] \
+  || fail "the readiness gate did not carry the task profile through check, repair, and verdict:"$'\n'"$(cat "$GATE_DIR/task.log")"
+run_gate "$GATE_DIR/secondmate.log" rsm || fail "the readiness gate refused a secondmate host its repair readied"
+[ "$(cat "$GATE_DIR/secondmate.log")" = "$(printf '%s\n' \
+  'rsm fm-remote-doctor.sh' \
+  'rsm fm-remote-doctor.sh --fix' \
+  'rsm fm-remote-doctor.sh')" ] \
+  || fail "the default readiness gate changed its doctor argv:"$'\n'"$(cat "$GATE_DIR/secondmate.log")"
+pass "the readiness gate carries the task profile and leaves the second-mate argv unchanged"

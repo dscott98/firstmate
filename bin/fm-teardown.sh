@@ -176,6 +176,11 @@
 # leased home releases its durable treehouse lease so the pool slot is freed,
 # never left leased forever. If the treehouse return fails, teardown leaves the
 # leased home and state in place instead of hiding a still-held lease.
+# bin/fm-remote-route-lib.sh decides remote placement before anything else
+# reads the record: a remote secondmate takes the remote retirement above, and
+# a sandbox task record, or a record whose placement is malformed, is refused
+# with nothing touched, even under --force, because this version has no
+# host-side teardown or landed-work gate for a sandbox task.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
@@ -324,6 +329,7 @@ for _teardown_source in \
   fm-backlog-transition-lib.sh \
   fm-timeout-lib.sh \
   fm-backend.sh \
+  fm-remote-route-lib.sh \
   fm-control-lib.sh \
   fm-lock-lib.sh \
   fm-classify-lib.sh \
@@ -354,6 +360,8 @@ unset _teardown_source
 . "$SCRIPT_DIR/fm-backlog-transition-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-lock-lib.sh
@@ -415,6 +423,25 @@ fi
 fm_lease_guard "$ID" "teardown (fm-teardown)"
 
 META="$STATE/$ID.meta"
+# Remote dispatch (bin/fm-remote-route-lib.sh) runs before anything reads the
+# record's worktree or endpoint as local. A sandbox task's worktree lives on
+# its VM, and this version has neither its host-side teardown nor its
+# landed-work gate, so the task is refused with nothing touched; a record whose
+# placement is malformed is refused the same way. The remote secondmate
+# dispatch below resolves the route again under the task's locks.
+teardown_refuse_unroutable() {
+  if ! fm_remote_route_resolve "$META" "$ID"; then
+    echo "REFUSED: task $ID: $FM_REMOTE_ROUTE_ERROR; nothing was changed" >&2
+    return 1
+  fi
+  if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    echo "REFUSED: $(fm_remote_route_unsupported "$ID" "teardown"); nothing was changed" >&2
+    return 1
+  fi
+}
+if [ -f "$META" ] && [ ! -L "$META" ]; then
+  teardown_refuse_unroutable || exit 1
+fi
 TREEHOUSE_PROJECT_LOCK=
 TREEHOUSE_PROJECT_LOCK_HELD=0
 TREEHOUSE_SLOT_LOCK_REQUIRED=0
@@ -1000,14 +1027,14 @@ remote_outbox_cleanup() {
   )
 }
 
+# Called only once the locked dispatch below has resolved this record as a
+# remote secondmate, so the FM_REMOTE_ROUTE_* fields describe this record.
 remote_secondmate_teardown() {
-  local remote_host remote_root remote_home kind route_host route_root route_home out rc tmp
-  remote_host=$(fm_meta_get "$META" remote_host)
-  [ -n "$remote_host" ] || return 3
-  kind=$(fm_meta_get "$META" kind)
-  [ "$kind" = secondmate ] || { echo "REFUSED: remote placement metadata is valid only for a secondmate" >&2; return 1; }
-  remote_root=$(fm_meta_get "$META" remote_root)
-  remote_home=$(fm_meta_get "$META" home)
+  local remote_host remote_root remote_home remote_control route_host route_root route_home out rc tmp
+  remote_host=$FM_REMOTE_ROUTE_HOST
+  remote_root=$FM_REMOTE_ROUTE_ROOT
+  remote_home=$FM_REMOTE_ROUTE_HOME
+  remote_control=$FM_REMOTE_ROUTE_CONTROL
   [ -n "$remote_root" ] && [ -n "$remote_home" ] || { echo "REFUSED: remote secondmate metadata is incomplete" >&2; return 1; }
   secondmate_registry_line_for_id "$SECONDMATE_REG" "$ID" || { echo "REFUSED: remote secondmate route is missing or ambiguous" >&2; return 1; }
   [ "$SECONDMATE_REGISTRY_REMOTE" -eq 1 ] || { echo "REFUSED: secondmate registry route is not remote" >&2; return 1; }
@@ -1031,9 +1058,9 @@ remote_secondmate_teardown() {
   }
   "$FM_ROOT/bin/fm-guard.sh" || true
   if [ "$FORCE" = --force ]; then
-    if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh retire "$ID" --force < /dev/null 2>&1); then rc=0; else rc=$?; fi
+    if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" "$remote_control" retire "$ID" --force < /dev/null 2>&1); then rc=0; else rc=$?; fi
   else
-    if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-secondmate-control.sh retire "$ID" < /dev/null 2>&1); then rc=0; else rc=$?; fi
+    if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" "$remote_control" retire "$ID" < /dev/null 2>&1); then rc=0; else rc=$?; fi
   fi
   if [ "$rc" -ne 0 ]; then
     [ -z "$out" ] || printf '%s\n' "$out" >&2
@@ -1074,7 +1101,8 @@ remote_secondmate_teardown() {
 
 remote_secondmate_teardown_locked() {
   local rc
-  [ -n "$(fm_meta_get "$META" remote_host)" ] || return 3
+  teardown_refuse_unroutable || return 1
+  [ "$FM_REMOTE_ROUTE_KIND" = secondmate ] || return 3
   REMOTE_REGISTRY_LOCK=$(secondmate_registry_lock_path "$STATE")
   fm_lock_acquire_wait "$REMOTE_REGISTRY_LOCK" || return 1
   REMOTE_HANDOFF_LOCK="$STATE/.backlog-handoff-$ID.lock"

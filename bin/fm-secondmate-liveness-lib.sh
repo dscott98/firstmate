@@ -7,7 +7,9 @@
 # single-sourced here.
 #
 # A secondmate's recorded endpoint is the tmux window, herdr pane, or remote
-# peer it runs in. Probing classifies that endpoint through the owning backend
+# peer it runs in, and bin/fm-remote-route-lib.sh decides which: a record it
+# resolves as a sandbox task, or rejects as malformed, is skipped with its
+# reason. Probing classifies that endpoint through the owning backend
 # adapter's fm_backend_agent_state (local) or the remote control script's
 # state verb (remote), which returns one of:
 #
@@ -54,6 +56,8 @@ FM_SM_LIVE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 # shellcheck source=bin/fm-backend.sh
 . "$FM_SM_LIVE_LIB_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$FM_SM_LIVE_LIB_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-remote-readiness-lib.sh
 . "$FM_SM_LIVE_LIB_DIR/fm-remote-readiness-lib.sh"
 # shellcheck source=bin/fm-timeout-lib.sh
@@ -133,12 +137,24 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
   local meta=$1 id=$2 mode=$3
   FM_SM_LIVE_STATUS=skipped FM_SM_LIVE_STATE=unknown FM_SM_LIVE_KILL=0
   FM_SM_LIVE_CAUSE='' FM_SM_LIVE_WHERE='' FM_SM_LIVE_REASON='' FM_SM_LIVE_LINE=''
-  local window harness remote_host remote_rc out agent_state readiness_reason route_out remote_backend
+  local window harness remote_host remote_control remote_rc out agent_state readiness_reason route_out remote_backend
   window=$(fm_meta_get "$meta" window)
   [ -n "$window" ] || { FM_SM_LIVE_STATUS=silent; return 0; }
   harness=$(fm_meta_get "$meta" harness)
-  remote_host=$(fm_meta_get "$meta" remote_host)
-  if [ -n "$remote_host" ]; then
+  # Remote dispatch is bin/fm-remote-route-lib.sh's: a sandbox task or a record
+  # whose placement is malformed is no secondmate route, so it is skipped with
+  # the library's reason rather than probed locally or as a remote mate.
+  if ! fm_remote_route_resolve "$meta" "$id"; then
+    FM_SM_LIVE_REASON=$FM_REMOTE_ROUTE_ERROR
+    return 0
+  fi
+  if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    FM_SM_LIVE_REASON=$(fm_remote_route_unsupported "$id" "secondmate liveness recovery")
+    return 0
+  fi
+  remote_host=$FM_REMOTE_ROUTE_HOST
+  remote_control=$FM_REMOTE_ROUTE_CONTROL
+  if [ "$FM_REMOTE_ROUTE_KIND" = secondmate ]; then
     if [ "$mode" = full ]; then
       remote_rc=0
       fm_remote_readiness_ensure "$FM_SM_LIVE_LIB_DIR" "$id" || remote_rc=$?
@@ -155,7 +171,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
         return 0
       fi
     fi
-    if out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh state "$id" < /dev/null 2>/dev/null); then
+    if out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" "$remote_control" state "$id" < /dev/null 2>/dev/null); then
       remote_rc=0
     else
       remote_rc=$?
@@ -173,7 +189,7 @@ fm_secondmate_liveness_probe() {  # <meta> <id> <full|poll>
     case "$agent_state" in
       alive)
         if [ "$mode" = full ]; then
-          if route_out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" fm-remote-secondmate-control.sh route "$id" < /dev/null 2>/dev/null); then
+          if route_out=$("$FM_SM_LIVE_LIB_DIR/fm-on.sh" "$id" "$remote_control" route "$id" < /dev/null 2>/dev/null); then
             remote_rc=0
           else
             remote_rc=$?
