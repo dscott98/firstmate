@@ -522,10 +522,18 @@ pi_auth_merge() {
 }
 
 gh_auth_store() {
-  local name
+  local name dir index
+  local -a missing_dirs=()
   GH_AUTH_DIR=${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}
   [ ! -L "$GH_AUTH_DIR" ] || die "the gh configuration directory is a symlink"
-  mkdir -p -m 700 "$GH_AUTH_DIR" || die "cannot create the gh configuration directory"
+  dir=$GH_AUTH_DIR
+  while [ ! -d "$dir" ]; do
+    missing_dirs+=("$dir")
+    dir=$(dirname -- "$dir")
+  done
+  for ((index=${#missing_dirs[@]}-1; index>=0; index--)); do
+    mkdir -m 700 "${missing_dirs[index]}" || die "cannot create the gh configuration directory"
+  done
   for name in hosts.yml config.yml; do
     if [ -e "$GH_AUTH_DIR/$name" ] || [ -L "$GH_AUTH_DIR/$name" ]; then
       [ -f "$GH_AUTH_DIR/$name" ] && [ ! -L "$GH_AUTH_DIR/$name" ] \
@@ -538,8 +546,9 @@ gh_auth_store() {
   "$GH_BIN" auth login --hostname github.com --git-protocol https --insecure-storage --with-token \
     < "$PROVISION_TMP/gh-token" >/dev/null 2>&1 \
     || die "gh credential storage failed for github.com"
-  [ -f "$GH_AUTH_DIR/hosts.yml" ] && chmod 600 "$GH_AUTH_DIR/hosts.yml" \
-    || die "gh did not store its github.com credential file"
+  if [ ! -f "$GH_AUTH_DIR/hosts.yml" ] || ! chmod 600 "$GH_AUTH_DIR/hosts.yml"; then
+    die "gh did not store its github.com credential file"
+  fi
 }
 
 provision_apply() { # <id>
@@ -604,9 +613,10 @@ provision_apply() { # <id>
   git ${git_auth[@]+"${git_auth[@]}"} clone --no-local --quiet -- "$(cat "$PROVISION_TMP/origin")" "$dest" \
     || die "could not clone project $P_FIELD_project from its origin"
   if provision_has gh_token_b64; then
-    git -C "$dest" config --local --add credential.https://github.com.helper "" \
-      && git -C "$dest" config --local --add credential.https://github.com.helper "$helper" \
-      || die "could not configure GitHub authentication for project $P_FIELD_project"
+    if ! git -C "$dest" config --local --add credential.https://github.com.helper "" \
+      || ! git -C "$dest" config --local --add credential.https://github.com.helper "$helper"; then
+      die "could not configure GitHub authentication for project $P_FIELD_project"
+    fi
   fi
   journal "clone project=$P_FIELD_project"
   if [ "$P_FIELD_kind" = ship ] && [ "$P_FIELD_mode" = no-mistakes ]; then
