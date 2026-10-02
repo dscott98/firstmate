@@ -1,0 +1,152 @@
+[
+  {
+    "argv": [
+      "create",
+      "t1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "status",
+      "sbx-1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "list"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "extend",
+      "sbx-1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "hold",
+      "sbx-1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "release",
+      "sbx-1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "policy",
+      "sbx-1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "exec",
+      "sbx-1",
+      "--",
+      "true"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "snapshot",
+      "sbx-1",
+      "snap"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "rollback",
+      "sbx-1",
+      "snap"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "destroy",
+      "sbx-1",
+      "--expect-task",
+      "t1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)\n"
+  },
+  {
+    "argv": [
+      "create",
+      "t1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: default_profile=open is forbidden: open requires explicit per-task --profile open\n"
+  },
+  {
+    "argv": [
+      "create",
+      "t1"
+    ],
+    "exit": 3,
+    "stdout": "",
+    "stderr": "refused: sandbox provider command '/nonexistent/sandbox-provider' from /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3WZPYTBCZEB62K80NDKK7ZR/.sandbox-live-7db87tzd/config/sandbox-provider does not exist\n"
+  },
+  {
+    "argv": [
+      "exec",
+      "sbx-1",
+      "echo bad"
+    ],
+    "exit": 2,
+    "stdout": "",
+    "stderr": "usage error: exec requires '--' before the command argv, because the command is an argv, never a shell string\nusage: fm-sandbox.sh <verb> [args]\n  create <task-id> [--profile <name>] [--ttl <duration>]\n  status <name>\n  list\n  extend <name> [--ttl <duration>]\n  hold <name>\n  release <name>\n  policy <name>\n  exec <name> -- <argv...>\n  snapshot <name> <label>\n  rollback <name> <label>\n  destroy <name> --expect-task <task-id>\nThis script is the only Firstmate code that invokes the sandbox provider.\nIts header owns the provider command, output, and exit contracts.\n"
+  },
+  {
+    "argv": [
+      "destroy",
+      "sbx-1"
+    ],
+    "exit": 2,
+    "stdout": "",
+    "stderr": "usage error: destroy requires --expect-task <task-id>, so it refuses when the sandbox's labels disagree\nusage: fm-sandbox.sh <verb> [args]\n  create <task-id> [--profile <name>] [--ttl <duration>]\n  status <name>\n  list\n  extend <name> [--ttl <duration>]\n  hold <name>\n  release <name>\n  policy <name>\n  exec <name> -- <argv...>\n  snapshot <name> <label>\n  rollback <name> <label>\n  destroy <name> --expect-task <task-id>\nThis script is the only Firstmate code that invokes the sandbox provider.\nIts header owns the provider command, output, and exit contracts.\n"
+  },
+  {
+    "check": "config/sandbox-provider gitignored",
+    "output": "config/sandbox-provider\n"
+  },
+  {
+    "check": "provider availability",
+    "config_exists": false,
+    "pve-sandbox": null
+  }
+]
