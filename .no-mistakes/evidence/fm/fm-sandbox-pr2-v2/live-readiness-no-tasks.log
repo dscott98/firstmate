@@ -1,0 +1,54 @@
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-readiness-lab.GjyH7F
+$ bin/fm-remote-doctor.sh --profile task --fix
+mode=fix
+path=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-readiness-lab.GjyH7F/.local/bin:/usr/bin:/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=linux
+fix remote-job-worker=applied: installed or reloaded dev.firstmate.remote-job
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required tmux=/usr/bin/tmux
+required treehouse=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-readiness-lab.GjyH7F/.local/bin/treehouse
+required harness=codex:/usr/bin/codex
+optional tasks-axi=/usr/bin/tasks-axi
+optional no-mistakes=absent
+optional gh=/usr/bin/gh
+check herdr=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-version=skip: the task profile runs its worker on tmux with no Herdr session
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check launchagent=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-scope=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-loaded=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-server=skip: the task profile runs its worker on tmux with no Herdr session
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+ok: remote task readiness confirmed on this host
+$ bin/fm-remote-doctor.sh --profile task
+mode=check
+path=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-readiness-lab.GjyH7F/.local/bin:/usr/bin:/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required tmux=/usr/bin/tmux
+required treehouse=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-readiness-lab.GjyH7F/.local/bin/treehouse
+required harness=codex:/usr/bin/codex
+optional tasks-axi=/usr/bin/tasks-axi
+optional no-mistakes=absent
+optional gh=/usr/bin/gh
+check herdr=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-version=skip: the task profile runs its worker on tmux with no Herdr session
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check launchagent=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-scope=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-loaded=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-server=skip: the task profile runs its worker on tmux with no Herdr session
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+ok: remote task readiness confirmed on this host

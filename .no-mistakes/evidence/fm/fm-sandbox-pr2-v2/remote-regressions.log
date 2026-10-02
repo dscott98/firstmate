@@ -1,0 +1,685 @@
+FM_TEST_BEGIN 2026-10-02T04:59:51Z tests/fm-crew-state.test.sh family=pure-contract-unit expected_gate_skip=none
+ok - captured AXI replacement status replays through crew-state
+ok - captured AXI parked status replays through crew-state
+ok - captured AXI failed status replays through crew-state
+ok - captured capped inventory replays selection, ambiguity, and unavailable lookup
+ok - captured status formats reject a synthetic authority transition
+ok - captured completed status yields to synthetic subsequent development
+ok - captured cancelled run leaves fleet inventory unverified without a failure contradiction
+ok - failed-outcome/github/open: terminal delivery uses current disposition
+ok - failed-outcome/github/merged: terminal delivery uses current disposition
+ok - failed-outcome/github/closed: terminal delivery uses current disposition
+ok - failed-outcome/github/unreadable: terminal delivery uses current disposition
+ok - failed-outcome/github/skipped: terminal delivery uses current disposition
+ok - failed-outcome/github/no-identity: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/open: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/merged: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/closed: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/unreadable: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/skipped: terminal delivery uses current disposition
+ok - failed-outcome/gitlab/no-identity: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/open: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/merged: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/closed: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/unreadable: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/skipped: terminal delivery uses current disposition
+ok - failed-outcome/gerrit/no-identity: terminal delivery uses current disposition
+ok - failed-status/github/open: terminal delivery uses current disposition
+ok - failed-status/github/merged: terminal delivery uses current disposition
+ok - failed-status/github/closed: terminal delivery uses current disposition
+ok - failed-status/github/unreadable: terminal delivery uses current disposition
+ok - failed-status/github/skipped: terminal delivery uses current disposition
+ok - failed-status/github/no-identity: terminal delivery uses current disposition
+ok - failed-status/gitlab/open: terminal delivery uses current disposition
+ok - failed-status/gitlab/merged: terminal delivery uses current disposition
+ok - failed-status/gitlab/closed: terminal delivery uses current disposition
+ok - failed-status/gitlab/unreadable: terminal delivery uses current disposition
+ok - failed-status/gitlab/skipped: terminal delivery uses current disposition
+ok - failed-status/gitlab/no-identity: terminal delivery uses current disposition
+ok - failed-status/gerrit/open: terminal delivery uses current disposition
+ok - failed-status/gerrit/merged: terminal delivery uses current disposition
+ok - failed-status/gerrit/closed: terminal delivery uses current disposition
+ok - failed-status/gerrit/unreadable: terminal delivery uses current disposition
+ok - failed-status/gerrit/skipped: terminal delivery uses current disposition
+ok - failed-status/gerrit/no-identity: terminal delivery uses current disposition
+ok - cancelled-outcome/github/open: terminal delivery uses current disposition
+ok - cancelled-outcome/github/merged: terminal delivery uses current disposition
+ok - cancelled-outcome/github/closed: terminal delivery uses current disposition
+ok - cancelled-outcome/github/unreadable: terminal delivery uses current disposition
+ok - cancelled-outcome/github/skipped: terminal delivery uses current disposition
+ok - cancelled-outcome/github/no-identity: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/open: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/merged: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/closed: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/unreadable: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/skipped: terminal delivery uses current disposition
+ok - cancelled-outcome/gitlab/no-identity: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/open: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/merged: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/closed: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/unreadable: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/skipped: terminal delivery uses current disposition
+ok - cancelled-outcome/gerrit/no-identity: terminal delivery uses current disposition
+ok - cancelled-status/github/open: terminal delivery uses current disposition
+ok - cancelled-status/github/merged: terminal delivery uses current disposition
+ok - cancelled-status/github/closed: terminal delivery uses current disposition
+ok - cancelled-status/github/unreadable: terminal delivery uses current disposition
+ok - cancelled-status/github/skipped: terminal delivery uses current disposition
+ok - cancelled-status/github/no-identity: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/open: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/merged: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/closed: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/unreadable: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/skipped: terminal delivery uses current disposition
+ok - cancelled-status/gitlab/no-identity: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/open: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/merged: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/closed: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/unreadable: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/skipped: terminal delivery uses current disposition
+ok - cancelled-status/gerrit/no-identity: terminal delivery uses current disposition
+ok - outcome: cancellation without delivery carries no verdict
+ok - status: cancellation without delivery carries no verdict
+ok - selected: cancellation without delivery carries no verdict
+ok - coarse: cancellation without delivery carries no verdict
+ok - no-ci-log: cancellation without delivery carries no verdict
+ok - red-ci: cancellation without delivery carries no verdict
+ok - cancelled-test: cancellation without delivery carries no verdict
+ok - skipped-test: cancellation without delivery carries no verdict
+ok - synthetic cancelled run leaves fleet inventory unverified without a failure contradiction
+ok - cancelled-outcome: terminal delivery reports only observed evidence
+ok - cancelled-status: terminal delivery reports only observed evidence
+ok - skipped-rebase: terminal delivery reports only observed evidence
+ok - cancelled-skipped-rebase: terminal delivery reports only observed evidence
+ok - passed: terminal delivery reports only observed evidence
+ok - active run-step is authoritative
+ok - stale needs-decision over active run is superseded
+ok - stale blocked over active run is superseded
+ok - daemon/timeout blocked claim over a live fixing run reads as run alive
+ok - socket refusal or missing socket over a stale fixing run reports blocked
+ok - socket refusal over a terminal attributed run reports blocked
+ok - socket-down evidence outranks a live run only while it is the log's latest event
+ok - broken-pipe blocker over a live run keeps the plain superseded reading
+ok - genuine daemon-down blocked line still reports blocked
+ok - a busy secondmate keeps its open blocker until that exact key closes
+ok - the most recently opened decision supplies the reported state and detail
+ok - ship and scout terminal declarations supersede stale decisions
+ok - latest status retains legacy completion events and shared captain matching
+ok - latest status subprocess work stays bounded and still reads past a long prose tail
+ok - genuine parked run is not flagged superseded
+ok - the parked human-decision component is derived from the findings table's action column
+ok - scalar gate parked run is not flagged superseded
+ok - gate block parked run is not flagged superseded
+ok - ci-ready status log beats monitoring run
+ok - ci-monitoring run with checks already green surfaces done
+ok - top-level ci status uses ci log green marker
+ok - terminal no-checks ci-monitor marker surfaces done
+ok - base-advance re-arm after green stays checks green
+ok - a green marker before the ci log tail still surfaces done
+ok - pending no-checks ci-monitor marker stays working
+ok - ci-monitoring run with checks not yet green stays working
+ok - a fresh issue after an earlier green reading is not masked
+ok - stale checks-green status log does not mask CI relapse
+ok - ci fixing is not overridden by an earlier green marker
+ok - top-level fixing is not overridden by a stale ci running row
+ok - top-level fixing is not overridden by a stale done log
+ok - terminal passed run is authoritative
+ok - terminal passed-with-override run reads done like a clean pass
+ok - terminal passed-with-skips run reads done with the skip kept visible
+ok - terminal passed run uses matching retirement receipt without forge
+ok - terminal passed no-forge mode preserves local receipt evidence
+ok - terminal passed run with open PR does not claim merged
+ok - terminal passed run PR overrides stale task metadata
+ok - terminal passed run without readable PR identity reports unknown
+ok - terminal passed run reads open GitLab MR state
+ok - terminal passed run reads merged GitLab MR state
+ok - terminal passed run handles failed GitLab read
+ok - terminal passed run reads open Gerrit change state
+ok - terminal passed run reads merged and abandoned Gerrit change state
+ok - terminal passed run handles an unreadable or mismatched Gerrit read
+ok - terminal failed run is authoritative
+ok - orphaned ci monitor after green reads as held-for-merge done
+ok - status-only failed orphaned ci monitor after green reads done
+ok - genuinely failing CI keeps the failed verdict
+ok - a second failed step disqualifies the orphaned-monitor reclassification
+ok - cross-branch run is attributed via the real runs list
+ok - socket refusal over a coarse active run reports blocked
+ok - failed ledger record reads unknown only when the daemon is provably down
+ok - cross-branch attribution picks the branch's most recent row
+ok - a newer failure is not hidden by a live sibling
+ok - runs-list selection keeps the newer failure over an older live row
+ok - an older unfetched live sibling does not hide a newer failure
+ok - two terminal rows keep the existing newest-first precedence
+ok - an unclassifiable status row keeps the ledger's newest-first precedence
+ok - a terminal run with no live sibling is unchanged
+ok - coarse run does not probe another branch's ci log
+ok - another branch's run is ignored, falls back
+ok - unpushed ship done: is current-state blocked
+ok - recorded merged PR reads done under the fleet snapshot's captured meta
+ok - no-mistakes pre-validation done: stays current-state done
+ok - moved remote branch without the named head is current-state blocked
+ok - no run + a busy semantic record reads working, attributed to its source
+ok - a launch parked on a recognized interactive prompt never reads working, closing the absorb path a stale watcher poll depends on
+ok - a converted adapter never reads working from rendered footer text
+ok - grok still reads working through its isolated rendered-tail fallback
+ok - herdr's native busy verdict reads working with no record present
+ok - a herdr CLI that fails to answer reads unknown/unreachable, never gone
+ok - an alive endpoint whose scrollback read failed stays working
+ok - a husk pane (agent gone) still reads gone for reclaim
+ok - a mid-tool-call crew stays working because its record outranks herdr's generation state
+ok - an idle record with idle agent_status stays not-busy (no regression for a human-blocked agent)
+ok - no run + idle pane uses the status-log verb
+ok - no run + idle pane parses keyed status syntax
+ok - no run + idle pane on a paused: status reports state: paused with its reason
+ok - no run + idle pane honors the configured paused verb
+ok - a trailing resolved: event does not corrupt state render (idle stays idle)
+ok - dead window ignores stale status log
+ok - a tmux that fails to answer reads unknown/unreachable, never gone
+ok - closed pane still reports a terminal run-step
+ok - closed pane still reports an active run-step
+ok - no timeout command uses perl bound
+ok - scout skips the run lookup
+ok - torn-down worktree is handled gracefully
+ok - fm-crew-state remote: alive endpoint falls through to the routed status log
+ok - fm-crew-state remote: an idle alive endpoint reads alive, never gone or dead
+ok - fm-crew-state remote: an unreachable host reads unknown-remote, never gone or dead
+ok - fm-crew-state remote: the remote host's own dead verdict is reported truthfully
+ok - missing meta is handled gracefully
+ok - crew_is_provably_working absorbs a validating crew found only via the runs-list fallback
+ok - crew_is_provably_working still surfaces a genuinely stopped crew (safety property preserved)
+ok - usage error exits 2
+ok - historical same-branch rewritten head is not attributed as current
+ok - active run with valid descendant fix head remains current
+ok - local work advanced past run head invalidates attribution
+ok - pipeline-owned active run binds without head equality and beats the failed row
+ok - a genuinely failed run with no later run is not hidden
+ok - coarse scan anchors the unresolvable active row instead of falling to an older one
+ok - coarse scan with a mismatched anchor stays unknown and lets the pane answer
+ok - coarse terminal row at a foreign head is not attributed
+ok - an executing run binds regardless of branch_sync state
+ok - a parked run keeps the strict head rule without pipeline_owned
+ok - run_parked_scalar_gate_running keeps the strict head rule despite its live status word
+ok - run_parked_in_gate_block keeps the strict head rule despite its live status word
+ok - the exemption never applies to a terminal run
+ok - missing run head falls back instead of matching by branch
+ok - active fix round with an unfetched pipeline head reads working
+ok - unanchored unverifiable active row is attributed because it is live
+ok - unresolvable terminal row never reads as current
+ok - runs-list continuation attribution works when axi answers another branch
+ok - herdr stale registration over a shell-only pane reads agent gone, not alive
+ok - herdr stale working record never reports a shell-only pane busy
+ok - capped overview retains both competing same-branch run ids
+ok - same-branch identity survives both runs falling outside the overview
+ok - a capped overview with zero same-branch rows reports absent, not unreadable
+ok - no run for this branch beside a live run elsewhere reads absent, not unreadable
+ok - the capped inventory reader is bounded by the crew read budget
+ok - a repo spelling the inventory does not record reads unreadable
+ok - a linked worktree green PR in merge monitoring reads held for merge
+ok - complete inventory preserves the replacement gate without writes
+ok - missing complete-inventory failure reports unknown
+ok - corrupt complete-inventory failure reports unknown
+ok - schema complete-inventory failure reports unknown
+ok - repo complete-inventory failure reports unknown
+ok - count complete-inventory failure reports unknown
+ok - norepo complete-inventory failure reports unknown
+ok - R6 complete selection ignores unrelated branch semantics
+ok - R6 requested branches use exact identity without a whitelist
+ok - R6 capped inventory ignores unrelated semantics and names both ids
+ok - R6 complete identity lookup precedes partial-row semantic rejection
+ok - R6 capped inventory preserves quoted requested-branch identity
+ok - R6 structural completeness and requested-run validation remain enforced
+ok - R5 complete inventory without Python keeps the replacement gate
+ok - R5 complete ambiguity without Python names both ids
+ok - R5 capped lookup without Python preserves available ids
+ok - R5 capped lookup without SQLite support preserves available ids
+ok - R1 both directions of inventory liveness disagreement read unknown
+ok - R2 uninitialized busy workers retain pane reporting
+ok - R2 uninitialized idle workers retain status reporting
+ok - R3 historical inventory yields to the current busy pane
+ok - R3 historical inventory yields to current worker status
+ok - superseded cancelled run preserves the replacement review gate
+ok - a live rebased run beats an older failed run at the local head
+ok - pending run with a rebased head reads working
+ok - running run with a rebased head reads working
+ok - legacy live rebased run is authoritative over an older failed row
+ok - legacy surface binds a fixing run at a rebased head
+ok - legacy surface binds a ci run at a rebased head
+ok - an unproven record at a diverged head does not answer for the crew
+ok - an unproven record with a dead daemon never overrides a busy pane
+ok - an ordinary blocked tip over a coarse live row keeps the superseded reading
+ok - a socket-refused blocker survives the dead-daemon verdict
+ok - an ordinary blocked tip survives the dead-daemon verdict
+ok - a parked gate survives a dead daemon with its findings intact
+ok - an unproven record at a diverged head does not answer on the selected route
+ok - a live record at a diverged head binds while the daemon answers
+ok - the anchored continuation binds while the daemon answers
+ok - a head-tied coarse record keeps its working reading and its original note
+ok - a coarse failed record with a dead daemon reads unknown
+ok - the selected-run anchored continuation reports the dead daemon, not an identity failure
+ok - the selected-run anchored continuation binds while the daemon answers
+ok - the selected route keeps an anchored parked run's gate with a dead daemon
+ok - an open decision survives the dead-daemon verdict on the selected route
+ok - a coarse pending ledger word reads unknown
+ok - an unanswered probe never turns a failed coarse record into a gate
+ok - the selected-route dead-daemon verdict names the run once
+ok - a head-tied row reads working when axi names the self run
+ok - a head-tied row reads working when axi names the other run
+ok - a head-tied coarse row is exempt even when the record head diverged
+ok - an unrecognised ledger word keeps the ordinary supersede note
+ok - an unanswered daemon probe leaves a live rebased run bound
+ok - a head-tied coarse live row is exempt from the dead-daemon verdict
+ok - a coarse live row over an open decision keeps the original supersede note
+ok - a coarse live row at a rebased head is not attributed
+ok - a terminal run at a diverged head keeps the strict head rule
+ok - competing live runs report unknown with both run ids
+ok - newer failed run remains failed beside an older live run
+ok - missing run selection reports unknown with candidate ids
+ok - wrong-id run selection reports unknown with candidate ids
+ok - wrong-branch run selection reports unknown with candidate ids
+ok - wrong-head run selection reports unknown with candidate ids
+ok - missing-status run selection reports unknown with candidate ids
+ok - malformed-table run selection reports unknown with candidate ids
+ok - inventory-error run selection reports unknown with candidate ids
+ok - selected-error run selection reports unknown with candidate ids
+ok - legacy conflicting run records report unknown
+all fm-crew-state tests passed
+FM_TEST_END 2026-10-02T05:05:04Z tests/fm-crew-state.test.sh exit=0 duration_ms=312929 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:05:04Z tests/fm-remote-secondmate-lifecycle-e2e.test.sh family=secondmate expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-02T05:05:04Z tests/fm-remote-reply.test.sh family=secondmate expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-02T05:05:05Z tests/fm-secondmate-reconcile.test.sh family=secondmate expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-02T05:05:05Z tests/fm-remote-backlog-handoff.test.sh family=secondmate expected_gate_skip=none
+ok - reconcile requests stop oversized streams at the capture bound
+ok - reconcile requests require exactly one snapshot document
+ok - reconcile requests coalesce per target and retire independently after delivery
+ok - Bearings records locally, returns before a delayed remote queue, and supervision delivers later
+ok - a home in mismatch is asked once, and later recaps stay silent
+ok - a mismatch outliving the cooldown earns one re-nudge, then goes quiet again
+ok - the cooldown begins when delivery finishes
+ok - the cooldown window is four hours
+ok - the cooldown is per home, not fleet-wide
+ok - the reconcile ask expects no reply and stays out of a ladder that still rings ordinary steers
+ok - only a backlog-vs-metadata mismatch produces an ask
+ok - the parent asks and changes nothing inside the mate's home
+ok - a failed ask starts no cooldown, so the next run retries it
+ok - busy reconcile lifecycle locks never block the digest or start cooldown
+ok - simultaneous recaps still ask the mate only once
+ok - a delayed snapshot asks for a current check instead of prescribing a stale repair
+ok - a stale snapshot cannot ask or silence a replacement mate
+ok - teardown retires the cooldown before a replacement can inherit it
+ok - a legitimately markerless persistent remote secondmate is nudged once per window
+ok - a stale remote-route snapshot cannot ask or silence a replacement mate
+ok - a route replacement between reconcile and fm-send cannot receive a stale ask
+ok - a row with neither a spawn generation nor a host fails loudly instead of vanishing
+FM_TEST_END 2026-10-02T05:06:02Z tests/fm-secondmate-reconcile.test.sh exit=0 duration_ms=56994 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:06:02Z tests/fm-remote-job.test.sh family=secondmate expected_gate_skip=none
+ok - confined put rejects incomplete and superseded payload generations
+ok - confined put rejects directory replacement without external writes
+ok - ambiguous receipt leaves one durable outbox and no duplicate dispatchable source
+ok - re-delivery after unknown completion converges without duplication
+ok - dropped transfer recovery overwrites scratch and delivers exactly once
+ok - concurrent handoffs serialize staging through confirmed cleanup
+ok - receiver removes one proven dead stale lock and retries once
+ok - bootstrap detects pending outbox handoffs without a journal
+ok - remote handoff releases durable work and separately retries its receiver wake
+ok - an escalated undelivered receiver wake stays retryable instead of jamming the outbox
+ok - a permanently unconfirmable wake never jams later durable handoffs
+ok - fresh remote work gets a new wake after confirmed cleanup recovery
+ok - confirmed marker cleanup cannot fail a completed remote handoff
+ok - delivered pending state cannot suppress a new handoff wake
+ok - unrecordable best-effort wake state drops without blocking later handoffs
+ok - undeletable invalid wake state cannot block remote handoffs
+ok - route classification serializes with retirement before staging
+ok - unconfigured bootstrap has no remote handoff behavior
+ALL TESTS PASSED
+FM_TEST_END 2026-10-02T05:07:26Z tests/fm-remote-backlog-handoff.test.sh exit=0 duration_ms=141414 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:07:26Z tests/fm-remote-secondmate-trace-context.test.sh family=secondmate expected_gate_skip=none
+ok - default: result and command samples use 0.25 seconds; dispatcher uses four 0.05-second waits then one second
+ok - legacy: result and command samples use 0.07 seconds; dispatcher uses four 0.07-second waits then one second
+ok - active: result and command samples use 0.12 seconds; dispatcher uses four 0.07-second waits then one second
+ok - default queue and execution bounds independently cover long polls
+ok - operator PATH excludes a symlinked local bin
+ok - operator PATH honors nvm defaults with a deterministic fallback
+ok - operator PATH resolves the authorized Nix profile bin link
+ok - operator PATH orders discovered tool installs deterministically
+ok - the worker preserves bounded argv and stdin in an empty environment
+ok - active jobs keep the worker ready for concurrent requests
+ok - ensure replaces a live worker after its code changes
+ok - worker identity binds the canonical configured code root
+ok - stale ownership is reclaimed without signaling a reused pid
+ok - the worker enforces the job timeout and publishes its result
+ok - the worker expires queued jobs before they can mutate
+ok - queued jobs receive a fresh bounded execution window
+ok - a queued short command preempts a running long poll instead of waiting its window
+ok - a poll re-armed after preemption reads the same cursor with nothing lost
+ok - sibling polls never preempt each other into a re-arm churn loop
+ok - worker shutdown terminates the active command tree before replacement
+ok - Linux supervision recovers crashes and stops orphaned commands
+ok - pre-execution validation obeys the job timeout
+ok - the worker drains bounded output without changing command results
+ok - the worker refuses symlinked job fields before command execution
+ok - failed shutdown quarantines ownership against replacement workers
+ok - quarantine recovery refuses unverifiable supervisors and ignores reused pids
+ok - a repeatedly signalled shutdown still releases ownership for the next worker
+ok - TERM after ownership loss stops the serving worker
+ok - TERM after ownership loss still stops the active command tree
+ok - a lost owner terminates without stopping the replacement owner's work
+ok - an ousted worker in shutdown leaves the replacement quarantine untouched
+ok - an idle worker sleeps out a second between passes instead of busy-polling
+ok - an idle worker keeps its readiness heartbeat fresh between passes
+ok - an idle worker claims and publishes a staged job within a few seconds
+ok - an idle worker still repairs queue permissions and stops promptly on TERM
+ok - barely healthy worker failures remain bounded by the restart guard
+ALL TESTS PASSED
+FM_TEST_END 2026-10-02T05:08:02Z tests/fm-remote-job.test.sh exit=0 duration_ms=120619 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:08:02Z tests/fm-remote-transport-lanes.test.sh family=secondmate expected_gate_skip=none
+not ok - concurrent sequence claims were not unique and monotonic: 1
+2
+3
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+FM_TEST_END 2026-10-02T05:08:02Z tests/fm-remote-transport-lanes.test.sh exit=1 duration_ms=221 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:08:02Z tests/fm-secondmate-sync.test.sh family=secondmate expected_gate_skip=none
+ok - default delta reader waits 0.5 seconds then delivers a non-destructive complete-line delta
+ok - override delta reader waits 0.07 seconds then delivers a non-destructive complete-line delta
+ok - a blocking non-destructive remote delta reaches durable process-event capture
+ok - a captured delta is applied, acknowledged, and re-armed without a handler
+ok - ingest appends one validated line, fetches its document, and advances the cursor
+ok - replayed capture has one deduplicated append and one durable handling identity
+ok - later generations cannot invalidate an unacknowledged ingested result
+ok - the remote status and decision model mirrors and the cursor advances
+ok - a remote mate's new decision folds open exactly as a local mate's does
+ok - a replayed mirrored delta is idempotent in both the stream and the cursor
+ok - transported control bytes are normalized in place and never stop the stream
+ok - payload protocol-field names cannot collide with transport metadata
+ok - NUL bytes are normalized in place before shell line processing
+ok - local document storage failures remain retryable until delivery succeeds
+ok - a structured pointer must end at its token boundary
+ok - adjacent pointers are fetched while malformed tokens remain unchanged
+ok - a rejected candidate never gives the following text a false leading boundary
+ok - nested remote reports relay while an undeliverable foreign pointer fails open
+ok - the reported incident raises no standing decision and still delivers the report
+ok - an undeliverable structured offer fails open with one note and never a decision
+ok - a remote refusal surfaces its own reason without opening a decision
+ok - a failed pointer extraction never commits a partial delta
+ok - a failed mirror write never drops status content or advances the cursor
+ok - source-line identity survives commit failure and cursor-loss recapture
+ok - a mirrored reserved-key line cannot squat or clear the parent's own decision
+ok - a reply that arrives after escalation resolves it and clears the open decision
+ok - a remote reply listener stays owned across empty waits and a delta
+ok - a failed remote read exits instead of relistening
+ok - persistent ingestion failure leaves exactly one durable capture
+ok - a preempted reply poll reports a closed window without publishing channel freshness
+ok - a preempted reply poll keeps its listener and reconcile launches nothing
+ok - a quiet reply window publishes the caught-up watermark the reply guard reads
+ok - a cursor-loss whole-log recapture is acknowledged quietly with no duplicate wake
+ok - truncation is detected, escalated once, and not silently rebased
+ok - remote reply retirement quiesces and refuses unhandled captured results
+ALL TESTS PASSED
+FM_TEST_END 2026-10-02T05:08:45Z tests/fm-remote-reply.test.sh exit=0 duration_ms=220380 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:08:45Z tests/fm-herdr-machine.test.sh family=secondmate expected_gate_skip=none
+ok - an absent local herdr skips the save silently
+ok - an absent local jq skips the save silently
+ok - an enabled machine for the required session is a silent no-op
+ok - a machine saved under another session is reported and never rewritten
+ok - a disabled foreign machine is left untouched with repair commands
+ok - a missing machine is added through the exact idempotent save command
+ok - a manual replacement after an automatic add stays untouched
+ok - the save passes the route's remote session through
+ok - a refused add reports the refusal and still succeeds
+ok - an unreadable machine list is reported and never blind-adds
+ok - a concurrent save for the same alias skips quietly under its lock
+FM_TEST_END 2026-10-02T05:08:48Z tests/fm-herdr-machine.test.sh exit=0 duration_ms=2580 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:08:48Z tests/fm-remote-herdr-guard.test.sh family=secondmate expected_gate_skip=none
+ok - holder processes expose their environment to the owner library
+ok - an empty session is started inside the launch agent
+ok - launchd and worker markers require gui-domain launchctl proof
+ok - background, inherited-XPC, SSH-born, SSH-descended, and unprovable owners are taken over
+ok - a running session with no provable owner is taken over rather than trusted
+ok - a host without lsof cannot prove an Aqua birth, so the session is taken over
+ok - a foreign server that never releases the socket yields exit 1 so launchd retries
+ok - the guard starts as soon as the foreign server releases the socket
+ok - argument errors are refused before any herdr call
+FM_TEST_END 2026-10-02T05:08:52Z tests/fm-remote-herdr-guard.test.sh exit=0 duration_ms=4545 gate_skip=false
+ok - T1 updated: a behind home fast-forwards to the primary's local HEAD
+ok - T2 current: an already-current home is a no-op and reports no instruction change
+ok - T3 dirty: an uncommitted home is skipped, its edit preserved
+ok - scratchpad2/ does not mark a secondmate home dirty for the sync guard
+ok - T4 diverged: a home that is not an ancestor of the primary's HEAD is skipped
+ok - T5 in-flight: a home on a feature branch is skipped, its work preserved
+ok - T6 no fetch: the local-HEAD sync never invokes git fetch
+ok - T7 sweep nudges on a real instruction change only, but still fast-forwards
+ok - T8 bootstrap sweeps live homes and sends exactly one marked nudge for the instruction change
+ok - T8a bootstrap nudge send respects FM_STATE_OVERRIDE
+ok - T8f bootstrap nudge retry rejects malformed marker ids
+ok - T8c failed bootstrap nudge is surfaced and recorded for retry
+ok - T8d bootstrap nudge retry is idempotent after success
+ok - T8e bootstrap nudge retry refuses a changed home instead of guessing
+ok - T8b a stale herdr endpoint cannot lose a durably enqueued nudge, and fm-<id> resolves through post-respawn metadata
+ok - T9 bootstrap surfaces a skipped dirty live secondmate home
+ok - T10 spawn fast-forwards a secondmate worktree to the primary's local HEAD before launch
+ok - T11 spawn warns when pre-launch sync is skipped
+ok - T12 gitignored marker: a freshly seeded home reads clean to fleet-sync and the ff sweep
+ok - T13 gitignored marker: an existing marker-only-dirty home converges, then reads clean
+ok - T14 marker tolerance does not mask a genuinely dirty home
+ok - R1 a remote home ahead of the host's Firstmate copy still advances to the primary's commit
+ok - R1b a remote sync names exactly which instruction paths its advance changed
+ok - R2 a missing target is imported from the host's Firstmate copy without moving it
+ok - R3 a target neither side holds is imported from the home's own origin
+ok - R4 an already-present target advances the home with no fetch available
+ok - R5 a target neither the host copy nor the origin holds skips with an actionable reason
+ok - R6 dirty, diverged, and feature-branch remote homes skip and are left untouched
+ok - R7 a sync with no target still follows the host's own refreshed Firstmate copy
+ok - R8 session start converges a remote home on the primary's default-branch commit
+ok - R10 a host too old for a parent-targeted sync is reported with the command that fixes it
+ok - R9 a remote launch leaves the home on the parent's commit while an ordinary spawn follows its own checkout
+# all fm-secondmate-sync tests passed
+FM_TEST_END 2026-10-02T05:09:06Z tests/fm-secondmate-sync.test.sh exit=0 duration_ms=63647 gate_skip=false
+ok - disabled: a remote-routed second mate records and receives no carrier and stays enabled-off end to end
+ok - enabled: a remote-routed second mate receives one carrier in its pane, identical to the parent's recorded identity, before launch
+ok - relaunch: a remote-routed second mate keeps one stable identity across restarts
+ok - boundary: each remote-routed second mate roots its own trace and never adopts the spawning environment's carrier
+ok - allowlist: the remote receiver accepts exactly the declared inherited-material set, including the enablement flag
+ok - delivery: a parent-supplied carrier is accepted only for a secondmate launch and only as a strict W3C value
+ALL TESTS PASSED
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-push': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-merge': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-rebase': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-push': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-merge': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-rebase': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/commit-msg': Permission denied
+FM_TEST_END 2026-10-02T05:10:30Z tests/fm-remote-secondmate-trace-context.test.sh exit=0 duration_ms=183946 gate_skip=false
+ok - overlapping remote home provisioning serializes through publication and rollback
+ok - competing cleanup of the public home cannot reach a live provisioning clone
+ok - a home that appears mid-provision makes the provision die without touching it
+ok - remote seed rollback preserves serialized competing routes
+ok - unknown readiness preserves its route and brief for reconciliation
+ok - remote seeding checks, repairs, and re-checks readiness, then stops on a remaining gap
+ok - remote seeding proceeds once the repair closes every gap
+ok - remote seeding provisions a supplied origin without touching the primary project tree
+ok - remote provisioning re-validates a supplied origin at the receiving host
+ok - seeding carries bitbucket, self-hosted, and scp-like origins through to the remote clone
+ok - remote seed registers the route and provisions the whole home and project clone on that host
+ok - remote inheritance rejects incomplete and superseded payload generations
+ok - mixed local and remote routes validate without migration
+warning: herdr machine remote-mac was not saved: error: remote server is not ready for saved machines
+ok - an alive remote route is saved once as a local herdr machine, launch refusal notwithstanding
+ok - remote spawn launches on the remote-local backend and records a host-qualified route
+ok - legacy and mismatched remote endpoints fail closed before backend access
+ok - non-herdr remote endpoints are refused without changing either route
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-concurrent.trace: No such file or directory
+ok - remote spawn serializes inheritance through launch publication
+ok - marked send and routed reply complete through the existing parent correlation owner
+ok - partial remote inheritance retains reread intent through bootstrap convergence
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/config-concurrent-first.trace: No such file or directory
+ok - config push and bootstrap serialize remote inheritance convergence
+WARNING: watcher still down (same stale episode; last beat: 210s ago, grace 300s) - full banner already printed this episode.
+ok - remote inherited config retains and retries a failed live reread nudge
+ok - fleet snapshot projects mixed local and remote structured state
+ok - remote update imports and fast-forwards the persistent home on its configured host
+ok - the remote restart verb delegates to the host-local control plane and refuses before stopping anything
+ok - startup repairs remote readiness before probing without relaunching
+ok - watch liveness: a dead remote secondmate is auto-relaunched on its own host with one wake
+ok - watch liveness: an unreachable remote secondmate is probed, preserved, and never failed over
+ok - the host-local state read steps around a stale shadowing herdr client
+ok - startup reports alive legacy backends without changing their routes
+ok - unreachable no-ledger remote state remains explicit with no local respawn or failover
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+tests/fm-remote-secondmate-lifecycle-e2e.test.sh: line 372: /tmp/fm-test-run.uEDfe3/w2/tmp/fm-remote-secondmate-e2e.HcDk9L/spawn-retirement.trace: No such file or directory
+ok - remote retirement refuses child work, then removes only its own endpoint while a shared-session sibling survives
+ALL TESTS PASSED
+FM_TEST_END 2026-10-02T05:20:14Z tests/fm-remote-secondmate-lifecycle-e2e.test.sh exit=0 duration_ms=909328 gate_skip=false
+FM_TEST_BEGIN 2026-10-02T05:20:14Z tests/fm-send-remote-delivery.test.sh family=standalone expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-02T05:20:14Z tests/fm-peek-remote.test.sh family=standalone expected_gate_skip=none
+FM_TEST_BEGIN 2026-10-02T05:20:14Z tests/fm-project-origin.test.sh family=standalone expected_gate_skip=none
+ok - ordinary clone URLs are accepted and clone with the command the remote host runs
+ok - executable transports, option-shaped values, and unusable spellings are refused
+ALL TESTS PASSED
+FM_TEST_END 2026-10-02T05:20:14Z tests/fm-project-origin.test.sh exit=0 duration_ms=138 gate_skip=false
+ok - fm-peek remote: the capture routes over the remote transport, local adapters untouched
+ok - fm-peek remote: an unreachable host fails loudly without a false death claim
+all fm-peek-remote tests passed
+FM_TEST_END 2026-10-02T05:20:16Z tests/fm-peek-remote.test.sh exit=0 duration_ms=2002 gate_skip=false
+ok - fm-send remote: a text steer lands as a durable remote inbox record and exits 0 at enqueue
+ok - fm-send remote: the printed correlation-reusing resend deduplicates onto the same record
+ok - fm-send remote: a failed retry cannot erase an earlier ambiguous delivery
+ok - fm-send remote: fire-and-forget delivery is idempotent without reply recovery
+ok - remote control: send revalidates endpoint ownership under the metadata lock
+ok - fm-send remote: enqueue revalidates the parent route under its metadata lock
+ok - fm-send remote: expected host is enforced by final route validation
+ok - fm-send remote: a --resolve-key answer closes its decision at enqueue
+ok - fm-send remote: every remote text, harness-native included, rides the inbox
+ok - fm-send remote: a real remote failure still fails loudly with the remote diagnostics
+ok - fm-send remote: exit 3 from the remote leg is a failure, never a delivery claim
+ok - fm-send remote: ssh 255 fails with resend-safe guidance and preserves the expectation
+ok - fm-send remote: the remote leg is budget-bounded and stays idempotent across the bound
+ok - fm-send local: an unconfirmed submit exits 3 with an honest non-error report
+ok - fm-send local: an unconfirmed submit still never closes a --resolve-key decision
+ok - fm-send local: an unconfirmed secondmate send keeps its reply expectation armed
+all fm-send-remote-delivery tests passed
+FM_TEST_END 2026-10-02T05:21:19Z tests/fm-send-remote-delivery.test.sh exit=0 duration_ms=64811 gate_skip=false
+FM_TEST_SUMMARY total=14 failed=1 skipped_gate=0 duration_ms=1288540
+FM_TEST_SUMMARY_FAMILY family=pure-contract-unit count=1 duration_ms=312929 failed=0
+FM_TEST_SUMMARY_FAMILY family=secondmate count=10 duration_ms=1703674 failed=1
+FM_TEST_SUMMARY_FAMILY family=standalone count=3 duration_ms=66951 failed=0
+FM_TEST_SLOWEST rank=1 script=tests/fm-remote-secondmate-lifecycle-e2e.test.sh duration_ms=909328
+FM_TEST_SLOWEST rank=2 script=tests/fm-crew-state.test.sh duration_ms=312929
+FM_TEST_SLOWEST rank=3 script=tests/fm-remote-reply.test.sh duration_ms=220380
+FM_TEST_SLOWEST rank=4 script=tests/fm-remote-secondmate-trace-context.test.sh duration_ms=183946
+FM_TEST_SLOWEST rank=5 script=tests/fm-remote-backlog-handoff.test.sh duration_ms=141414
+FM_TEST_SLOWEST rank=6 script=tests/fm-remote-job.test.sh duration_ms=120619
+FM_TEST_SLOWEST rank=7 script=tests/fm-send-remote-delivery.test.sh duration_ms=64811
+FM_TEST_SLOWEST rank=8 script=tests/fm-secondmate-sync.test.sh duration_ms=63647
+FM_TEST_SLOWEST rank=9 script=tests/fm-secondmate-reconcile.test.sh duration_ms=56994
+FM_TEST_SLOWEST rank=10 script=tests/fm-remote-herdr-guard.test.sh duration_ms=4545
+FM_TEST_SLOWEST rank=11 script=tests/fm-herdr-machine.test.sh duration_ms=2580
+FM_TEST_SLOWEST rank=12 script=tests/fm-peek-remote.test.sh duration_ms=2002
+FM_TEST_SLOWEST rank=13 script=tests/fm-remote-transport-lanes.test.sh duration_ms=221
+FM_TEST_SLOWEST rank=14 script=tests/fm-project-origin.test.sh duration_ms=138
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-push': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-merge': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-rebase': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home-2/state/parent-route/ios2.git-hooks/commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/sendemail-validate': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-auto-gc': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-rewrite': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-push': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-merge': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-checkout': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-rebase': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/prepare-commit-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-merge-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-commit': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/post-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/pre-applypatch': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/applypatch-msg': Permission denied
+rm: cannot remove '/tmp/fm-test-run.uEDfe3/w7/tmp/fm-remote-trace-context.7o0Er1/remote-home/state/parent-route/ios.git-hooks/commit-msg': Permission denied

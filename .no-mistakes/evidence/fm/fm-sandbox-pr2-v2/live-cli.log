@@ -1,0 +1,142 @@
+$ bin/fm-lab-home.sh create /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+EXIT=0
+
+$ bin/fm-peek.sh probe
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; reading its pane is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-peek.sh fm-probe
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; reading its pane is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-peek.sh remote:probe
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; reading its pane is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-send.sh probe hello
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: steer not sent: task probe runs in a sandbox on fm-route-unreachable.invalid; steering it is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (tried meta=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo/state/probe.meta)
+EXIT=1
+
+$ bin/fm-send.sh remote:probe hello
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: steer not sent: task probe runs in a sandbox on fm-route-unreachable.invalid; steering it is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (tried meta=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo/state/probe.meta)
+EXIT=1
+
+$ bin/fm-send.sh probe --key Enter
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: steer not sent: task probe runs in a sandbox on fm-route-unreachable.invalid; steering it is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (tried meta=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo/state/probe.meta)
+EXIT=1
+
+$ bin/fm-control.sh probe interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; lifecycle control is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-control.sh probe exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; lifecycle control is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-control.sh probe relaunch --note recover
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3XFH4YKHBNVD3N72N6PPSEW/.fm-route-lab-a_8nv4bo
+error: task probe runs in a sandbox on fm-route-unreachable.invalid; lifecycle control is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+EXIT=1
+
+$ bin/fm-teardown.sh probe
+REFUSED: task probe runs in a sandbox on fm-route-unreachable.invalid; teardown is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate; nothing was changed
+EXIT=1
+
+$ bin/fm-teardown.sh probe --force
+REFUSED: task probe runs in a sandbox on fm-route-unreachable.invalid; teardown is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate; nothing was changed
+EXIT=1
+
+$ bin/fm-crew-state.sh probe
+state: unknown · source: none · task probe runs in a sandbox on fm-route-unreachable.invalid; reading its current state is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (not proof of death)
+EXIT=0
+
+PRESERVED: sandbox metadata and unlanded file unchanged after every refused operation.
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: sandbox task probe has an unsafe route: configured SSH alias is unsafe: -oProxyCommand=bad
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: sandbox task probe has an unsafe route: configured remote root is not absolute: relative
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: sandbox task probe has its remote home inside its code root: /opt/firstmate/nested
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: sandbox task probe must record remote_kind=task exactly once
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: sandbox task probe must record endpoint_task_id=probe exactly once
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+error: remote route 'probe' names a sandbox task and also selects 1 configured secondmate route(s); refusing the ambiguous route
+EXIT=1
+
+$ bin/fm-on.sh probe fm-remote-doctor.sh --profile task
+ssh: Could not resolve hostname fm-route-unreachable.invalid: Name or service not known
+EXIT=255
+
+$ bin/fm-on.sh mate fm-remote-doctor.sh
+ssh: Could not resolve hostname fm-route-unreachable.invalid: Name or service not known
+EXIT=255
+
+$ bin/fm-crew-state.sh mate
+state: unknown · source: remote-endpoint · unknown-remote: fm-route-unreachable.invalid unreachable or endpoint unreadable (not proof of death)
+EXIT=0
+
+$ bin/fm-remote-doctor.sh --profile task
+mode=check
+path=/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.codex/tmp/arg0/codex-arg00j3mgn:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/share/pnpm/bin:/home/dscott/.bun/bin:/home/dscott/.opencode/bin:/home/dscott/.pi/agent/npm-global/bin:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/bin:/home/dscott/go/bin:/home/dscott/.cargo/bin:/home/dscott/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required tmux=/usr/bin/tmux
+required treehouse=/home/dscott/.local/bin/treehouse
+required harness=claude:/home/dscott/.local/bin/claude
+optional tasks-axi=/home/dscott/.local/bin/tasks-axi
+optional no-mistakes=/home/dscott/.local/bin/no-mistakes
+optional gh=/usr/bin/gh
+check herdr=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-version=skip: the task profile runs its worker on tmux with no Herdr session
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=fixable: the Linux remote job worker is not running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=fixable: the remote job worker has not reported a fresh probe
+check launchagent=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-scope=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-loaded=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-server=skip: the task profile runs its worker on tmux with no Herdr session
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+action: remote-job-worker: rerun this command with --fix to start it
+action: remote-job-probe: rerun this command with --fix to restart the worker, then rerun through fm-on.sh
+error: this host is not ready for a remote task; unresolved: remote-job-worker remote-job-probe
+EXIT=1
+
+$ bin/fm-remote-doctor.sh --profile invalid
+error: unknown readiness profile: invalid (expected secondmate or task)
+EXIT=2
+
+LIVE CHECKS COMPLETE; doctor gaps reflect this unprovisioned lab, no repair requested.

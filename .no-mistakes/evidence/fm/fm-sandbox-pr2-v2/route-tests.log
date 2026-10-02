@@ -1,0 +1,16 @@
+ok - absent, local, and explicitly local records resolve to none
+ok - a legacy remote secondmate record resolves exactly as the remote_host signal did
+ok - a remote_host record that is not a secondmate is refused, never routed as one
+ok - a complete sandbox ship or scout record resolves to a validated task route
+ok - sandbox placement is never inferred and refuses every contradictory record
+ok - a sandbox route must be safe, absolute, clean, and disjoint
+ok - the shape check and the unsupported-verb refusal speak for every consumer
+ok - fm-peek refuses a sandbox task by id, label, or recorded window
+ok - fm-send refuses a sandbox task before anything is recorded or typed
+ok - fm-control refuses every lifecycle verb for a sandbox task
+ok - fm-teardown refuses a sandbox task, even forced, with nothing touched
+ok - fm-crew-state reports a sandbox task as unknown without probing it
+ok - a ship carrying remote_host is refused, never routed as a remote secondmate
+ok - the secondmate liveness probe skips a sandbox task and a sandbox-placed secondmate
+ok - the watcher's queue-stall tick reads only the queues remote dispatch calls local
+ALL TESTS PASSED
