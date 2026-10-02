@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Security and regression tests for canonical PR parsing, static merge polls,
-# private atomic artifacts, authenticated custom checks, and teardown cleanup.
+# private atomic artifacts, authenticated custom checks, teardown cleanup, and
+# registration of a sandbox task's PR without reading its worktree.
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -139,6 +140,7 @@ SH
   cat > "$fakebin/gh" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FM_TEST_GH_LOG"
+[ -z "${FM_TEST_GH_CWD_LOG:-}" ] || printf '%s\n' "$PWD" >> "$FM_TEST_GH_CWD_LOG"
 case "${1:-} ${2:-}" in
   "api graphql")
     printf '%s\n' \
@@ -733,6 +735,106 @@ test_direct_pr_unpushed_commit_refuses_registration() {
     || fail "direct-PR refusal did not name the unpushed commit: $(cat "$dir/stderr")"
   [ ! -e "$dir/home/state/task-a.check.sh" ] || fail "direct-PR unpushed commit still armed a poll"
   pass "fm-pr-check refuses a direct-PR registration while a later commit is only in the copy"
+}
+
+# A sandbox task's recorded worktree is a path on its sandbox, so registration
+# never reads it: the PR head comes from the forge alone, and where the named-head
+# gate applies its head comes from the host's `head` verb through bin/fm-on.sh.
+# The fixture's worktree path exists locally and holds a different HEAD, so a
+# local read or a `cd` into it would show. make_sandbox_case adds a git-tracked
+# host control script to the fake code root, which bin/fm-on.sh requires, and a
+# fake ssh that answers the `head` verb per FM_TEST_SANDBOX_HEAD_MODE.
+make_sandbox_case() {  # <name> <mode> -> case dir
+  local dir local_wt
+  dir=$(make_case "$1")
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/root/bin/fm-remote-task-control.sh"
+  chmod +x "$dir/root/bin/fm-remote-task-control.sh"
+  git -C "$dir/root" init -q
+  git -C "$dir/root" add bin
+  git -C "$dir/root" commit -qm 'fake code root'
+  cat > "$dir/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+while [ "$#" -gt 0 ]; do
+  case "$1" in -o) shift 2 ;; --) shift; break ;; *) exit 90 ;; esac
+done
+printf '%s %s\n' "$1" "$(printf '%s' "$6" | base64 --decode | tr '\000' ' ')" >> "$FM_TEST_SSH_LOG"
+case "${FM_TEST_SANDBOX_HEAD_MODE:-block}" in
+  unreachable) exit 255 ;;
+  unusable) printf 'schema=fm-remote-task-control.v1\nhead=%s\n' "$FM_TEST_SANDBOX_HEAD" ;;
+  *) printf 'schema=fm-remote-task-control.v1\nbranch=fm/task-s\nhead=%s\ndirty=no\n' "$FM_TEST_SANDBOX_HEAD" ;;
+esac
+SH
+  chmod +x "$dir/fake-ssh"
+  local_wt="$dir/sandbox-path"
+  mkdir -p "$local_wt"
+  git -C "$local_wt" init -q
+  git -C "$local_wt" commit -q --allow-empty -m 'not the sandbox copy'
+  fm_write_meta "$dir/home/state/task-s.meta" \
+    "window=remote:task-s" "endpoint_task_id=task-s" "worktree=$local_wt" \
+    "project=$dir/project" "kind=ship" "mode=$2" "placement=sandbox" "remote_kind=task" \
+    "remote_host=alias-task-s" "remote_root=/opt/firstmate" "remote_home=/home/agent/fm-home" \
+    "sandbox_provider=pve-sandbox" "sandbox_name=sbx-task-s"
+  : > "$dir/ssh.log"
+  printf '%s\n' "$dir"
+}
+
+run_sandbox_check() {  # <dir> <url>
+  FM_SSH_BIN="$1/fake-ssh" FM_TEST_SSH_LOG="$1/ssh.log" FM_TEST_GH_CWD_LOG="$1/gh-cwd.log" \
+    run_check_entry "$1" task-s "$2" > "$1/stdout" 2> "$1/stderr"
+}
+
+test_sandbox_registration_reads_the_forge_head_only() {
+  local dir forge
+  dir=$(make_sandbox_case sandbox-forge-head no-mistakes)
+  forge=1111111111111111111111111111111111111111
+  FM_TEST_GH_HEAD=$forge run_sandbox_check "$dir" https://github.com/o/r/pull/7 \
+    || fail "a sandbox ship's no-mistakes PR was not registered: $(cat "$dir/stderr")"
+  grep -qx 'pr=https://github.com/o/r/pull/7' "$dir/home/state/task-s.meta" || fail "the sandbox PR was not recorded"
+  grep -qx "pr_head=$forge" "$dir/home/state/task-s.meta" || fail "the forge head was not recorded as pr_head"
+  [ -f "$dir/home/state/task-s.check.sh" ] || fail "the sandbox PR's merge poll was not armed"
+  ! grep -qxF "$dir/sandbox-path" "$dir/gh-cwd.log" || fail "the forge head was read from inside the recorded sandbox path"
+  [ ! -s "$dir/ssh.log" ] || fail "a forge-reported no-mistakes head still read the sandbox host: $(cat "$dir/ssh.log")"
+  pass "fm-pr-check records a sandbox ship's pr_head from the forge alone, without its recorded worktree"
+}
+
+test_sandbox_direct_pr_gate_reads_the_host_head() {
+  local dir forge
+  dir=$(make_sandbox_case sandbox-host-head direct-PR)
+  forge=2222222222222222222222222222222222222222
+  FM_TEST_GH_HEAD=$forge FM_TEST_SANDBOX_HEAD=$forge run_sandbox_check "$dir" https://github.com/o/r/pull/8 \
+    || fail "a sandbox head the forge holds was refused: $(cat "$dir/stderr")"
+  grep -q '^alias-task-s fm-remote-task-control.sh head task-s $' "$dir/ssh.log" \
+    || fail "the gate did not read the named head through the host's head verb: $(cat "$dir/ssh.log")"
+  [ -f "$dir/home/state/task-s.check.sh" ] || fail "an accepted sandbox head did not arm the poll"
+  pass "fm-pr-check accepts a direct-PR sandbox head that the host reports and the forge holds"
+}
+
+test_sandbox_gate_refuses_an_unverified_host_head() {
+  local dir forge later
+  forge=4444444444444444444444444444444444444444
+  later=5555555555555555555555555555555555555555
+  dir=$(make_sandbox_case sandbox-later-head direct-PR)
+  FM_TEST_GH_HEAD=$forge FM_TEST_SANDBOX_HEAD=$later run_sandbox_check "$dir" https://github.com/o/r/pull/9 \
+    && fail "a sandbox head the forge does not hold was registered"
+  grep -Fq "named head $later on the sandbox is unreachable outside the worker copy: the forge reports $forge" "$dir/stderr" \
+    || fail "the refusal did not name the host's head and the forge's: $(cat "$dir/stderr")"
+  ! grep -q '^pr=' "$dir/home/state/task-s.meta" || fail "a refused sandbox head still recorded pr="
+  [ ! -e "$dir/home/state/task-s.check.sh" ] || fail "a refused sandbox head still armed a poll"
+
+  dir=$(make_sandbox_case sandbox-unreachable direct-PR)
+  FM_TEST_GH_HEAD=$forge FM_TEST_SANDBOX_HEAD_MODE=unreachable run_sandbox_check "$dir" https://github.com/o/r/pull/9 \
+    && fail "a sandbox head read that never completed was registered"
+  grep -Fq "the sandbox host's head read did not complete (exit:255)" "$dir/stderr" \
+    || fail "an unreachable host was not named: $(cat "$dir/stderr")"
+  [ ! -e "$dir/home/state/task-s.check.sh" ] || fail "an unreachable host still armed a poll"
+
+  dir=$(make_sandbox_case sandbox-unusable direct-PR)
+  FM_TEST_GH_HEAD=$forge FM_TEST_SANDBOX_HEAD=$forge FM_TEST_SANDBOX_HEAD_MODE=unusable \
+    run_sandbox_check "$dir" https://github.com/o/r/pull/9 && fail "an unusable head block was registered"
+  grep -Fq "the sandbox host's head block is unusable (field branch is missing)" "$dir/stderr" \
+    || fail "an unusable head block was not named: $(cat "$dir/stderr")"
+  [ ! -e "$dir/home/state/task-s.check.sh" ] || fail "an unusable head block still armed a poll"
+  pass "fm-pr-check refuses a sandbox head the forge lacks, an unreachable host, and an unusable block"
 }
 
 test_valid_recording_and_merge_derivation() {
@@ -3468,6 +3570,9 @@ test_draft_pull_request_is_not_armed
 test_secondmate_record_refuses_a_pr_watch
 test_unpushed_named_head_refuses_registration
 test_direct_pr_unpushed_commit_refuses_registration
+test_sandbox_registration_reads_the_forge_head_only
+test_sandbox_direct_pr_gate_reads_the_host_head
+test_sandbox_gate_refuses_an_unverified_host_head
 test_valid_recording_and_merge_derivation
 test_rejected_metacharacter_bytes_are_inert
 test_static_poll_contract

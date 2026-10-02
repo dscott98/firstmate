@@ -4,7 +4,7 @@ This page covers how to configure and operate the provider that runs Firstmate t
 It is for operators who wire a sandbox provider into a firstmate home and for anyone checking the adapter's safety behavior.
 
 Sandbox placement runs an ordinary ship or scout in a one-task Firstmate home on a disposable VM, with the supervising home as its only supervisor.
-Spawn places and launches such a task and mirrors its status today; lifecycle control, stale-pane supervision, and cleanup are later stages, as [current status](#current-status) lists.
+Spawn places and launches such a task, its status is mirrored, and teardown destroys its sandbox behind the landed-work gate; lifecycle control and stale-pane supervision are later stages, as [current status](#current-status) lists.
 
 ## Find a topic
 
@@ -18,6 +18,7 @@ Spawn places and launches such a task and mirrors its status today; lifecycle co
 | Understand task routes and readiness | [Task routes](#task-routes) and [task readiness](#task-readiness) |
 | Read, steer, or check a placed task | [Status mirror and routed verbs](#status-mirror-and-routed-verbs) |
 | Understand what a sandbox host runs | [Host-side task control](#host-side-task-control) |
+| Tear down a placed task, renew TTLs, or find orphans | [Teardown, TTL, and orphans](#teardown-ttl-and-orphans) |
 | Handle capacity or failures | [Capacity and failures](#capacity-and-failures) |
 | Run the tests | [Verification](#verification) |
 
@@ -32,12 +33,13 @@ What is wired today:
 - [Host-side task control](#host-side-task-control): everything a sandbox host runs for its one task, from provisioning its home to retiring it, and briefs rendered for that home.
 - [Placement](#placement): `bin/fm-spawn.sh --placement sandbox` creates a sandbox, converges and gates it, provisions its home with the task's credentials, launches the task, and records its route.
 - [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, a scout's report arrives before its terminal line, and peek, steering, and current-state reads route to the task's host.
+- [Teardown, TTL, and orphans](#teardown-ttl-and-orphans): teardown destroys a placed task's sandbox only behind its landed-work gate, PR registration reads a sandbox ship's heads without its worktree, and session start retries pending destroys, renews TTLs, and reports orphans.
 
 Sandbox placement is not for real use until the remaining stages land.
 Lifecycle control arrives in PR6: interrupt, exit, and relaunch with the record republished.
 Until PR6, `fm-control.sh` keeps its explicit named refusal of sandbox tasks.
-Stale-pane and liveness supervision, teardown, and orphan and TTL handling of a placed task arrive in later stages of the plan.
-Until then lifecycle control and teardown refuse a sandbox task, and cleaning one up is a manual operator step: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
+Stale-pane and liveness supervision of a placed task arrives in a later stage of the plan.
+A launch that never published its final record is still reconciled by hand: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
 
 ## Principles
 
@@ -52,8 +54,8 @@ Until then lifecycle control and teardown refuse a sandbox task, and cleaning on
 - Every sandbox carries two labels: `fm_task=<task-id>` and `fm_home=<home tag>`.
   `extend`, `hold`, `release`, `policy`, `exec`, `snapshot`, and `rollback` require an existing sandbox belonging to this home, enforced by the [adapter's shared status guard](../bin/fm-sandbox.sh).
   Destroying a sandbox refuses when the labels disagree, so one home can never destroy another home's sandbox, and an already-absent sandbox is success, so cleanup is idempotent.
-- Preserve unlanded work before invoking `destroy` manually.
-  The adapter checks no landing evidence; the host-side `retire` gate described below does not make provider destruction safe automatically.
+- The adapter checks no landing evidence, so only [teardown](#teardown-ttl-and-orphans) destroys a placed task's sandbox behind its landed-work gate.
+  Preserve unlanded work before invoking `destroy` by hand.
 
 ## Network profiles
 
@@ -121,7 +123,7 @@ A sandbox task's explicit placement and route come from this home's `state/<id>.
   It applies the same transport checks as a second-mate registry route, refuses a code root and home that overlap, and refuses a task id that also names a registry route.
   Second-mate registry routes are unchanged.
 - Peek, steering, and the current-state read route a sandbox task to [host-side task control](#host-side-task-control), as [status mirror and routed verbs](#status-mirror-and-routed-verbs) describes.
-- Until the primary routes the remaining verbs there, lifecycle control and teardown refuse a sandbox task record by name, and teardown refuses it even with `--force`.
+- Teardown takes its [sandbox branch](#teardown-ttl-and-orphans), and until the primary routes the remaining verbs there, lifecycle control refuses a sandbox task record by name.
   Second-mate liveness and the watcher's queue checks skip it.
   None of them treats a sandbox task as a local task or as a remote second mate.
 
@@ -170,6 +172,29 @@ Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com
 Use the remote-rendered brief described under [placement](#placement); [the brief header](../bin/fm-brief.sh) owns its path substitution contract.
 A sandbox brief must be self-contained, because the sandbox cannot read the supervising home's reports.
 
+## Teardown, TTL, and orphans
+
+A placed task's worktree is its sandbox, so destroying the sandbox is its teardown, and the landed-work gate stands in front of that destroy exactly as it stands in front of a local worktree return.
+`bin/fm-teardown.sh <task-id>` runs it; [the teardown script's sandbox branch](../bin/fm-teardown.sh) owns the exact sequence and refusals, and [`bin/fm-sandbox-reconcile-lib.sh`](../bin/fm-sandbox-reconcile-lib.sh) owns the inventory read and the destroy.
+
+- Teardown first confirms the sandbox in this home's provider inventory under this task's `fm_task` label.
+  An unreadable inventory, or another task's label, refuses even with `--force`.
+- A scout needs its report locally, fetched through the status mirror's confined reader when it is missing, and the same captain-call completion gate as a local scout.
+  Nothing runs on its host, because a scout's worktree is scratch.
+- A ship runs its host's `retire`, the host's own teardown with the full landed-work test.
+  A refusal is relayed, and the sandbox, its hold label, the record, and the backlog item stay; an SSH exit 255 is unknown completion and preserves everything for a rerun.
+- On a pass, teardown closes this home's records and backlog item and retires the status mirror, and only then destroys the sandbox, once, with `--expect-task` label confirmation.
+  A failed destroy leaves `state/<id>.sandbox-destroy-pending`, which session start retries.
+- `--force` is the captain's explicit discard: it skips the scout gate and the host's `retire`, because destroying the sandbox discards everything on it.
+
+`bin/fm-pr-check.sh` registers a sandbox ship's PR without reading its worktree: the PR head comes from the forge alone, and [the named-head gate](../bin/fm-dod-lib.sh) reads the sandbox copy's HEAD through the host's `head` verb, accepting it when the forge or this home's project clone already holds that commit.
+A Gerrit change from a sandbox ship cannot pass that gate, because its published-tree check needs the copy itself.
+
+Every Firstmate-owned sandbox carries the reap-blocking hold label from creation until its destroy.
+Session start's deferred network checks retry pending destroys, renew the TTL of every sandbox a task record names, and compare this home's inventory with its records.
+A sandbox no record names is reported as an orphan and never destroyed automatically, because a crash between launch and publication can leave real work in it.
+[`bin/fm-bootstrap.sh`](../bin/fm-bootstrap.sh) owns those reports, and the [bootstrap diagnostics playbook](../.agents/skills/bootstrap-diagnostics/SKILL.md) owns the response to each.
+
 ## Capacity and failures
 
 Provider capacity refusals during lifecycle calls and ownership status checks surface as blockers; [the adapter header](../bin/fm-sandbox.sh) owns the exact exit statuses, including the raw relay behavior once `exec` begins.
@@ -188,6 +213,7 @@ bin/fm-test-run.sh tests/fm-remote-route-lib.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-control.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-spawn.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-lifecycle-e2e.test.sh
+bin/fm-test-run.sh tests/fm-teardown-remote-task.test.sh
 ```
 
 The adapter suite drives every verb against a fake provider, including the refusal paths, the home-tag filtering, the capacity distinction, and argv-only invocation.
@@ -195,6 +221,8 @@ The route suite pins the task record contract and the consumer behavior describe
 The task control suite drives every host-side verb against a fixture home with fake tmux, including provision idempotence and rollback, foreign-home refusal, credential file modes, and a search of every output and record for planted credential values.
 The placement suite drives `bin/fm-spawn.sh --placement sandbox` against a fake provider and a fake SSH transport that runs the real host-side control plane with fake tmux, covering the refusal matrix, the record fields, destroy before launch, the hold once launch may have started, SSH exit 255, the mirror armed at publish, and a search of every output, record, log, and argument for planted credential values.
 The lifecycle suite drives a placed ship and scout on the same harness through the real process-event runner: a mirrored decision, a steer that answers it with `--resolve-key`, peek, the composed current state, and a scout report that is local before its terminal line lands.
+The teardown suite drives a placed ship and scout on the same harness through `bin/fm-teardown.sh`: an unlanded refusal that keeps the sandbox, a landed pass that destroys it exactly once with label confirmation and only after the records are gone, SSH exit 255 preserving everything, the scout report and completion gates, `--force`, an identity refusal, and a failed destroy that session start later retries.
+Sandbox PR registration is covered by `tests/fm-pr-check-security.test.sh`, and session start's pending destroys, TTL renewal, and orphan reports by `tests/fm-bootstrap.test.sh`.
 The status mirror's route kind, peek, steering, and the current-state composition are also covered by `tests/fm-remote-reply.test.sh`, `tests/fm-peek-remote.test.sh`, `tests/fm-send-remote-delivery.test.sh`, and `tests/fm-crew-state.test.sh`.
 Brief rendering for a sandbox home and the spawn refusal are covered by `tests/fm-brief.test.sh` and `tests/fm-task-delivery.test.sh`.
 Task route resolution and the task readiness profile are covered by `tests/fm-on.test.sh` and `tests/fm-remote-doctor.test.sh`, part of the [remote second-mate suite](remote-secondmates.md#portable-tests).

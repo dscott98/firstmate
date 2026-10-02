@@ -17,6 +17,10 @@
 # draft state does not refuse, matching how the head read below is optional.
 # bin/fm-pr-merge.sh records through this script with FM_PR_CHECK_MERGE=1 and
 # skips this refusal, because its own merge-time draft refusal is authoritative.
+# A sandbox task's worktree is a path on its sandbox, never read here
+# (bin/fm-remote-route-lib.sh owns that dispatch): its pr_head comes from the
+# forge alone, and the gate reads its named head through its host's `head` verb
+# (bin/fm-dod-lib.sh's fm_dod_accept_sandbox_ship_done).
 # Usage: fm-pr-check.sh <task-id> <pr-url>
 set -eu
 
@@ -33,6 +37,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-parent-channel-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 
 if [ "$#" -ne 2 ]; then
   echo "error: invalid PR check request" >&2
@@ -67,6 +73,12 @@ if [ "$KIND" = secondmate ]; then
   echo "error: $ID is a secondmate, not a delivery lane - $URL was reported on its status channel but belongs to a task in the mate's own home, which arms its own merge watch" >&2
   exit 1
 fi
+if ! fm_remote_route_resolve "$META" "$ID"; then
+  echo "error: $FM_REMOTE_ROUTE_ERROR" >&2
+  exit 1
+fi
+SANDBOX_CONTROL=
+[ "$FM_REMOTE_ROUTE_KIND" != task ] || SANDBOX_CONTROL=$FM_REMOTE_ROUTE_CONTROL
 
 # A prior exact merged result may have queued its durable wake immediately
 # before interruption.
@@ -126,9 +138,14 @@ fi
 # and treats a recorded value that disagrees as stale rather than authoritative.
 WT=$(grep '^worktree=' "$META" | tail -1 | cut -d= -f2- || true)
 PR_HEAD=
-if [ "$PROVIDER" = github ] && [ -n "$WT" ] && [ -d "$WT" ] && command -v gh >/dev/null 2>&1; then
-  if REMOTE_HEAD=$(cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) \
-    && fm_pr_head_valid "$REMOTE_HEAD"; then
+if [ "$PROVIDER" = github ] && command -v gh >/dev/null 2>&1; then
+  REMOTE_HEAD=
+  if [ -n "$SANDBOX_CONTROL" ]; then
+    REMOTE_HEAD=$(gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) || REMOTE_HEAD=
+  elif [ -n "$WT" ] && [ -d "$WT" ]; then
+    REMOTE_HEAD=$(cd "$WT" && gh pr view "$URL" --json headRefOid -q .headRefOid 2>/dev/null) || REMOTE_HEAD=
+  fi
+  if fm_pr_head_valid "$REMOTE_HEAD"; then
     PR_HEAD=$REMOTE_HEAD
   fi
 fi
@@ -142,10 +159,17 @@ case "$PROVIDER:$MODE" in
   *:no-mistakes|*:) DONE_LINE="done: PR $URL checks green" ;;
   *) DONE_LINE="done: PR $URL" ;;
 esac
-if { [ -z "$PR_HEAD" ] || ! fm_dod_forge_head_is_named_head "$MODE"; } \
-  && ! GATE_REASON=$(fm_dod_accept_ship_done "${KIND:-ship}" "$MODE" "$WT" "$PROJECT" "$DONE_LINE" "$STATE" "$ID" "$META"); then
-  echo "error: $GATE_REASON" >&2
-  exit 1
+if [ -z "$PR_HEAD" ] || ! fm_dod_forge_head_is_named_head "$MODE"; then
+  if [ -n "$SANDBOX_CONTROL" ]; then
+    GATE_REASON=$(fm_dod_accept_sandbox_ship_done "${KIND:-ship}" "$MODE" "$PROJECT" "$DONE_LINE" \
+      "$STATE" "$ID" "$META" "$SANDBOX_CONTROL" "$PR_HEAD") || {
+      echo "error: $GATE_REASON" >&2
+      exit 1
+    }
+  elif ! GATE_REASON=$(fm_dod_accept_ship_done "${KIND:-ship}" "$MODE" "$WT" "$PROJECT" "$DONE_LINE" "$STATE" "$ID" "$META"); then
+    echo "error: $GATE_REASON" >&2
+    exit 1
+  fi
 fi
 
 META_TMP=

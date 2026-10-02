@@ -18,9 +18,10 @@
 # override, blank-env defaulting, partial-output relay, and pre-launch timeout
 # scan.
 # Dedicated network-phase cases pin FM_BOOTSTRAP_NETWORK as a true partition of
-# one run into its local and network halves, and the one-hop tasks-axi
+# one run into its local and network halves, the one-hop tasks-axi
 # compatibility handoff that keeps a session start from paying for that verdict
-# twice.
+# twice, and sandbox reconciliation's retried destroys, TTL renewal, and orphan
+# reports.
 set -u
 
 # shellcheck source=tests/lib.sh disable=SC1091
@@ -973,7 +974,138 @@ SH
     "the stale worker did not report the refused handoff sweep"
   assert_contains "$out" "changed before project clone refresh" \
     "the stale worker did not report the refused clone refresh"
+  assert_not_contains "$out" "sandbox reconciliation" "a home with no sandboxes reported sandbox reconciliation"
   pass "bootstrap: every deferred mutating sweep rechecks fleet-lock ownership"
+}
+
+# Sandbox reconciliation in the deferred network phase: a destroy a landed
+# teardown left pending is retried, every sandbox a task record names has its
+# TTL renewed, and a sandbox no record names is reported as an orphan and never
+# destroyed. The provider is a fake behind the real bin/fm-sandbox.sh adapter,
+# labelling its sandboxes with this home's real tag.
+write_sandbox_task_record() {  # <state> <id> <sandbox-name>
+  fm_write_meta "$1/$2.meta" "window=remote:$2" "endpoint_task_id=$2" "kind=ship" "mode=direct-PR" \
+    "placement=sandbox" "remote_kind=task" "remote_host=alias-$2" "remote_root=/opt/firstmate" \
+    "remote_home=/home/agent/fm-home" "sandbox_provider=pve-sandbox" "sandbox_name=$3" "spawn_gen=s1.2.3"
+}
+
+test_sandbox_reconcile_retries_renews_and_reports_orphans() {
+  local case_dir home sbx fakebin out tag
+  case_dir="$TMP_ROOT/sandbox-reconcile"
+  home="$case_dir/home"
+  sbx="$case_dir/provider-state"
+  mkdir -p "$home/config" "$home/state" "$sbx"
+  printf '%s\n' manual > "$home/config/backlog-backend"
+  fakebin=$(make_fake_toolchain "$case_dir")
+  cat > "$case_dir/pve-sandbox" <<'SH'
+#!/usr/bin/env bash
+set -u
+d=${FM_FAKE_SBX_STATE:?}
+printf '%s\n' "$*" >> "$d/argv.log"
+record() { printf 'name=%s state=running fm_task=%s fm_home=%s hold=yes\n' "$1" "$(cat "$d/vm.$1")" "$(cat "$d/tag")"; }
+case "${1:-}" in
+  list)
+    [ ! -f "$d/fail-list" ] || { echo "cluster API unreachable" >&2; exit 1; }
+    for vm in "$d"/vm.*; do [ -f "$vm" ] || continue; record "${vm##*/vm.}"; done
+    ;;
+  status) if [ -f "$d/vm.$2" ]; then record "$2"; else printf 'name=%s state=absent\n' "$2"; fi ;;
+  extend) [ ! -f "$d/fail-extend" ] || { echo "extension refused" >&2; exit 1; } ;;
+  destroy)
+    [ ! -f "$d/fail-destroy" ] || { echo "destroy timed out" >&2; exit 1; }
+    if [ -f "$d/vm.$2" ]; then
+      [ "$(cat "$d/vm.$2")" = "$4" ] || { echo "label mismatch" >&2; exit 1; }
+      rm -f "$d/vm.$2"
+    fi
+    ;;
+  *) exit 64 ;;
+esac
+SH
+  chmod +x "$case_dir/pve-sandbox"
+  printf '%s\n' "$case_dir/pve-sandbox" default_profile=default ttl=4h "ssh_include=$case_dir/ssh-include" \
+    > "$home/config/sandbox-provider"
+  tag=$(FM_HOME="$home" bash -c '. "$1/bin/fm-backend-hometag-lib.sh"; fm_home_hometag' _ "$ROOT") \
+    || fail "could not derive the home tag"
+  printf '%s\n' "$tag" > "$sbx/tag"
+  # sbx-a is recorded; sbx-b has no record; sbx-c is owed a destroy and has no
+  # record left; sbx-d is owed one but its record still names it; task-e's
+  # sandbox is gone; sbx-f's spawn is still publishing; sbx-h's record names a
+  # sandbox labelled for another task.
+  printf 'task-a\n' > "$sbx/vm.sbx-a"
+  printf 'task-b\n' > "$sbx/vm.sbx-b"
+  printf 'task-c\n' > "$sbx/vm.sbx-c"
+  printf 'task-d\n' > "$sbx/vm.sbx-d"
+  printf 'task-f\n' > "$sbx/vm.sbx-f"
+  printf 'task-x\n' > "$sbx/vm.sbx-h"
+  write_sandbox_task_record "$home/state" task-a sbx-a
+  write_sandbox_task_record "$home/state" task-d sbx-d
+  write_sandbox_task_record "$home/state" task-e sbx-e
+  write_sandbox_task_record "$home/state" task-h sbx-h
+  printf 'task_id=task-c\nsandbox_name=sbx-c\n' > "$home/state/task-c.sandbox-destroy-pending"
+  printf 'task_id=task-d\nsandbox_name=sbx-d\n' > "$home/state/task-d.sandbox-destroy-pending"
+  mkdir -p "$home/state/.spawn-task-f.lock"
+  printf '%s\n' "$$" > "$home/state/.spawn-task-f.lock/pid"
+
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_NETWORK=only FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "BOOTSTRAP_INFO: destroyed sandbox sbx-c for task-c, which an earlier teardown left pending" \
+    "the owed destroy was not retried"
+  assert_absent "$sbx/vm.sbx-c" "the owed destroy left its sandbox"
+  assert_absent "$home/state/task-c.sandbox-destroy-pending" "the finished destroy left its pending record"
+  assert_contains "$out" "SANDBOX_DESTROY_PENDING: task-d: sandbox sbx-d still has its task record, so its destroy waits for a rerun of bin/fm-teardown.sh task-d" \
+    "a pending destroy whose record survives was not held for teardown"
+  assert_present "$sbx/vm.sbx-d" "a sandbox whose record survives was destroyed"
+  assert_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-b (task task-b, running) has no task record in this home; it is never destroyed automatically" \
+    "the unrecorded sandbox was not reported"
+  assert_present "$sbx/vm.sbx-b" "an orphan was destroyed"
+  assert_not_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-a" "a recorded sandbox was reported as an orphan"
+  assert_not_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-d" "a sandbox owed a destroy was reported as an orphan"
+  assert_not_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-f" "a sandbox whose spawn is publishing was reported as an orphan"
+  assert_contains "$out" "SANDBOX_TTL: task-e: sandbox sbx-e is not in this home's sandbox inventory (absent, or labelled for another home), so its TTL was not renewed" \
+    "a record whose sandbox is gone was not reported"
+  assert_contains "$out" "SANDBOX_TTL: task-h: sandbox sbx-h is labelled for task task-x, so its TTL was not renewed" \
+    "a record naming another task's sandbox was not reported"
+  grep -qx 'extend sbx-a --ttl 4h' "$sbx/argv.log" || fail "the recorded sandbox's TTL was not renewed: $(cat "$sbx/argv.log")"
+  grep -qx 'extend sbx-d --ttl 4h' "$sbx/argv.log" || fail "a still-recorded sandbox's TTL was not renewed"
+  ! grep -q '^extend sbx-h' "$sbx/argv.log" || fail "another task's sandbox had its TTL renewed"
+  assert_equals "destroy sbx-c --expect-task task-c --home $tag" "$(grep '^destroy ' "$sbx/argv.log")" \
+    "something other than the owed destroy reached the provider"
+
+  # Failures are reported rather than hidden.
+  printf 'task-g\n' > "$sbx/vm.sbx-g"
+  printf 'task_id=task-g\nsandbox_name=sbx-g\n' > "$home/state/task-g.sandbox-destroy-pending"
+  : > "$sbx/fail-destroy"
+  : > "$sbx/fail-extend"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_NETWORK=only FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "SANDBOX_DESTROY_PENDING: task-g: sandbox sbx-g is still not destroyed (sandbox provider exited 1: destroy timed out); session start retries it" \
+    "a failed retry was not reported"
+  assert_present "$home/state/task-g.sandbox-destroy-pending" "a failed retry dropped its pending record"
+  assert_contains "$out" "SANDBOX_TTL: task-a: sandbox sbx-a: TTL renewal failed (sandbox provider exited 1: extension refused)" \
+    "a failed renewal was not reported"
+  rm -f "$sbx/fail-destroy" "$sbx/fail-extend"
+  : > "$sbx/fail-list"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_NETWORK=only FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "SANDBOX_ORPHAN: this home's sandbox inventory could not be read (sandbox provider exited 1: cluster API unreachable), so sandboxes without a task record were not checked" \
+    "an unreadable inventory did not say the orphan check was skipped"
+  assert_contains "$out" "SANDBOX_TTL: task-a: sandbox sbx-a: TTL not renewed, because this home's sandbox inventory could not be read" \
+    "an unreadable inventory did not say the renewal was skipped"
+  rm -f "$sbx/fail-list"
+
+  # Only a locked session's deferred network phase touches the provider.
+  : > "$sbx/argv.log"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_DETECT_ONLY=1 FM_BOOTSTRAP_NETWORK=only FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "SANDBOX_" "a detect-only session reconciled sandboxes"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_NETWORK=skip FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_not_contains "$out" "SANDBOX_" "the local phase reconciled sandboxes"
+  printf '222222\n' > "$home/state/.lock"
+  out=$(PATH="$fakebin:$BASE_PATH" FM_HOME="$home" FM_ROOT_OVERRIDE="$ROOT" FM_FAKE_TREEHOUSE_LEASE_HELP=1 \
+    FM_BOOTSTRAP_NETWORK=only FM_BOOTSTRAP_NETWORK_LOCK_PID=111111 FM_FAKE_SBX_STATE="$sbx" "$ROOT/bin/fm-bootstrap.sh")
+  assert_contains "$out" "changed before sandbox reconciliation" "a stale worker did not refuse sandbox reconciliation"
+  [ ! -s "$sbx/argv.log" ] || fail "an unauthorized run reached the provider: $(cat "$sbx/argv.log")"
+  pass "bootstrap: sandbox reconciliation retries owed destroys, renews TTLs, and reports orphans without destroying them"
 }
 
 # The verdict costs three subprocesses, so a caller that already has it can hand
@@ -1268,6 +1400,7 @@ test_routine_bootstrap_confirmations_are_silent
 test_routine_bootstrap_contract_runs_under_system_bash
 test_network_phase_partitions_the_run
 test_network_sweeps_recheck_lock_ownership
+test_sandbox_reconcile_retries_renews_and_reports_orphans
 test_network_phases_record_per_step_elapsed_times
 test_tasks_axi_verdict_handoff_is_consumed_once
 test_crew_dispatch_active_rules_are_verbose_bootstrap_info

@@ -9,10 +9,12 @@
 # probe, and the watcher's foreign-queue stall tick against a home that holds a
 # sandbox task record, with a logging, always-failing ssh, tmux, and herdr first
 # on PATH. Peek, steering, and the current-state read cross only the transport
-# to the task's own host and fail loudly when it fails; every other consumer
-# refuses with the library's named reason and reaches neither the transport nor
-# a local backend. All leave the record byte-identical, so a sandbox task can
-# never fall into secondmate-only code or be read as local.
+# to the task's own host and fail loudly when it fails; teardown takes the
+# sandbox task branch, which refuses an unconfirmed sandbox; every other
+# consumer refuses with the library's named reason. None of those refusals
+# reaches the transport or a local backend. All leave the record
+# byte-identical, so a sandbox task can never fall into secondmate-only code or
+# be read as local.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -340,17 +342,22 @@ test_control_refuses_a_sandbox_task() {
   pass "fm-control refuses every lifecycle verb for a sandbox task"
 }
 
-test_teardown_refuses_a_sandbox_task() {
+# Teardown takes a sandbox task's own branch (tests/fm-teardown-remote-task.test.sh
+# owns its behavior). This home configures no provider, so no inventory can
+# confirm the sandbox, and that refuses even forced, before any host or local
+# backend is touched.
+test_teardown_takes_the_sandbox_branch() {
   run_consumer fm-teardown.sh t1
-  expect_code 1 "$RC" "teardown of a sandbox task"
-  assert_contains "$OUT" "REFUSED: task t1 runs in a sandbox on sbx-t1; teardown is not supported" "teardown names the refusal"
+  expect_code 1 "$RC" "teardown of a sandbox task with no readable inventory"
+  assert_contains "$OUT" "REFUSED: this home's sandbox inventory could not be read" "teardown names the unconfirmed sandbox"
   assert_contains "$OUT" "nothing was changed" "teardown says nothing changed"
   run_consumer fm-teardown.sh t1 --force
-  expect_code 1 "$RC" "forced teardown of a sandbox task"
-  assert_contains "$OUT" "teardown is not supported" "forced teardown names the refusal"
+  expect_code 1 "$RC" "forced teardown of a sandbox task with no readable inventory"
+  assert_contains "$OUT" "sandbox inventory could not be read" "forced teardown names the unconfirmed sandbox"
   assert_untouched "teardown"
   assert_absent "$STATE_DIR/t1.backlog-close" "teardown recorded a backlog close for the sandbox task"
-  pass "fm-teardown refuses a sandbox task, even forced, with nothing touched"
+  assert_absent "$STATE_DIR/t1.sandbox-destroy-pending" "teardown recorded a destroy for an unconfirmed sandbox"
+  pass "fm-teardown takes a sandbox task's own branch, which refuses an unconfirmed sandbox even forced"
 }
 
 test_crew_state_routes_a_sandbox_task() {
@@ -450,7 +457,7 @@ test_shape_check_and_refusal_wording
 test_peek_routes_a_sandbox_task_by_id
 test_send_routes_a_sandbox_task_by_id
 test_control_refuses_a_sandbox_task
-test_teardown_refuses_a_sandbox_task
+test_teardown_takes_the_sandbox_branch
 test_crew_state_routes_a_sandbox_task
 test_invalid_placement_is_refused_by_consumers
 test_liveness_probe_skips_non_secondmate_routes

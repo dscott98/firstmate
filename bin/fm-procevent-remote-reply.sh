@@ -12,6 +12,7 @@
 #   fm-procevent-remote-reply.sh source-id <id>
 #   fm-procevent-remote-reply.sh relisten
 #   fm-procevent-remote-reply.sh retire <id>
+#   fm-procevent-remote-reply.sh fetch-report <id>
 #
 # <id> names one route, and bin/fm-remote-route-lib.sh decides its kind. A
 # configured remote secondmate's channel is its remote home's
@@ -100,6 +101,11 @@
 # removes any earlier local copy, so an older report is never read as the one
 # the line announces. An SSH exit 255 or a primary-side receiver failure leaves the
 # delta uncommitted for retry and the local report untouched.
+#
+# `fetch-report` runs that same scout report fetch on its own, for
+# bin/fm-teardown.sh when a sandbox scout's report is not local: 0 once it is
+# local, 1 when the host refused it (the reason on stderr, any older local copy
+# removed), 255 when the host was unreachable, and 2 on a local failure.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -918,6 +924,22 @@ cmd_retire() {
   )
 }
 
+cmd_fetch_report() {
+  local id=${1:-} rc=0
+  validate_id "$id"
+  reply_route_kind "$id"
+  [ "$REPLY_KIND" = task ] && [ "$REPLY_TASK_KIND" = scout ] \
+    || die "$id is not a sandbox scout, so it has no report to fetch"
+  fetch_scout_report "$id" || rc=$?
+  case "$rc" in
+    0) printf 'fetched: data/%s/report.md\n' "$id" ;;
+    1) printf 'error: the sandbox host refused the report: %s\n' "${FETCH_DOC_REASON:-no reason given}" >&2 ;;
+    "$SSH_UNAVAILABLE") printf 'error: the sandbox host was unreachable (SSH exit 255)\n' >&2 ;;
+    *) printf 'error: the report could not be written into this home\n' >&2 ;;
+  esac
+  return "$rc"
+}
+
 require_parent_lifecycle_lock() {
   local id=$1 lock owner pid
   lock=$(secondmate_reply_lifecycle_lock_path "$STATE" "$id")
@@ -944,6 +966,7 @@ case "${1:-}" in
   source-id) shift; [ "$#" -eq 1 ] || usage; source_id "$1" ;;
   relisten) shift; [ "$#" -eq 0 ] || usage; exit 0 ;;
   retire) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_retire "$@" ;;
+  fetch-report) shift; [ "$#" -eq 1 ] || usage; cmd_fetch_report "$@" ;;
   retire-quiesce-locked) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; require_parent_lifecycle_lock "$1"; cmd_retire_quiesce_locked "$@" ;;
   retire-finalize-locked) shift; [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; require_parent_lifecycle_lock "$1"; cmd_retire_finalize_locked "$@" ;;
   ''|-h|--help|help) usage ;;

@@ -546,7 +546,7 @@ The first line holds the provider command's absolute path, then `key=value` line
 | --- | --- |
 | `/absolute/path/to/provider` | The provider command `bin/fm-sandbox.sh` invokes, argv only. |
 | `default_profile=<name>` | Network profile used when `create` omits `--profile`; `open` is refused as a default and requires explicit per-task `--profile open`. |
-| `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
+| `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, including the renewal session start applies to every recorded sandbox, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
 | `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into; whitespace is refused. |
 
 `default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative provider path, a relative or whitespace/control-character-bearing `ssh_include`, and a malformed duration are refused with the concrete problem named.
