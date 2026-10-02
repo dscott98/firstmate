@@ -121,7 +121,7 @@ fm_remote_route_check_shape() { # <host> <root> <home>
 
 fm_remote_route_resolve() { # <meta-file> [<task-id>]
   local meta=${1:-} id=${2:-} placement_lines remote_kind_lines placement
-  local kind remote_kind window binding host root home
+  local kind remote_kind window binding host root home root_normalized home_normalized
   fm_remote_route_reset
   [ -n "$meta" ] && [ -f "$meta" ] || return 0
   if [ -z "$id" ]; then
@@ -204,16 +204,18 @@ fm_remote_route_resolve() { # <meta-file> [<task-id>]
     fm_remote_route_invalid "sandbox task $id has an unsafe route: $FM_REMOTE_ROUTE_ERROR"
     return 1
   fi
-  if [ "$root" = "$home" ]; then
+  root_normalized=${root%/}
+  home_normalized=${home%/}
+  if [ -z "$root_normalized" ] || [ -z "$home_normalized" ] || [ "$root_normalized" = "$home_normalized" ]; then
     fm_remote_route_invalid "sandbox task $id has an overlapping remote root and home: $root"
     return 1
   fi
-  case "$home/" in "$root/"*)
+  case "$home_normalized/" in "$root_normalized/"*)
     fm_remote_route_invalid "sandbox task $id has its remote home inside its code root: $home"
     return 1
     ;;
   esac
-  case "$root/" in "$home/"*)
+  case "$root_normalized/" in "$home_normalized/"*)
     fm_remote_route_invalid "sandbox task $id has its remote code root inside its home: $root"
     return 1
     ;;
