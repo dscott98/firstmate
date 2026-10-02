@@ -1,0 +1,3 @@
+ok - fm-peek remote: the capture routes over the remote transport, local adapters untouched
+ok - fm-peek remote: an unreachable host fails loudly without a false death claim
+all fm-peek-remote tests passed

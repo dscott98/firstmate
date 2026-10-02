@@ -1,0 +1,124 @@
+$ bash bin/fm-lab-home.sh create /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+[exit 0]
+$ bash bin/fm-peek.sh validation
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+●  WATCHER DOWN - SUPERVISION IS OFF
+●  1 task(s) in flight, but no watcher has a fresh beacon (last beat: never, grace 300s).
+●  Trust the emitted supervision protocol for this harness; do not use shell & for watcher repair.
+●  This is a supervision warning only; the guarded operation WILL still run.
+●  repair missing watcher supervision with a foreground checkpoint: bin/fm-watch-checkpoint.sh --seconds 180.
+●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+error: task validation runs in a sandbox on fm-pr2-validation.invalid; reading its pane is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+[exit 1]
+$ bash bin/fm-peek.sh remote:validation
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: task validation runs in a sandbox on fm-pr2-validation.invalid; reading its pane is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+[exit 1]
+$ bash bin/fm-send.sh validation please continue
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: steer not sent: task validation runs in a sandbox on fm-pr2-validation.invalid; steering it is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (tried meta=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu/state/validation.meta)
+[exit 1]
+$ bash bin/fm-send.sh validation --key Enter
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+WARNING: watcher still down (same stale episode; last beat: never, grace 300s) - full banner already printed this episode.
+error: steer not sent: task validation runs in a sandbox on fm-pr2-validation.invalid; steering it is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (tried meta=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu/state/validation.meta)
+[exit 1]
+$ bash bin/fm-control.sh validation interrupt
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+error: task validation runs in a sandbox on fm-pr2-validation.invalid; lifecycle control is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+[exit 1]
+$ bash bin/fm-control.sh validation exit
+fm-gate-refuse: gate agent lifecycle permitted only against lab home /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu
+error: task validation runs in a sandbox on fm-pr2-validation.invalid; lifecycle control is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate
+[exit 1]
+$ bash bin/fm-teardown.sh validation
+REFUSED: task validation runs in a sandbox on fm-pr2-validation.invalid; teardown is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate; nothing was changed
+[exit 1]
+$ bash bin/fm-crew-state.sh validation
+state: unknown · source: none · task validation runs in a sandbox on fm-pr2-validation.invalid; reading its current state is not supported for a sandbox task in this Firstmate version, so it was refused rather than treated as local or as a remote secondmate (not proof of death)
+[exit 0]
+Record preserved byte-for-byte; no steering inbox created.
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+error: sandbox task validation has its remote home inside its code root: /opt/firstmate/home
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+error: sandbox task validation has an overlapping remote root and home: /
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+error: sandbox task validation has an unsafe route: configured SSH alias is unsafe: -oProxyCommand=evil
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+error: sandbox task validation must record remote_kind=task exactly once
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+error: sandbox task validation must record endpoint_task_id=validation exactly once
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh --profile task
+ssh: Could not resolve hostname fm-pr2-validation.invalid: Name or service not known
+[exit 255]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh
+error: remote route 'validation' names a sandbox task and also selects 1 configured secondmate route(s); refusing the ambiguous route
+[exit 1]
+$ bash bin/fm-on.sh validation fm-remote-doctor.sh
+ssh: Could not resolve hostname fm-pr2-validation.invalid: Name or service not known
+[exit 255]
+$ bash bin/fm-crew-state.sh validation
+state: unknown · source: remote-endpoint · unknown-remote: fm-pr2-validation.invalid unreachable or endpoint unreadable (not proof of death)
+[exit 0]
+$ bash bin/fm-remote-doctor.sh --profile task
+mode=check
+path=/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.codex/tmp/arg0/codex-arg0yDQvPl:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/share/pnpm/bin:/home/dscott/.bun/bin:/home/dscott/.opencode/bin:/home/dscott/.pi/agent/npm-global/bin:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/bin:/home/dscott/go/bin:/home/dscott/.cargo/bin:/home/dscott/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required tmux=/usr/bin/tmux
+required treehouse=/home/dscott/.local/bin/treehouse
+required harness=claude:/home/dscott/.local/bin/claude
+optional tasks-axi=/home/dscott/.local/bin/tasks-axi
+optional no-mistakes=/home/dscott/.local/bin/no-mistakes
+optional gh=/usr/bin/gh
+check herdr=skip: the task profile runs its worker on tmux with no Herdr session
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=fixable: the Linux remote job worker is not running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=fixable: the remote job worker has not reported a fresh probe
+check launchagent=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-scope=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-loaded=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-server=skip: the task profile runs its worker on tmux with no Herdr session
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+action: remote-job-worker: rerun this command with --fix to start it
+action: remote-job-probe: rerun this command with --fix to restart the worker, then rerun through fm-on.sh
+error: this host is not ready for a remote task; unresolved: remote-job-worker remote-job-probe
+[exit 1]
+$ bash bin/fm-remote-doctor.sh --profile task
+mode=check
+path=/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.codex/tmp/arg0/codex-arg0yDQvPl:/usr/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/share/pnpm/bin:/home/dscott/.bun/bin:/home/dscott/.opencode/bin:/home/dscott/.pi/agent/npm-global/bin:/usr/local/go/bin:/home/dscott/go/bin:/home/dscott/.local/bin:/home/dscott/.local/bin:/home/dscott/go/bin:/home/dscott/.cargo/bin:/home/dscott/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:/snap/bin
+entrypoint=no
+note: not launched through the fixed remote entrypoint; the reported PATH is this caller environment.
+platform=linux
+required git=/usr/bin/git
+required jq=/usr/bin/jq
+required tmux=/usr/bin/tmux
+required treehouse=/home/dscott/.no-mistakes/worktrees/a1211da81307/01M3X897SXMJW3QPYZ6N5FTSEE/fm-lab.7b__nkdu/account/.local/bin/treehouse
+required harness=codex:/usr/bin/codex
+optional tasks-axi=/home/dscott/.local/bin/tasks-axi
+optional no-mistakes=/home/dscott/.local/bin/no-mistakes
+optional gh=/usr/bin/gh
+check herdr=skip: the task profile runs its worker on tmux with no Herdr session
+check gui-session=skip: no Aqua login session applies on linux
+check remote-job-worker=ok: the Linux remote job worker is running
+check remote-job-worker-loaded=skip: Aqua launch agents do not apply on linux
+check remote-job-probe=ok: the remote job worker completed the required-tool probe
+check launchagent=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-scope=skip: the task profile runs its worker on tmux with no Herdr session
+check launchagent-loaded=skip: the task profile runs its worker on tmux with no Herdr session
+check herdr-server=skip: the task profile runs its worker on tmux with no Herdr session
+check entrypoint-link=skip: this run did not come through the fixed remote entrypoint
+ok: remote task readiness confirmed on this host
+[exit 0]
+LIVE CHECKS COMPLETED
