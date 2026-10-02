@@ -236,6 +236,7 @@ Any remaining gap exits non-zero.
 The script's own header owns the full line protocol.
 
 One readiness check is a herdr release floor: the host's herdr client and, while it is running, its `fm-remote` server must be herdr 0.9.3 or newer, the first release verified to serve the primary's saved machines (see [Saved machines in the local Herdr](#saved-machines-in-the-local-herdr)).
+This check imposes no version floor on the primary's local Herdr client.
 Below the floor the gap is `human:`, because only a person chooses when to upgrade a host.
 The action names `herdr update --handoff`, which upgrades the live `fm-remote` server without killing the second-mate panes, and `--fix` reports that step without ever running it.
 
@@ -437,6 +438,7 @@ All remote secondmates on one host share `fm-remote` and retain separate `2ndmat
 
 ### Saved machines in the local Herdr
 
+Automatic saving is specific to the `dscott98/firstmate` fork and is not an upstream Firstmate feature.
 After a remote second mate is launched, and again whenever a liveness probe finds its route alive, the primary saves the host as a machine in this machine's local Herdr:
 
 ```sh
@@ -452,7 +454,7 @@ That saved machine is what makes the remote agent's activity visible in the loca
 - A primary with no local herdr or jq skips the save silently.
 - A refused save, for example a remote server too old to serve saved machines, is reported as a warning and never fails the launch or the probe around it.
   The readiness floor above is the durable fix for that refusal.
-- Each save is bounded, so an unreachable host cannot stall a launch or a supervision pass, and mates that share one host serialize behind one per-host save.
+- Each save is bounded, so an unreachable host cannot stall a launch or a supervision pass indefinitely, and mates that share one host serialize behind one per-host save.
 
 ### Liveness recovery
 
