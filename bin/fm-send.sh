@@ -21,7 +21,7 @@
 # remote alike. The message is appended as a durable sequenced record under
 # the task's steering inbox (newlines are legal) - state/<id>.inbox/ for a
 # local task, or the remote home's host-local inbox reached through fm-on.sh
-# for a remote secondmate - and the terminal receives only one short constant
+# for a remote secondmate or sandbox task - and the terminal receives only one short constant
 # self-describing doorbell line plus Enter, best-effort. The durable record IS
 # the delivery, so the record's fate alone governs the exit: 0 = the steer is
 # durably sent (recorded); nonzero = nothing was confirmed delivered and a
@@ -152,12 +152,23 @@
 # FM_SEND_EXPECTED_REMOTE_HOST to require that sampled identity to still match
 # during the final locked remote-route validation; unset or empty guards do not
 # change ordinary sends.
+# Sandbox task delivery: a sandbox task selected by id rides the same remote
+# inbox leg to its host's task control plane (bin/fm-remote-task-control.sh
+# cmd_send), unmarked, with no pending-reply expectation, and with the same
+# budget, single retry after ssh exit 255, and unconfirmed-delivery contract.
+# Its steer carries no correlation token, so fm-send mints a per-request id
+# (bin/fm-task-inbox-lib.sh) that keys the remote record: the retry lands on
+# the same record, and the unconfirmed-delivery error prints the exact
+# FM_SEND_REQUEST_ID=<id> resend that reuses it, while a fresh send of the
+# same text is a new instruction. --key crosses to the sandbox pane as for a
+# remote secondmate, and --resolve-key closes in this home's mirrored status
+# log, the authoritative copy for a sandbox task.
 # bin/fm-remote-route-lib.sh decides whether a recorded target is remote. A
-# sandbox task record, or a record whose placement is malformed, has no
-# steering leg in this version, so a steer or key to one - selected by id or by
-# its recorded window - is refused before anything is marked, recorded, or
-# typed, and the final locked validation refuses a record that stopped being
-# local or stopped being the same remote secondmate.
+# record whose placement is malformed has no steering leg, and a sandbox task's
+# recorded window names no endpoint here, so a steer or key to either is
+# refused before anything is marked, recorded, or typed; the final locked
+# validation refuses a record that stopped being local or stopped being the
+# same remote secondmate or sandbox task.
 #
 # Decision closure (answerer-closes): pass --resolve-key <key> (repeatable,
 # before the message) when this send answers an open keyed needs-decision: or
@@ -347,20 +358,19 @@ fm_send_count_colons() { # <string>
   printf '%s' $((${#s} - ${#no_colons}))
 }
 
-# bin/fm-remote-route-lib.sh owns remote dispatch. A record that is neither
-# local nor a remote secondmate - a sandbox task, or a record whose placement
-# is malformed - has no steering leg here, so the steer is refused before
-# anything is marked, recorded, or typed, whether the record was selected by
-# id or by its recorded window.
-fm_send_refuse_unroutable() { # <meta>
-  local meta=$1 id
+# bin/fm-remote-route-lib.sh owns remote dispatch. A record whose placement is
+# malformed has no steering leg here, and a sandbox task is steered only by its
+# task id, because its recorded window names no endpoint in this home, so
+# either is refused before anything is marked, recorded, or typed.
+fm_send_refuse_unroutable() { # <meta> [window]
+  local meta=$1 selected_by=${2:-} id
   id=$(fm_send_id_from_meta "$meta")
   if ! fm_remote_route_resolve "$meta" "$id"; then
     echo "error: steer not sent to $id: $FM_REMOTE_ROUTE_ERROR (tried meta=$meta)" >&2
     return 1
   fi
-  if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
-    echo "error: steer not sent: $(fm_remote_route_unsupported "$id" "steering it") (tried meta=$meta)" >&2
+  if [ "$FM_REMOTE_ROUTE_KIND" = task ] && [ "$selected_by" = window ]; then
+    echo "error: steer not sent: that target is the recorded window of sandbox task $id on $FM_REMOTE_ROUTE_HOST, not an endpoint in this home; steer the task by its id ($id) instead (tried meta=$meta)" >&2
     return 1
   fi
 }
@@ -377,12 +387,14 @@ fm_send_resolve_target() { # <raw-target>
   TARGET_REMOTE_ID=""
   TARGET_REMOTE_HOST=""
   TARGET_REMOTE_CONTROL=""
+  TARGET_REMOTE_KIND=""
+  TARGET_REMOTE_NOUN=""
   RESOLUTION_TRIED=""
 
   meta=$(fm_backend_meta_for_selector "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
     fm_send_refuse_unroutable "$meta" || return 1
-    if [ "$FM_REMOTE_ROUTE_KIND" = secondmate ]; then
+    if [ "$FM_REMOTE_ROUTE_KIND" = secondmate ] || [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
       id=$(fm_send_id_from_meta "$meta")
       RESOLVED_TARGET="remote:$id"
       TARGET_BACKEND=remote
@@ -393,7 +405,14 @@ fm_send_resolve_target() { # <raw-target>
       TARGET_REMOTE_ID=$id
       TARGET_REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
       TARGET_REMOTE_CONTROL=$FM_REMOTE_ROUTE_CONTROL
-      RESOLUTION_TRIED="meta=$meta; placement=remote"
+      TARGET_REMOTE_KIND=$FM_REMOTE_ROUTE_KIND
+      if [ "$TARGET_REMOTE_KIND" = task ]; then
+        TARGET_REMOTE_NOUN="sandbox task"
+        RESOLUTION_TRIED="meta=$meta; placement=sandbox"
+      else
+        TARGET_REMOTE_NOUN="remote secondmate"
+        RESOLUTION_TRIED="meta=$meta; placement=remote"
+      fi
       return 0
     fi
     RESOLUTION_TRIED="meta=$meta; backend=from-meta"
@@ -436,7 +455,7 @@ fm_send_resolve_target() { # <raw-target>
 
   meta=$(fm_backend_meta_for_window "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
-    fm_send_refuse_unroutable "$meta" || return 1
+    fm_send_refuse_unroutable "$meta" window || return 1
     target=$(fm_backend_target_of_meta "$meta")
     if [ -z "$target" ]; then
       echo "error: no backend target recorded in $meta (tried explicit target '$raw' via recorded window/terminal; backend=from-meta)" >&2
@@ -814,7 +833,7 @@ if [ "${1:-}" = "--key" ]; then
     esac
     if ! fm_run_timed "$FM_SEND_REMOTE_BUDGET" "$SCRIPT_DIR/fm-on.sh" "$TARGET_REMOTE_ID" \
       "$TARGET_REMOTE_CONTROL" key "$TARGET_REMOTE_ID" "$key" </dev/null; then
-      echo "error: key '$key' not sent to remote secondmate $TARGET_REMOTE_ID; completion may be unknown" >&2
+      echo "error: key '$key' not sent to $TARGET_REMOTE_NOUN $TARGET_REMOTE_ID; completion may be unknown" >&2
       exit 1
     fi
   elif ! fm_backend_send_key "$TARGET_BACKEND" "$T" "$key" "$EXPECTED_LABEL"; then
@@ -837,6 +856,21 @@ else
       exit 1
       ;;
     esac
+  fi
+  # A sandbox task steer carries no correlation token, so one request id keys
+  # its remote record across this send's retry (see the header).
+  TARGET_REQUEST_ID=
+  if [ "$TARGET_REMOTE_KIND" = task ]; then
+    if [ -n "${FM_SEND_REQUEST_ID:-}" ]; then
+      fm_task_inbox_request_id_valid "$FM_SEND_REQUEST_ID" || {
+        echo "error: FM_SEND_REQUEST_ID must be 16 lowercase hex characters; nothing was sent" >&2
+        exit 1
+      }
+      TARGET_REQUEST_ID=$FM_SEND_REQUEST_ID
+    elif ! TARGET_REQUEST_ID=$(fm_task_inbox_new_request_id); then
+      echo "error: could not mint a request id for the steer to sandbox task $TARGET_REMOTE_ID; nothing was sent" >&2
+      exit 1
+    fi
   fi
   # The pre-marker answer text, kept for the closing resolved note so the
   # durable ledger records the plain answer without marker or corr bytes.
@@ -933,11 +967,13 @@ else
     # open indefinitely; a bound hit exits through the same
     # unconfirmed-delivery contract.
     REMOTE_META_LOCK=$(fm_meta_lock_path "$TARGET_META") || exit 1
+    REMOTE_RECORD_OWNER="parent task"
+    [ "$TARGET_REMOTE_KIND" != task ] || REMOTE_RECORD_OWNER=task
     if ! fm_task_inbox_lock_acquire "$REMOTE_META_LOCK"; then
       if [ "$PENDING_REPLY_CREATED" = 1 ] && [ -n "$PENDING_REPLY_CORR" ]; then
         fm_pending_reply_discard_undelivered "$STATE" "$PENDING_REPLY_CORR" || true
       fi
-      echo "error: steer not sent to remote secondmate $TARGET_REMOTE_ID: its parent task metadata could not be locked for final delivery validation" >&2
+      echo "error: steer not sent to $TARGET_REMOTE_NOUN $TARGET_REMOTE_ID: its $REMOTE_RECORD_OWNER metadata could not be locked for final delivery validation" >&2
       exit 1
     fi
     CURRENT_REMOTE_ID=
@@ -946,7 +982,7 @@ else
     if [ -f "$TARGET_META" ]; then
       CURRENT_REMOTE_ID=$(fm_send_id_from_meta "$TARGET_META")
       if fm_remote_route_resolve "$TARGET_META" "$CURRENT_REMOTE_ID" &&
-        [ "$FM_REMOTE_ROUTE_KIND" = secondmate ]; then
+        [ "$FM_REMOTE_ROUTE_KIND" = "$TARGET_REMOTE_KIND" ]; then
         CURRENT_REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
       fi
       CURRENT_REMOTE_SPAWN_GEN=$(fm_meta_get "$TARGET_META" spawn_gen)
@@ -962,13 +998,14 @@ else
       if [ "$PENDING_REPLY_CREATED" = 1 ] && [ -n "$PENDING_REPLY_CORR" ]; then
         fm_pending_reply_discard_undelivered "$STATE" "$PENDING_REPLY_CORR" || true
       fi
-      echo "error: steer not sent to remote secondmate $TARGET_REMOTE_ID: its parent task retired or changed route during target resolution" >&2
+      echo "error: steer not sent to $TARGET_REMOTE_NOUN $TARGET_REMOTE_ID: its $REMOTE_RECORD_OWNER retired or changed route during target resolution" >&2
       exit 1
     fi
     remote_rc=0
     remote_completion_unknown=0
     REMOTE_SEND_ARGS=("$TARGET_REMOTE_ID" "$MESSAGE")
     [ -z "$FIRE_AND_FORGET_ID" ] || REMOTE_SEND_ARGS+=(fire-and-forget)
+    [ -z "$TARGET_REQUEST_ID" ] || REMOTE_SEND_ARGS+=("$TARGET_REQUEST_ID")
     # Each transport attempt is bounded by FM_SEND_REMOTE_BUDGET seconds.
     # fm_run_timed's 124 means the attempt was killed at the bound with remote
     # completion unknown - the enqueue may have landed - so it exits through
@@ -995,20 +1032,26 @@ else
       if [ -n "$PENDING_REPLY_CORR" ]; then
         fm_pending_reply_mark_delivery_unknown "$STATE" "$PENDING_REPLY_CORR" || true
       fi
-      if [ "$remote_rc" -eq 255 ]; then
-        echo "error: steer to remote secondmate $TARGET_REMOTE_ID is unconfirmed (transport lost twice; remote completion unknown). Only the correlation-reusing resend below is idempotent and lands on the same remote inbox record:" >&2
-      elif [ "$remote_rc" -eq 124 ]; then
-        echo "error: steer to remote secondmate $TARGET_REMOTE_ID is unconfirmed (the remote transport did not complete within its ${FM_SEND_REMOTE_BUDGET}s budget; remote completion unknown). Only the correlation-reusing resend below is idempotent and lands on the same remote inbox record:" >&2
+      case "$remote_rc" in
+      255) unconfirmed_cause="transport lost twice; remote completion unknown" ;;
+      124) unconfirmed_cause="the remote transport did not complete within its ${FM_SEND_REMOTE_BUDGET}s budget; remote completion unknown" ;;
+      *) unconfirmed_cause="the first transport attempt had unknown completion and the retry failed" ;;
+      esac
+      if [ "$TARGET_REMOTE_KIND" = task ]; then
+        resend_identity=request
+        resend_assignment="FM_SEND_REQUEST_ID=$TARGET_REQUEST_ID"
       else
-        echo "error: steer to remote secondmate $TARGET_REMOTE_ID is unconfirmed (the first transport attempt had unknown completion and the retry failed). Only the correlation-reusing resend below is idempotent and lands on the same remote inbox record:" >&2
+        resend_identity=correlation
+        printf -v resend_assignment 'FM_PENDING_REPLY_EXISTING_CORR=%q' "$PENDING_REPLY_CORR"
       fi
+      echo "error: steer to $TARGET_REMOTE_NOUN $TARGET_REMOTE_ID is unconfirmed ($unconfirmed_cause). Only the $resend_identity-reusing resend below is idempotent and lands on the same remote inbox record:" >&2
       resend_home=$(cd "$FM_HOME" 2>/dev/null && pwd) || resend_home=$FM_HOME
       printf 'FM_HOME=%q ' "$resend_home" >&2
       if [ "${FM_STATE_OVERRIDE+x}" = x ]; then
         resend_state=$(cd "$STATE" 2>/dev/null && pwd) || resend_state=$STATE
         printf 'FM_STATE_OVERRIDE=%q ' "$resend_state" >&2
       fi
-      printf 'FM_PENDING_REPLY_EXISTING_CORR=%q %q' "$PENDING_REPLY_CORR" "$SCRIPT_DIR/fm-send.sh" >&2
+      printf '%s %q' "$resend_assignment" "$SCRIPT_DIR/fm-send.sh" >&2
       for resend_arg in "${FM_SEND_ORIGINAL_ARGS[@]}"; do
         printf ' %q' "$resend_arg" >&2
       done
@@ -1018,7 +1061,7 @@ else
     if [ "$remote_rc" -ne 0 ]; then
       fm_send_known_undelivered_cleanup ||
         echo "error: known-undelivered pending-reply state could not be reset for $TARGET_TASK_ID" >&2
-      echo "error: steer not sent to remote secondmate $TARGET_REMOTE_ID (the remote steering-inbox record could not be written; the remote leg's stderr above has the reason)" >&2
+      echo "error: steer not sent to $TARGET_REMOTE_NOUN $TARGET_REMOTE_ID (the remote steering-inbox record could not be written; the remote leg's stderr above has the reason)" >&2
       exit 1
     fi
     # The remote record is durable delivery, exactly as a local enqueue is.

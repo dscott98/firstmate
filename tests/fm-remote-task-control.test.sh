@@ -688,7 +688,7 @@ test_read_verbs_report_the_endpoint() {
   case "$(route_value "$out" worktree_write)" in ''|*[!0-9]*) fail "observe worktree_write is not an epoch" ;; esac
   assert_equals none "$(route_value "$out" inbox_oldest)" "no steer is waiting"
 
-  run_control send "$ID" "rebase onto main" >/dev/null 2>&1 || fail "send failed"
+  run_control send "$ID" "rebase onto main" 0123456789abcdef >/dev/null 2>&1 || fail "send failed"
   out=$(run_control observe "$ID" 2>&1)
   assert_equals 001.msg "$(route_value "$out" inbox_oldest)" "observe names the oldest unacknowledged steer"
   case "$(route_value "$out" inbox_oldest_at)" in ''|*[!0-9]*) fail "observe inbox_oldest_at is not an epoch" ;; esac
@@ -736,27 +736,39 @@ test_read_verbs_report_the_endpoint() {
 }
 
 test_send_writes_one_durable_record_per_steer() {
-  local out rc inbox
+  local out rc inbox steer=$'rebase onto main\nthen rerun the suite'
+  local first=0123456789abcdef second=fedcba9876543210 third=00112233445566aa
   new_case send
   provision_ship claude
-  out=$(run_control send "$ID" "too early" 2>&1); rc=$?
+  out=$(run_control send "$ID" "too early" "$first" 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "a steer for a task with no worker was accepted"
   launch_ready
   run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
   inbox="$TASK_HOME/state/$ID.inbox"
-  run_control send "$ID" $'rebase onto main\nthen rerun the suite' >/dev/null 2>&1 || fail "send failed"
+  run_control send "$ID" "$steer" "$first" >/dev/null 2>&1 || fail "send failed"
   assert_present "$inbox/001.msg" "the steer is a durable record in the task's inbox"
-  assert_contains "$(cat "$inbox/001.msg")" $'rebase onto main\nthen rerun the suite' "the record keeps the whole message"
-  run_control send "$ID" $'rebase onto main\nthen rerun the suite' >/dev/null 2>&1 || fail "a repeated send failed"
-  assert_absent "$inbox/002.msg" "a repeated steer lands on its existing record"
-  run_control send "$ID" "a second steer" >/dev/null 2>&1 || fail "a second send failed"
+  assert_contains "$(cat "$inbox/001.msg")" "$steer" "the record keeps the whole message"
+  assert_contains "$(cat "$inbox/001.msg")" "request=$first" "the record carries the steer's request id"
+  run_control send "$ID" "$steer" "$first" >/dev/null 2>&1 || fail "a retried send failed"
+  assert_absent "$inbox/002.msg" "a retry of the same request lands on its existing record"
+  run_control send "$ID" "a second steer" "$second" >/dev/null 2>&1 || fail "a second send failed"
   assert_present "$inbox/002.msg" "a new steer gets a new record"
   mv "$inbox/001.msg" "$inbox/handled/"
-  out=$(run_control send "$ID" $'rebase onto main\nthen rerun the suite' 2>&1) || fail "resending an acknowledged steer failed"
-  assert_contains "$out" "already delivered and acknowledged" "an acknowledged steer is not delivered twice"
+  out=$(run_control send "$ID" "$steer" "$first" 2>&1) || fail "retrying an acknowledged request failed"
+  assert_contains "$out" "already delivered and acknowledged" "a retried request is not delivered twice"
+  assert_absent "$inbox/003.msg" "a retried acknowledged request writes nothing"
+  run_control send "$ID" "$steer" "$third" >/dev/null 2>&1 || fail "repeating the steer as a new request failed"
+  assert_present "$inbox/003.msg" "the same text under a new request id is a new instruction"
+  out=$(run_control send "$ID" "a different steer" "$first" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a request id already keying another steer was accepted"
+  assert_contains "$out" "request id $first already keys a different steer" "the conflict names the request id"
+  assert_absent "$inbox/004.msg" "a conflicting request writes nothing"
+  out=$(run_control send "$ID" "x" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a steer without a request id was accepted"
   out=$(run_control send "$ID" "x" bogus 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "an unknown delivery mode was accepted"
-  pass "send writes one idempotent record per steer into the task's own inbox"
+  [ "$rc" -ne 0 ] || fail "a malformed request id was accepted"
+  assert_contains "$out" "16 lowercase hex characters" "the refusal names the request id shape"
+  pass "send writes one idempotent record per request into the task's own inbox"
 }
 
 test_brief_update_replaces_the_brief_only_for_this_home() {

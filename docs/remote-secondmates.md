@@ -577,18 +577,21 @@ It is never a gate on the stream, so no single line can stop or wedge the relay 
 
 ### When an offered document cannot be fetched
 
-If the confined remote reader cannot deliver an offered document, the channel fails open instead of stalling the stream:
+The primary bounds both document bytes and stderr locally and imposes a transfer deadline; [`fetch_remote_file` in the mirror adapter](../bin/fm-procevent-remote-reply.sh) owns the limits and timeout setting.
+If the confined remote reader refuses an offered document, or the transfer exceeds those bounds, the channel fails open instead of stalling the stream:
 
 - The mate's line is mirrored with its original pointer.
 - The cursor still advances.
-- The adapter appends one unkeyed note carrying the reader's own reason.
+- The adapter appends one unkeyed note carrying the refusal reason.
 
 That note never enters the open-decision fold, because the reader cannot tell a report that is still being written from one that will never exist.
 A decision raised on that ambiguity could stand open describing a transfer that later succeeded.
 
 A refused document is not re-attempted automatically.
 It stays on the remote, and a later structured offer of the same path fetches it.
-An SSH exit status of 255 while fetching a referenced document leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
+An SSH exit status of 255 leaves the delta uncommitted for the process-event runner's normal retry, because remote completion is unknown.
+Any primary-side setup, execution, or storage failure also leaves the delta uncommitted for retry and preserves an existing local document; a missing local helper is not a remote refusal.
+Only a successful, complete transfer replaces the local document.
 
 ### Reply settlement
 

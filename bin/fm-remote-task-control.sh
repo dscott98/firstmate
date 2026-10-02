@@ -7,7 +7,7 @@
 #   fm-remote-task-control.sh state <id>
 #   fm-remote-task-control.sh observe <id>
 #   fm-remote-task-control.sh capture <id> [lines]
-#   fm-remote-task-control.sh send <id> <message> [fire-and-forget]
+#   fm-remote-task-control.sh send <id> <message> <request-id>
 #   fm-remote-task-control.sh key <id> <key>
 #   fm-remote-task-control.sh crew-state <id>
 #   fm-remote-task-control.sh head <id>
@@ -103,13 +103,19 @@
 # capture, send, and key match the secondmate control script: a bounded pane
 # capture, a steer written idempotently into the task's own steering inbox and
 # announced by its doorbell (bin/fm-task-inbox-lib.sh), and one named key
-# through fm-send.sh.
+# through fm-send.sh. A task steer carries no correlation token, so send takes
+# the 16-hex request id the primary minted for it: a retry of that request
+# lands on its existing record, even one already acknowledged, while an
+# identical steer under a new id is a new record, and an id already keying a
+# different steer is refused.
 #
 # crew-state prints crew_state, this host's fm-crew-state.sh line computed with
 # the status log left out - its run-step attribution or its pane fallback -
 # because the primary's mirrored status log is the authoritative fold, plus
-# busy and busy_source. head prints branch (empty when detached), head, and
-# dirty (yes for any uncommitted or untracked change).
+# busy and busy_source. The read runs with FM_CREW_STATE_FOR_PRIMARY=1, so a
+# working run that is fixing or whose CI is not ready says so as its own
+# component for the primary's reconciliation. head prints branch (empty when
+# detached), head, and dirty (yes for any uncommitted or untracked change).
 #
 # control runs this host's fm-control.sh. interrupt and exit relay its output
 # and status. relaunch keeps the recorded harness, model, or effort given as -,
@@ -837,8 +843,8 @@ cmd_capture() {
 # A steer is a durable record, never text typed into the pane; the record and
 # doorbell are bin/fm-task-inbox-lib.sh's, exactly as for a remote secondmate.
 cmd_send() {
-  local id=$1 message=$2 delivery_mode=${3:-} rec ring_rc=0 meta_lock
-  [ -z "$delivery_mode" ] || [ "$delivery_mode" = fire-and-forget ] || die "invalid send delivery mode"
+  local id=$1 message=$2 request=$3 rec write_rc=0 ring_rc=0 meta_lock
+  fm_task_inbox_request_id_valid "$request" || die "send needs the steer's request id: 16 lowercase hex characters"
   meta_lock=$(fm_meta_lock_path "$TARGET_HOME/state/$id.meta") || die "the task metadata lock path is invalid"
   fm_task_inbox_lock_acquire "$meta_lock" \
     || die "the task endpoint record could not be locked for final delivery validation"
@@ -846,11 +852,12 @@ cmd_send() {
     fm_lock_release "$meta_lock"
     die "$EP_ERROR"
   fi
-  if ! rec=$(fm_task_inbox_write_idempotent "$TARGET_HOME/state" "$id" "$message" "$delivery_mode"); then
-    fm_lock_release "$meta_lock"
-    die "the steering-inbox record could not be written under $TARGET_HOME/state/$id.inbox"
-  fi
+  rec=$(fm_task_inbox_write_idempotent "$TARGET_HOME/state" "$id" "$message" '' "$request") || write_rc=$?
   fm_lock_release "$meta_lock"
+  if [ "$write_rc" -eq 2 ]; then
+    die "request id $request already keys a different steer in $TARGET_HOME/state/$id.inbox; nothing was written"
+  fi
+  [ "$write_rc" -eq 0 ] || die "the steering-inbox record could not be written under $TARGET_HOME/state/$id.inbox"
   case "$rec" in
     */handled/*)
       printf 'notice: this steer was already delivered and acknowledged at %s; nothing re-rung\n' "$rec" >&2
@@ -875,7 +882,7 @@ cmd_crew_state() {
   local id=$1 empty line verdict='unknown no-record' tail40=''
   empty=$(mktemp "${TMPDIR:-/tmp}/fm-task-crew-state.XXXXXX") || die "cannot stage the empty status log"
 
-  line=$(FM_CREW_STATE_STATUS_OVERRIDE="$empty" run_host fm-crew-state.sh "$id" 2>/dev/null) || line=
+  line=$(FM_CREW_STATE_STATUS_OVERRIDE="$empty" FM_CREW_STATE_FOR_PRIMARY=1 run_host fm-crew-state.sh "$id" 2>/dev/null) || line=
   rm -f -- "$empty"
   line=$(printf '%s\n' "$line" | tail -1)
   [ -n "$line" ] || line='state: unknown · source: none · crew state unreadable on the sandbox host'
@@ -1040,7 +1047,7 @@ case "$VERB" in
   state) [ "$#" -eq 1 ] || usage; cmd_state "$1" ;;
   observe) [ "$#" -eq 1 ] || usage; cmd_observe "$1" ;;
   capture) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_capture "$@" ;;
-  send) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || usage; cmd_send "$@" ;;
+  send) [ "$#" -eq 3 ] || usage; cmd_send "$@" ;;
   key) [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
   crew-state) [ "$#" -eq 1 ] || usage; cmd_crew_state "$1" ;;
   head) [ "$#" -eq 1 ] || usage; cmd_head "$1" ;;

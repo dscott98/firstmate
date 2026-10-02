@@ -1347,6 +1347,11 @@ EOF
   assert_contains "$out" "state: working" "a stale ready status must not mask a later CI relapse"
   assert_contains "$out" "source: run-step" "relapsed ci run remains run-step sourced"
   assert_not_contains "$out" "state: done" "relapsed ci run with stale done log must not read as done"
+  : > "$d/empty.status"
+  out=$(FM_CREW_STATE_STATUS_OVERRIDE="$d/empty.status" FM_CREW_STATE_FOR_PRIMARY=1 run_crew_state "$d" feat-cireadyrelapse)
+  assert_contains "$out" 'CI not ready' 'a sandbox host read carries CI relapse without its status log'
+  out=$(FM_CREW_STATE_STATUS_OVERRIDE="$d/empty.status" run_crew_state "$d" feat-cireadyrelapse)
+  assert_not_contains "$out" 'CI not ready' 'a fleet-snapshot style read must stay unchanged'
   pass "stale checks-green status log does not mask CI relapse"
 }
 
@@ -3258,6 +3263,196 @@ test_remote_dead_reports_remote_verdict() {
   assert_contains "$out" "remote endpoint dead on remote-mac" \
     "a genuinely dead remote endpoint reports the remote host's own verdict"
   pass "fm-crew-state remote: the remote host's own dead verdict is reported truthfully"
+}
+
+# --- sandbox task arm ----------------------------------------------------------
+# A sandbox task's worktree, runs, and pane live on its sandbox host, and this
+# home's mirrored status log is its authoritative fold. These cases drive the
+# real helper over the real fm-on.sh task route with a stubbed ssh transport
+# that prints FM_FAKE_SANDBOX_BLOCK as the host's crew-state block and exits
+# FM_FAKE_SSH_RC, and they pin how the host's run-step and busy components
+# compose with the local fold. The recorded worktree never exists locally.
+
+setup_sandbox_case() {  # <name> [kind] -> echoes case dir with a sandbox task record
+  local d kind=${2:-ship}
+  d=$(new_case "$1")
+  mkdir -p "$d/data" "$d/fakebin"
+  fm_write_meta "$d/state/sbx.meta" \
+    "window=remote:sbx" "endpoint_task_id=sbx" "worktree=/home/agent/fm-home/never-locally-present" \
+    "project=$d/projects/alpha" "harness=pi" "kind=$kind" "tasktmp=" "model=minimax/m2" "effort=default" \
+    "placement=sandbox" "remote_kind=task" "remote_host=sbx-host" "remote_root=/opt/firstmate" \
+    "remote_home=/home/agent/fm-home" "remote_backend=tmux" "remote_target=firstmate:fm-sbx" \
+    "sandbox_provider=pve-sandbox" "sandbox_name=sbx-1" "sandbox_profile=default"
+  if [ "$kind" = ship ]; then
+    printf '%s\n' "mode=direct-PR" "yolo=off" "branch=fm/sbx" >> "$d/state/sbx.meta"
+  fi
+  cat > "$d/fakebin/fake-ssh" <<'SH'
+#!/usr/bin/env bash
+cat > /dev/null
+while [ "$#" -gt 0 ]; do case "$1" in -o) shift 2 ;; --) shift; break ;; *) break ;; esac; done
+{ printf '%s ' "$1"; printf '%s' "${6:-}" | base64 --decode | tr '\0' ' '; printf '\n'; } >> "$FM_FAKE_SSH_ARGV"
+case "${FM_FAKE_SANDBOX_STREAM:-}" in
+  oversized) head -c 65537 /dev/zero; exit 0 ;;
+  endless) exec yes x ;;
+  stalled) exec sleep 60 ;;
+esac
+[ -z "${FM_FAKE_SANDBOX_BLOCK:-}" ] || printf '%s\n' "$FM_FAKE_SANDBOX_BLOCK"
+exit "${FM_FAKE_SSH_RC:-0}"
+SH
+  chmod +x "$d/fakebin/fake-ssh"
+  printf '%s\n' "$d"
+}
+
+sandbox_block() {  # <crew_state line> <busy> <busy_source>
+  printf 'schema=fm-remote-task-control.v1\ncrew_state=%s\nbusy=%s\nbusy_source=%s' "$1" "$2" "$3"
+}
+
+run_sandbox_crew_state() {  # <case-dir>
+  PATH="$1/fakebin:$PATH" FM_HOME="$1" FM_STATE_OVERRIDE="$1/state" FM_CREW_STATE_NO_FORGE=1 \
+    FM_SSH_BIN="$1/fakebin/fake-ssh" FM_FAKE_SSH_ARGV="$1/ssh-argv" "$CREW_STATE" sbx
+}
+
+test_sandbox_crew_state_reads_the_host_and_never_the_local_worktree() {
+  reset_fakes
+  local d out rc
+  d=$(setup_sandbox_case sandbox-idle-decision)
+  make_fakebin "$d" >/dev/null
+  printf 'needs-decision [key=base]: keep or drop the shim?\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: none · no current-state source available' idle pi-ext) \
+    run_sandbox_crew_state "$d"); rc=$?
+  expect_code 0 "$rc" "sandbox crew-state exits 0"
+  assert_contains "$out" "state: parked · source: status-log · keep or drop the shim? · sandbox host sbx-host" \
+    "an idle sandbox worker with an open local decision reads parked from this home's fold"
+  assert_not_contains "$out" "worktree gone" "the VM's worktree must never be probed locally"
+  assert_equals "sbx-host fm-remote-task-control.sh crew-state sbx " "$(cat "$d/ssh-argv")" \
+    "the read crosses once to the task's own host and its crew-state verb"
+  printf 'resolved [key=base]: answered: drop it\n' >> "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: none · no current-state source available' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: unknown · source: none · no current-state source available · sandbox host sbx-host" \
+    "this home's resolved line closes the decision whatever the host's own log holds"
+  pass "fm-crew-state sandbox: an idle worker reads from this home's authoritative fold"
+}
+
+test_sandbox_crew_state_host_run_step_reconciles_with_the_local_fold() {
+  reset_fakes
+  local d out
+  d=$(setup_sandbox_case sandbox-run-step)
+  make_fakebin "$d" >/dev/null
+  printf 'needs-decision [key=nm-r1-review]: ask-user findings=f1 file=x\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: parked · source: run-step · parked at review: 1 finding(s) · ask-user: authority decision · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: parked · source: run-step · parked at review: 1 finding(s) · ask-user: authority decision · run: r1 · sandbox host sbx-host" \
+    "a parked host run agrees with the open local decision and keeps its gate components"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: run-step · validating (fixing) · run: r1' busy pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: working · source: run-step · validating (fixing) · run: r1 · status-log superseded by active run · sandbox host sbx-host" \
+    "a host run that moved past the decision flags the local declaration superseded"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: run-step · no-mistakes daemon unreachable; last run record running - unverified · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: parked · source: status-log · ask-user findings=f1 file=x · run-step unknown on sandbox host sbx-host: no-mistakes daemon unreachable" \
+    "an unknown host run cannot close an open local decision"
+  printf 'blocked [at=1700000000]: no-mistakes daemon socket refused connection\n' >> "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: done · source: run-step · run completed · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: blocked · source: status-log · no-mistakes daemon socket refused connection · daemon socket down despite attributed run record · sandbox host sbx-host" \
+    "a refused-socket blocker at the log's tip still reads blocked"
+  pass "fm-crew-state sandbox: a host run-step is authoritative and reconciles with the local fold"
+}
+
+test_sandbox_ci_ready_log_reconciles_monitoring_run() {
+  reset_fakes
+  local d out detail
+  d=$(setup_sandbox_case sandbox-ci-ready)
+  sed 's/^mode=direct-PR$/mode=no-mistakes/' "$d/state/sbx.meta" > "$d/state/sbx.meta.tmp"
+  mv "$d/state/sbx.meta.tmp" "$d/state/sbx.meta"
+  printf 'done: PR https://github.com/o/r/pull/2 checks green\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: run-step · ci running · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" 'state: blocked · source: status-log' 'CI-ready done still needs a recorded PR'
+  assert_contains "$out" 'sandbox host sbx-host' 'the refusal names the sandbox host'
+  printf 'pr=https://github.com/o/r/pull/2\npr_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' >> "$d/state/sbx.meta"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: run-step · ci running · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" 'state: done · source: status-log' 'mirrored CI-ready done beats monitoring'
+  for detail in 'validating (fixing)' 'ci running · CI not ready'; do
+    out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block "state: working · source: run-step · $detail · run: r1" busy pi-ext) \
+      run_sandbox_crew_state "$d")
+    assert_contains "$out" 'state: working · source: run-step' 'CI relapse supersedes a stale ready claim'
+  done
+  pass "sandbox CI-ready reconciliation preserves the done gate and relapse safeguards"
+}
+
+test_sandbox_crew_state_busy_component_and_done_gate() {
+  reset_fakes
+  local d out
+  d=$(setup_sandbox_case sandbox-busy)
+  make_fakebin "$d" >/dev/null
+  printf 'working: refactoring\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: working · source: pane · harness busy (pi-ext) · sandbox host sbx-host" \
+    "a busy sandbox worker reads working from the host's busy component"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: none · backend target gone: firstmate:fm-sbx' dead endpoint-gone) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: unknown · source: remote-endpoint · endpoint gone on sandbox host sbx-host (endpoint-gone)" \
+    "the host's own endpoint-gone verdict reads unknown with its reason"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: pane · harness state unavailable (unknown unreadable)' unknown unreadable) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: unknown · source: pane · harness state unavailable (unknown unreadable) · sandbox host sbx-host" \
+    "an unknown host busy verdict reads unknown"
+  printf 'done [at=1700000000]: PR https://github.com/acme/alpha/pull/7 opened\n' >> "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: none · no current-state source available' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: blocked · source: status-log · named head cannot be verified from this home: no PR recorded here carries it, and task sbx's worktree is on sandbox host sbx-host" \
+    "a sandbox ship's done claim is not current-state done without a PR recorded here"
+  d=$(setup_sandbox_case sandbox-scout-done scout)
+  printf 'done [at=1700000000]: report ready\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: unknown · source: none · no current-state source available' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: done · source: status-log · report ready · sandbox host sbx-host" \
+    "an idle sandbox scout's done reads done"
+  pass "fm-crew-state sandbox: the host's busy component composes, and a ship's done needs this home's PR record"
+}
+
+test_sandbox_crew_state_bounds_remote_output() {
+  local d mode out start
+  d=$(setup_sandbox_case sandbox-bounded)
+  for mode in oversized endless stalled; do
+    start=$SECONDS
+    out=$(FM_FAKE_SANDBOX_STREAM=$mode FM_CREW_STATE_REMOTE_SECONDS=1 run_sandbox_crew_state "$d")
+    assert_contains "$out" "unknown-remote:" "$mode host output is unknown"
+    assert_contains "$out" "not proof of death" "$mode host output is never death"
+    [ "$((SECONDS - start))" -lt 8 ] || fail "$mode host output exceeded the read budget"
+  done
+  pass "sandbox crew-state bounds remote bytes and duration"
+}
+
+test_sandbox_crew_state_unreachable_or_untrusted_host_is_unknown() {
+  reset_fakes
+  local d out block
+  d=$(setup_sandbox_case sandbox-untrusted)
+  make_fakebin "$d" >/dev/null
+  printf 'working: refactoring\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SSH_RC=255 run_sandbox_crew_state "$d")
+  assert_contains "$out" "state: unknown · source: remote-endpoint · unknown-remote: sbx-host unreachable or crew state unreadable (not proof of death)" \
+    "an unreachable sandbox host reads unknown-remote, never dead"
+  for block in \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy pi-ext | sed '/^busy=/d')" \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy pi-ext)"$'\nextra=1' \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy pi-ext)"$'\nbusy=idle' \
+    "$(sandbox_block 'state: sleeping · source: pane · zzz' busy pi-ext)" \
+    "$(sandbox_block 'state: working · source: telepathy · trust me' busy pi-ext)" \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' certainly pi-ext)" \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy 'pi ext')" \
+    "$(sandbox_block "state: working · source: pane · $(printf 'bell\aring')" busy pi-ext)" \
+    "$(sandbox_block 'state: working · source: pane · harness busy (pi-ext)' busy pi-ext | sed 's/^schema=.*/schema=other.v9/')"; do
+    out=$(FM_FAKE_SANDBOX_BLOCK=$block run_sandbox_crew_state "$d")
+    assert_contains "$out" "state: unknown · source: remote-endpoint · unknown-remote: sbx-host returned an unusable crew-state block" \
+      "a crew-state block failing validation reads unknown-remote: $block"
+    assert_contains "$out" "(not proof of death)" "an unusable block is not a death claim"
+  done
+  pass "fm-crew-state sandbox: an unreachable host or an unusable block reads unknown-remote"
 }
 
 test_missing_meta() {
@@ -5604,6 +5799,12 @@ test_remote_alive_with_log_uses_status_log
 test_remote_alive_idle_is_healthy_not_gone
 test_remote_unreachable_is_unknown_remote_not_dead
 test_remote_dead_reports_remote_verdict
+test_sandbox_crew_state_reads_the_host_and_never_the_local_worktree
+test_sandbox_crew_state_host_run_step_reconciles_with_the_local_fold
+test_sandbox_ci_ready_log_reconciles_monitoring_run
+test_sandbox_crew_state_busy_component_and_done_gate
+test_sandbox_crew_state_bounds_remote_output
+test_sandbox_crew_state_unreachable_or_untrusted_host_is_unknown
 test_missing_meta
 test_provably_working_via_runs_list_fallback
 test_not_provably_working_when_stopped
