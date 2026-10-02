@@ -1167,20 +1167,33 @@ test_container_ensure_refuses_an_ambiguous_home_label() {
 test_container_ensure_starts_server_and_workspace() {
   local dir log resp fb out
   dir="$TMP_ROOT/container"; mkdir -p "$dir/responses"; log="$dir/log"; resp="$dir/responses"; : > "$log"
-  # 1: version_check status --json (server not running yet, irrelevant to client check)
-  printf '{"client":{"version":"0.7.1","protocol":14}}\n' > "$resp/1.out"
-  # 2: server_ensure's status --json check -> not running
-  printf '{"server":{"running":false}}\n' > "$resp/2.out"
-  # 3: `herdr server` backgrounded launch - no meaningful output
-  # 4: server_ensure poll -> now running
-  printf '{"server":{"running":true}}\n' > "$resp/4.out"
-  # 5: workspace list -> empty (no "firstmate" workspace yet)
-  printf '{"result":{"workspaces":[]}}\n' > "$resp/5.out"
-  # 6: workspace create -> w1, seeding default tab w1:t9 (real herdr returns
-  # the seeded tab/pane ids in the SAME response - verified empirically).
-  printf '{"result":{"workspace":{"workspace_id":"w1","label":"firstmate"},"tab":{"tab_id":"w1:t9"},"root_pane":{"pane_id":"w1:p9"}}}\n' > "$resp/6.out"
-  fb=$(make_herdr_fakebin "$dir")
-  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" FM_HERDR_SCRIPT_STATUS=1 HERDR_SESSION=fmtest \
+  # Server startup races with status polling. Model its state instead of
+  # assigning responses by call number, which assumes a scheduling order.
+  fb="$dir/fakebin"; mkdir -p "$fb"
+  cat > "$fb/herdr" <<'SH'
+#!/usr/bin/env bash
+set -eu
+{
+  printf 'HERDR_SESSION=%s' "${HERDR_SESSION:-}"
+  for a in "$@"; do printf '\x1f%s' "$a"; done
+  printf '\n'
+} >> "$FM_HERDR_LOG"
+case "$1 ${2:-}" in
+  'status --json')
+    running=false
+    [ ! -e "$FM_HERDR_RESPONSES/running" ] || running=true
+    printf '{"client":{"version":"0.7.1","protocol":14},"server":{"running":%s}}\n' "$running"
+    ;;
+  'server --session') : > "$FM_HERDR_RESPONSES/running" ;;
+  'workspace list') printf '{"result":{"workspaces":[]}}\n' ;;
+  'workspace create')
+    printf '{"result":{"workspace":{"workspace_id":"w1","label":"firstmate"},"tab":{"tab_id":"w1:t9"},"root_pane":{"pane_id":"w1:p9"}}}\n'
+    ;;
+  *) exit 1 ;;
+esac
+SH
+  chmod +x "$fb/herdr"
+  out=$( PATH="$fb:$PATH" FM_HERDR_LOG="$log" FM_HERDR_RESPONSES="$resp" HERDR_SESSION=fmtest \
     bash -c '. "$0/bin/backends/herdr.sh"; fm_backend_herdr_container_ensure /tmp' "$ROOT" )
   [ "$out" = $'fmtest:w1\tw1:t9' ] || fail "container_ensure should echo '<session>:<workspace_id>\\t<seeded_default_tab_id>', got '$out'"
   assert_contains "$(cat "$log")" "HERDR_SESSION=fmtest"$'\x1f''server' "container_ensure did not start the herdr server"

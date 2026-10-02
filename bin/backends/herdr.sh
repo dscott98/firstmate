@@ -394,7 +394,10 @@ fm_backend_herdr_cli() {  # <session> <herdr-subcommand-and-args...>
   # refusal can be recognized and retried once on a compatible client; see
   # "client selection" below. A failed command's stderr is replayed verbatim.
   # The long-lived `server` launch is exec'd straight through: buffering its
-  # stderr would hold this call open for the server's whole lifetime.
+  # stderr would hold this call open for the server's whole lifetime. The
+  # DETACHED server launch is fm_backend_herdr_server_ensure's to make: it
+  # execs the resolved client in place so Bash closes its saved caller output
+  # descriptors without leaving a persistent shell wrapper.
   if [ "${1:-}" = server ]; then
     HERDR_SESSION="$session" "$client_bin" "$@" --session "$session"
     return $?
@@ -1653,15 +1656,33 @@ fm_backend_herdr_projection_order_best_effort() {  # <session> <created-workspac
 # every later pane, so remove home, harness identity, and supervision selection
 # inherited from whichever agent happened to start it. Bounded poll for the
 # server to report running.
+#
+# Exec the server inside the async fork: a persistent shell wrapper would
+# retain Bash's close-on-exec saves of the caller's stdout/stderr during a
+# redirected function call and prevent capturing readers from reaching EOF.
+# Exec closes those saves; standard input/output/error use /dev/null.
+# setsid additionally separates the session and process group when available;
+# plain exec preserves the descriptor fix without that session isolation.
+# Regression: tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh.
 fm_backend_herdr_server_ensure() {  # <session>
-  local session=$1 running out i
+  local session=$1 running i client_bin
   running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
   [ "$running" = "true" ] && return 0
+  # Resolve the client the same way fm_backend_herdr_cli would, before the
+  # launch fork: the launcher must exec the resolved binary directly, and a
+  # late resolution would need a live shell around it again.
+  client_bin=herdr
+  if [ "${FM_BACKEND_HERDR_CLIENT_SESSION:-}" = "$session" ]; then
+    client_bin=$(fm_backend_herdr_bin)
+  fi
   (
     unset FM_HOME FM_ROOT_OVERRIDE FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE \
       CURSOR_AGENT CURSOR_INVOKED_AS CLAUDECODE PI_CODING_AGENT FM_PI_HARNESS GROK_AGENT FM_SUPERVISION_MODEL
-    fm_backend_herdr_cli "$session" server >/dev/null 2>&1 &
-  ) || return 1
+    if command -v setsid >/dev/null 2>&1; then
+      HERDR_SESSION="$session" exec setsid "$client_bin" server --session "$session" >/dev/null 2>&1
+    fi
+    HERDR_SESSION="$session" exec "$client_bin" server --session "$session" >/dev/null 2>&1
+  ) &
   for i in $(seq 1 20); do
     running=$(fm_backend_herdr_cli "$session" status --json 2>/dev/null | jq -r '.server.running // false' 2>/dev/null)
     [ "$running" = "true" ] && return 0

@@ -327,6 +327,7 @@ family_for_basename() {
     fm-backend-herdr-focus-flash-e2e.test.sh|\
     fm-backend-herdr-stale-active-tab-e2e.test.sh|\
     fm-backend-herdr-agent-exit-shell-e2e.test.sh|\
+    fm-backend-herdr-server-ensure-detach-e2e.test.sh|\
     fm-herdr-attached-viewer-live-e2e.test.sh|fm-herdr-session-cleanup-e2e.test.sh|\
     fm-backend-herdr-smoke.test.sh|fm-backend-herdr-workspace-per-home-e2e.test.sh|\
     fm-control-herdr-smoke.test.sh)
@@ -1653,7 +1654,7 @@ families_for_changed_path() {
     bin/fm-lint.sh|bin/fm-lint-workflows.sh|bin/fm-install-shellcheck.sh|\
     bin/fm-install-actionlint.sh|\
     bin/fm-brief.sh|bin/fm-ensure-agents-md.sh|bin/fm-crew-state.sh|\
-    bin/fm-captain-hold.sh|bin/fm-decision-hold.sh|bin/fm-supervision*|bin/fm-transition-lib.sh|\
+    bin/fm-captain-hold.sh|bin/fm-hold-reason-lib.sh|bin/fm-decision-hold.sh|bin/fm-supervision*|bin/fm-transition-lib.sh|\
     bin/fm-tmux-lib.sh|bin/fm-marker-lib.sh|bin/fm-operational-input.sh|bin/fm-tasks-axi-lib.sh|\
     bin/fm-vendor-auth-probe.sh|\
     bin/fm-primary-scope-lib.sh|bin/fm-project-mode.sh|bin/fm-forge-detect.sh|bin/fm-promote.sh|\

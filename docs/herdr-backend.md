@@ -515,10 +515,15 @@ Workspace and tab ids support verification and cleanup but are not inferred from
 ### Named server and session routing
 
 The adapter starts and polls a named server before workspace, tab, pane, or agent calls.
-Every Herdr invocation goes through `fm_backend_herdr_cli`, which sets the environment and passes an explicit trailing `--session <name>`.
+Herdr commands use `fm_backend_herdr_cli`, except server startup, which directly execs the selected client.
+Both paths set `HERDR_SESSION` and pass an explicit trailing `--session <name>`.
 An environment variable alone is not reliable when another Herdr server is running.
 
-When the selected named server is not running, the adapter launches it without these inherited values:
+When the selected named server is not running, the adapter starts it in the background without retaining the caller's captured stdout/stderr, allowing remote-doctor output capture to finish while the server stays running.
+Where `setsid` is available, startup also creates a separate session and process group; the portable plain-`exec` fallback does not provide that isolation.
+The launch invariant is documented beside `fm_backend_herdr_server_ensure` in [`bin/backends/herdr.sh`](../bin/backends/herdr.sh); [detached-launch verification](verification/runtime-backends.md#detached-server-launch-no-caller-descriptors) owns the regression evidence.
+
+The launch happens without these inherited values:
 
 - Firstmate home and directory overrides.
 - Harness identity markers.
