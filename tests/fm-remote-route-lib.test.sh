@@ -7,10 +7,12 @@
 # refuses. The consumer cases run the real fm-peek.sh, fm-send.sh,
 # fm-control.sh, fm-teardown.sh, and fm-crew-state.sh, the secondmate liveness
 # probe, and the watcher's foreign-queue stall tick against a home that holds a
-# sandbox task record, with a logging ssh, tmux, and herdr first on PATH. Each
-# consumer refuses with the library's named reason, reaches neither the remote
-# transport nor a local backend, and leaves the record byte-identical, so a
-# sandbox task can never fall into secondmate-only code or be read as local.
+# sandbox task record, with a logging, always-failing ssh, tmux, and herdr first
+# on PATH. Peek, steering, and the current-state read cross only the transport
+# to the task's own host and fail loudly when it fails; every other consumer
+# refuses with the library's named reason and reaches neither the transport nor
+# a local backend. All leave the record byte-identical, so a sandbox task can
+# never fall into secondmate-only code or be read as local.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -236,7 +238,7 @@ test_shape_check_and_refusal_wording() {
   pass "the shape check and the unsupported-verb refusal speak for every consumer"
 }
 
-# --- consumers: a sandbox task record is refused everywhere --------------------
+# --- consumers: a sandbox task routes to its host or is refused -------------
 
 HOME_DIR="$TMP_ROOT/home"
 STATE_DIR="$HOME_DIR/state"
@@ -273,30 +275,55 @@ assert_untouched() { # <label>
   assert_absent "$STATE_DIR/t1.inbox" "$1 created a steering inbox for the sandbox task"
 }
 
-test_peek_refuses_a_sandbox_task() {
-  run_consumer fm-peek.sh t1
-  expect_code 1 "$RC" "peek of a sandbox task by id"
-  assert_contains "$OUT" "task t1 runs in a sandbox on sbx-t1; reading its pane is not supported" "peek names the refusal"
-  run_consumer fm-peek.sh fm-t1
-  expect_code 1 "$RC" "peek of a sandbox task by its fm- label"
-  run_consumer fm-peek.sh remote:t1
-  expect_code 1 "$RC" "peek of a sandbox task by its recorded window"
-  assert_contains "$OUT" "reading its pane is not supported" "peek by window names the refusal"
-  assert_untouched "peek"
-  pass "fm-peek refuses a sandbox task by id, label, or recorded window"
+# A routed read or steer crosses only the transport, to the task's own host.
+# The logging ssh fails every call, so the consumer must fail loudly too, and
+# the log is reset for the next case.
+assert_routed_only() { # <label> <expected-calls>
+  local calls
+  calls=$(grep -c '^ssh ' "$CALL_LOG" 2>/dev/null || true)
+  assert_equals "$2" "$calls" "$1 did not cross the transport exactly as expected"
+  if grep -v '^ssh ' "$CALL_LOG" | grep -q .; then
+    fail "$1 reached a local backend:"$'\n'"$(cat "$CALL_LOG")"
+  fi
+  if grep '^ssh ' "$CALL_LOG" | grep -qv -- '-- sbx-t1 fm-remote-entrypoint.sh '; then
+    fail "$1 reached a host other than the task's own:"$'\n'"$(cat "$CALL_LOG")"
+  fi
+  assert_equals "$TASK_SUM" "$(cksum < "$STATE_DIR/t1.meta")" "$1 changed the sandbox task record"
+  assert_absent "$STATE_DIR/t1.inbox" "$1 created a local steering inbox for the sandbox task"
+  : > "$CALL_LOG"
 }
 
-test_send_refuses_a_sandbox_task() {
+test_peek_routes_a_sandbox_task_by_id() {
+  run_consumer fm-peek.sh t1
+  expect_code 1 "$RC" "peek of a sandbox task whose host fails"
+  assert_contains "$OUT" "could not read the sandbox pane of t1 on sbx-t1" "peek names the task and its host"
+  assert_contains "$OUT" "the task is not thereby dead" "an unreadable sandbox pane is not a death claim"
+  run_consumer fm-peek.sh fm-t1
+  expect_code 1 "$RC" "peek of a sandbox task by its fm- label"
+  assert_routed_only "peek by id and label" 2
+  run_consumer fm-peek.sh remote:t1
+  expect_code 1 "$RC" "peek of a sandbox task by its recorded window"
+  assert_contains "$OUT" "it is the recorded window of sandbox task t1 on sbx-t1; peek the task by its id (t1) instead" \
+    "peek by window names the refusal"
+  assert_untouched "peek by window"
+  pass "fm-peek routes a sandbox task by id or label to its host and refuses its recorded window"
+}
+
+test_send_routes_a_sandbox_task_by_id() {
   run_consumer fm-send.sh t1 'please look at the failing test'
-  expect_code 1 "$RC" "a steer to a sandbox task"
-  assert_contains "$OUT" "steer not sent: task t1 runs in a sandbox on sbx-t1; steering it is not supported" "send names the refusal"
+  expect_code 1 "$RC" "a steer to a sandbox task whose host fails"
+  assert_contains "$OUT" "steer not sent to sandbox task t1 (the remote steering-inbox record could not be written" \
+    "send names the task and the failed remote leg"
   run_consumer fm-send.sh t1 --key Enter
-  expect_code 1 "$RC" "a key to a sandbox task"
+  expect_code 1 "$RC" "a key to a sandbox task whose host fails"
+  assert_contains "$OUT" "key 'Enter' not sent to sandbox task t1" "a key names the task"
+  assert_routed_only "send and key" 2
   run_consumer fm-send.sh remote:t1 'typed at its window'
   expect_code 1 "$RC" "a typed steer at a sandbox task's recorded window"
-  assert_contains "$OUT" "steering it is not supported" "send by window names the refusal"
-  assert_untouched "send"
-  pass "fm-send refuses a sandbox task before anything is recorded or typed"
+  assert_contains "$OUT" "the recorded window of sandbox task t1 on sbx-t1, not an endpoint in this home" \
+    "send by window names the refusal"
+  assert_untouched "send by window"
+  pass "fm-send routes a sandbox task by id to its host and refuses typing at its recorded window"
 }
 
 test_control_refuses_a_sandbox_task() {
@@ -326,15 +353,15 @@ test_teardown_refuses_a_sandbox_task() {
   pass "fm-teardown refuses a sandbox task, even forced, with nothing touched"
 }
 
-test_crew_state_reports_a_sandbox_task_unknown() {
+test_crew_state_routes_a_sandbox_task() {
   run_consumer fm-crew-state.sh t1
   expect_code 0 "$RC" "crew-state of a sandbox task"
-  assert_contains "$OUT" "state: unknown · source: none · task t1 runs in a sandbox on sbx-t1; reading its current state is not supported" \
-    "crew-state reports the sandbox task as unknown with the reason"
+  assert_contains "$OUT" "state: unknown · source: remote-endpoint · unknown-remote: sbx-t1 unreachable" \
+    "crew-state reports an unreachable sandbox host as unknown-remote"
   assert_contains "$OUT" "(not proof of death)" "crew-state never calls the sandbox task dead"
   assert_not_contains "$OUT" "worktree gone" "crew-state must not probe the VM worktree locally"
-  assert_untouched "crew-state"
-  pass "fm-crew-state reports a sandbox task as unknown without probing it"
+  assert_routed_only "crew-state" 1
+  pass "fm-crew-state reads a sandbox task from its host, never locally"
 }
 
 test_invalid_placement_is_refused_by_consumers() {
@@ -420,11 +447,11 @@ test_sandbox_task_record_resolves_to_a_task_route
 test_sandbox_placement_must_be_explicit_and_consistent
 test_sandbox_route_shape_and_disjointness
 test_shape_check_and_refusal_wording
-test_peek_refuses_a_sandbox_task
-test_send_refuses_a_sandbox_task
+test_peek_routes_a_sandbox_task_by_id
+test_send_routes_a_sandbox_task_by_id
 test_control_refuses_a_sandbox_task
 test_teardown_refuses_a_sandbox_task
-test_crew_state_reports_a_sandbox_task_unknown
+test_crew_state_routes_a_sandbox_task
 test_invalid_placement_is_refused_by_consumers
 test_liveness_probe_skips_non_secondmate_routes
 test_watcher_stall_tick_reads_only_local_mate_queues

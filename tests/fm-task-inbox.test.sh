@@ -13,7 +13,8 @@
 #   2. Sequencing dedups per worker lifetime: the handled mv retires a record,
 #      re-acking it is a no-op, and an acknowledged sequence is never reissued.
 #      The idempotent enqueue (the remote steer leg's primitive) additionally
-#      dedups an exact-body re-run onto the existing record, handled or not.
+#      dedups an exact-body re-run onto the existing record, handled or not,
+#      or, for an unmarked steer, a retry carrying the same request id.
 #   3. Concurrent writers serialize on the sequence lock: no clobbered records.
 #   4. The re-ring ladder: within grace is quiet, past grace rings, ring
 #      spacing holds, a spent budget escalates exactly once, and an
@@ -424,6 +425,40 @@ test_idempotent_write_dedups_exact_body() {
   count=$(find "$state/t1.inbox" -maxdepth 1 -name '*.msg' | wc -l | tr -d ' ')
   [ "$count" = 1 ] || fail "a re-run of an acknowledged steer must not re-enqueue it, found $count unhandled records"
   pass "inbox: the idempotent enqueue dedups an exact re-run onto the same record, handled or not"
+}
+
+test_idempotent_write_keys_unmarked_steers_by_request_id() {
+  local state r1 r2 r3 r4 rc count text=$'rerun the suite\nthen report' first=0123456789abcdef second=fedcba9876543210
+  state="$TMP_ROOT/idem-request/state"; mkdir -p "$state"
+  r1=$(inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "$text" '' "$first") \
+    || fail "request-keyed write failed"
+  [ "$r1" = "$state/t1.inbox/001.msg" ] || fail "the first request-keyed write should create 001.msg, got $r1"
+  [ "$(inbox_lib "$state" fm_task_inbox_request_of "$r1")" = "$first" ] || fail "the record does not carry its request id"
+  [ "$(inbox_lib "$state" fm_task_inbox_body "$r1")" = "$text" ] || fail "the request id leaked into the record body"
+  mv "$r1" "$state/t1.inbox/handled/"
+  r2=$(inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "$text" '' "$first") \
+    || fail "a retried request failed"
+  [ "$r2" = "$state/t1.inbox/handled/001.msg" ] || fail "a retried request should land on its acknowledged record, got $r2"
+  # An unmarked steer carries no correlation token, so the same text under a
+  # new request id is a deliberate new instruction, and a body-only enqueue
+  # never folds into a request-keyed record.
+  r3=$(inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "$text" '' "$second") \
+    || fail "the same text under a new request id failed"
+  [ "$r3" = "$state/t1.inbox/002.msg" ] || fail "the same text under a new request id should be a new record, got $r3"
+  r4=$(inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "$text") \
+    || fail "a body-only enqueue failed"
+  [ "$r4" = "$state/t1.inbox/003.msg" ] || fail "a body-only enqueue folded into a request-keyed record, got $r4"
+  rc=0
+  inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "a different steer" '' "$first" >/dev/null || rc=$?
+  expect_code 2 "$rc" "a request id already keying another body must be refused"
+  rc=0
+  inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "$text" '' NOT-A-REQUEST >/dev/null || rc=$?
+  [ "$rc" -ne 0 ] || fail "a malformed request id was accepted"
+  count=$(find "$state/t1.inbox" -name '*.msg' | wc -l | tr -d ' ')
+  [ "$count" = 3 ] || fail "refused request-keyed writes created records, found $count"
+  inbox_lib "$state" fm_task_inbox_request_id_valid "$(inbox_lib "$state" fm_task_inbox_new_request_id)" \
+    || fail "a minted request id is not a valid request id"
+  pass "inbox: a request id keys an unmarked steer's idempotent record across a retry, and only that retry"
 }
 
 test_idempotent_write_follows_concurrent_ack() {
@@ -961,6 +996,7 @@ test_doorbell_rejects_terminal_controls
 test_ring_skips_dead_agent
 test_ring_submits_its_own_stuck_doorbell
 test_idempotent_write_dedups_exact_body
+test_idempotent_write_keys_unmarked_steers_by_request_id
 test_idempotent_write_follows_concurrent_ack
 test_handled_mv_dedups_by_sequence
 test_concurrent_writers_never_clobber

@@ -398,9 +398,10 @@ sandbox_brief() { # [fm-brief args...]: a brief rendered for the sandbox home
 }
 
 run_spawn() { # <spawn args...>; sets OUT and RC, with stderr in OUT
+  fm_test_track_procevent_home "$PRIMARY" "$CASE/claims"
   OUT=$(env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE \
     -u FM_BACKEND -u FM_ROOT_OVERRIDE -u TRACEPARENT -u TMUX -u TMUX_PANE \
-    FM_HOME="$PRIMARY" FM_SPAWN_NO_GUARD=1 FM_TEST_SEAM=1 \
+    FM_HOME="$PRIMARY" FM_SPAWN_NO_GUARD=1 FM_TEST_SEAM=1 FM_PROCEVENT_CLAIM_ROOT="$CASE/claims" \
     FM_TEST_SANDBOX_ROOT="$CODE_ROOT" FM_TEST_SANDBOX_HOME="$HOST_HOME" PATH="$LOCAL_BIN:$PATH" \
     FM_SSH_BIN="$LOCAL_BIN/fake-ssh" FM_FAKE_SSH_HOST="alias-$ID" FM_FAKE_SSH_LOG="$CASE/ssh.log" \
     FM_FAKE_SSH_MODE="${SSH_MODE:-normal}" FM_FAKE_HOST_DIR="$HOST_DIR" FM_FAKE_HOST_BIN="$HOST_BIN" \
@@ -475,6 +476,12 @@ test_refusals_happen_before_any_sandbox_exists() {
 
   run_spawn "$ID" --secondmate --placement sandbox
   assert_refused_before_any_sandbox "secondmate" "--placement sandbox refuses --secondmate"
+
+  local long_id
+  long_id="rts-long-$RUN_ID-$(printf 'x%.0s' $(seq 1 46))"
+  run_spawn "$long_id" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  assert_refused_before_any_sandbox "overlong task id" "is too long to name its status mirror's process-event source"
+  assert_absent "$PRIMARY/state/$long_id.meta" "an overlong task id left a record"
 
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode local-only --yolo off --harness pi --model minimax/m2 --placement sandbox
   assert_refused_before_any_sandbox "local-only" "--placement sandbox refuses --mode local-only"
@@ -576,7 +583,12 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   expect_code 0 "$RC" "a sandbox ship should launch"$'\n'"$OUT"
   assert_contains "$OUT" "spawned $ID harness=pi kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha,minimax" \
     "the success line names the placement, route, sandbox, profile, and credential names"
-  assert_contains "$OUT" "status mirroring arrives in PR4b; sandbox placement is not for real use until then" "success states the operational limitation"
+  assert_contains "$OUT" "teardown, lifecycle control, and stale-pane supervision of a sandbox task are later stages" \
+    "success states the operational limitation"
+  assert_line "adapter=remote-reply" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
+    "the status mirror is armed at publish"
+  assert_line "$CODE_ROOT/bin/fm-procevent-remote-reply.sh" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
+    "the armed source runs the status mirror adapter"
 
   tag=$(sed -n "s/^create $ID --home \([^ ]*\) .*/\1/p" "$CASE/provider/argv.log")
   [ -n "$tag" ] || fail "the provider never received create for $ID: $(cat "$CASE/provider/argv.log")"
@@ -661,6 +673,7 @@ test_failures_before_launch_destroy_the_sandbox() {
   assert_absent "$PRIMARY/state/$ID.meta" "a destroyed sandbox leaves no record"
   assert_absent "$HOST_HOME" "nothing was provisioned"
   assert_equals queued "$(row_state)" "the backlog item stays queued"
+  assert_absent "$PRIMARY/state/procevent/remote-reply-$ID.source" "a sandbox that never launched arms no status mirror"
   assert_no_secret_anywhere "an unready host"
 
   new_case converge
@@ -722,6 +735,7 @@ test_launch_failures_hold_the_sandbox_and_its_route() {
   assert_line "sandbox_name=sbx-$ID" "$PRIMARY/state/$ID.meta" "the kept record names the held sandbox"
   assert_present "$HOST_HOME/state/$ID.meta" "the worker the lost reply hid is running on the host"
   assert_equals queued "$(row_state)" "the spawn leaves the backlog transition to reconciliation"
+  assert_absent "$PRIMARY/state/procevent/remote-reply-$ID.source" "an unconfirmed launch arms no status mirror"
   assert_no_secret_anywhere "a lost launch reply"
 
   new_case unreachable
@@ -741,6 +755,20 @@ test_launch_failures_hold_the_sandbox_and_its_route() {
   assert_present "$PRIMARY/state/$ID.meta" "a malformed route keeps the provisional record"
   ! grep -q '^remote_target=' "$PRIMARY/state/$ID.meta" || fail "an untrusted route block reached the record"
   assert_equals queued "$(row_state)" "a malformed route never moves the backlog item"
+
+  # The mirror is armed last, after the record and the backlog move; a failed
+  # arm keeps the launched task, its record, and its sandbox.
+  new_case arm-fails
+  sandbox_brief --mode direct-PR
+  : > "$PRIMARY/state/procevent"
+  run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
+  [ "$RC" -ne 0 ] || fail "a spawn whose status mirror could not be armed reported success"
+  assert_contains "$OUT" "task $ID launched in sandbox sbx-$ID and is recorded, but its status mirror could not be armed" \
+    "the arm failure names the launched task"
+  assert_contains "$OUT" "until bin/fm-procevent-remote-reply.sh arm $ID succeeds" "the arm failure names the recovery"
+  assert_line "remote_target=firstmate:fm-$ID" "$PRIMARY/state/$ID.meta" "the final record is kept"
+  assert_equals in_flight "$(row_state)" "the backlog item still moves In flight"
+  assert_absent "$CASE/provider/destroyed.log" "a failed arm never destroys the sandbox"
   pass "fm-spawn --placement sandbox holds the sandbox and its route once launch may have started, preserving SSH 255"
 }
 

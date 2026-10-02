@@ -29,6 +29,11 @@
 #      slash) keeps its exit-3 delivered-unconfirmed contract, never closes a
 #      --resolve-key decision unconfirmed, and keeps a marked expectation
 #      armed.
+#   9. A sandbox task steer lands unmarked in its host's task inbox, keyed by a
+#      per-request id: an ambiguous transport retries onto one record and
+#      prints the request-reusing resend, an identical later steer is a new
+#      record, --resolve-key closes in this home, and the task's recorded
+#      window is refused.
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -785,6 +790,137 @@ test_local_pending_does_not_close_resolve_key() {
   pass "fm-send local: an unconfirmed submit still never closes a --resolve-key decision"
 }
 
+# --- sandbox task delivery ----------------------------------------------------
+# A sandbox task rides the same remote inbox leg to its one-task home's control
+# plane (fm-remote-task-control.sh cmd_send), which the stub executes for real
+# against a seeded task home. The steer is unmarked and creates no pending
+# reply, and a per-request id keys its record instead of a correlation token.
+
+setup_sandbox_task_home() {  # <name> -> echoes the one-task home the host leg validates
+  local th="$TMP_ROOT/$1-thome"
+  mkdir -p "$th/data/sbx" "$th/state" "$th/config" "$th/projects"
+  printf 'schema=fm-task-home.v1\ntask_id=sbx\nkind=ship\n' > "$th/.fm-task-home"
+  fm_write_meta "$th/state/sbx.meta" \
+    "window=firstmate:fm-sbx" "endpoint_task_id=sbx" "worktree=$th/wt" \
+    "project=$th/projects/alpha" "harness=pi" "kind=ship"
+  printf '%s\n' "$th"
+}
+
+setup_sandbox_parent_home() {  # <name> <task-home> -> echoes a home with the sandbox task record
+  local home
+  home=$(setup_home "$1")
+  fm_write_meta "$home/state/sbx.meta" \
+    "window=remote:sbx" "endpoint_task_id=sbx" "worktree=$2/wt" "project=$home/projects/alpha" \
+    "harness=pi" "kind=ship" "mode=direct-PR" "yolo=off" "branch=fm/sbx" \
+    "placement=sandbox" "remote_kind=task" "remote_host=sbx-host" "remote_root=/opt/firstmate" \
+    "remote_home=$2" "remote_backend=tmux" "remote_target=firstmate:fm-sbx" \
+    "sandbox_provider=pve-sandbox" "sandbox_name=sbx-1" "sandbox_profile=default"
+  printf '%s\n' "$home"
+}
+
+sandbox_records() {  # <task-home>
+  find "$1/state/sbx.inbox" -maxdepth 2 -name '*.msg' 2>/dev/null | sort
+}
+
+record_body() {  # <record>
+  sed -n '/^--$/,$p' "$1" | sed '1d'
+}
+
+test_sandbox_steer_lands_unmarked_in_the_task_inbox() {
+  local dir fb ssh_log home th rc err rec
+  dir="$TMP_ROOT/sandbox-inbox"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); ssh_log="$dir/ssh.log"; : > "$ssh_log"
+  th=$(setup_sandbox_task_home sandbox-inbox)
+  home=$(setup_sandbox_parent_home sandbox-inbox "$th")
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" "$SEND" sbx $'rerun the suite\nthen report' >"$dir/out" 2>"$dir/err" || rc=$?
+  err=$(cat "$dir/err")
+  expect_code 0 "$rc" "a durably recorded sandbox steer must exit 0: $err"
+  assert_grep '-- sbx-host fm-remote-entrypoint.sh ' "$ssh_log" "the steer should cross to the task's own host"
+  rec=$(sandbox_records "$th")
+  [ "$(printf '%s\n' "$rec" | grep -c .)" = 1 ] || fail "the steer must land as one record in the task inbox: $rec"
+  assert_equals $'rerun the suite\nthen report' "$(record_body "$rec")" "the record carries exactly the steer, unmarked"
+  grep -Eq '^request=[a-f0-9]{16}$' "$rec" || fail "the sandbox record must carry its request id: $(cat "$rec")"
+  [ -z "$(pending_record "$home")" ] || fail "a sandbox steer must not create a pending-reply expectation"
+  assert_absent "$home/state/sbx.inbox" "a sandbox steer must not write a local inbox"
+  assert_not_contains "$err" "error:" "a durably recorded sandbox steer must not carry an error report"
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" "$SEND" sbx $'rerun the suite\nthen report' >/dev/null 2>&1 || rc=$?
+  expect_code 0 "$rc" "an identical later sandbox steer must be sent"
+  [ "$(sandbox_records "$th" | grep -c .)" = 2 ] \
+    || fail "an identical later steer is a new instruction, not a duplicate of the first record"
+  pass "fm-send sandbox: a text steer lands unmarked in the task's host inbox, keyed by its own request id"
+}
+
+test_sandbox_steer_retry_and_printed_resend_are_idempotent() {
+  local dir fb ssh_log home th rc err request expected_cmd arg quoted resend_cmd
+  dir="$TMP_ROOT/sandbox-idem"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); ssh_log="$dir/ssh.log"; : > "$ssh_log"
+  th=$(setup_sandbox_task_home sandbox-idem)
+  home=$(setup_sandbox_parent_home sandbox-idem "$th")
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" FM_FAKE_SSH_AMBIGUOUS=1 \
+    "$SEND" sbx "rebase onto main" >"$dir/out" 2>"$dir/err" || rc=$?
+  err=$(cat "$dir/err")
+  [ "$rc" -ne 0 ] || fail "a twice-lost sandbox transport must not claim confirmed delivery"
+  [ "$(cat "$ssh_log.count")" = 2 ] \
+    || fail "fm-send must retry the identical sandbox leg exactly once after ssh 255, got $(cat "$ssh_log.count") attempts"
+  [ "$(sandbox_records "$th" | grep -c .)" = 1 ] \
+    || fail "the retried sandbox leg must land on one record: $(sandbox_records "$th")"
+  request=$(sed -n 's/^request=//p' "$(sandbox_records "$th")")
+  assert_contains "$err" "steer to sandbox task sbx is unconfirmed (transport lost twice; remote completion unknown). Only the request-reusing resend below is idempotent" \
+    "an unconfirmed sandbox steer limits resend safety to its request id"
+  printf -v quoted '%q' "$home"
+  expected_cmd="FM_HOME=$quoted FM_SEND_REQUEST_ID=$request"
+  for arg in "$SEND" sbx "rebase onto main"; do
+    printf -v quoted '%q' "$arg"
+    expected_cmd="$expected_cmd $quoted"
+  done
+  assert_contains "$err" "$expected_cmd" "double transport loss must print the exact request-reusing resend command"
+  resend_cmd=$(tail -1 "$dir/err")
+  rc=0
+  env PATH="$fb:$PATH" FM_ROOT_OVERRIDE="$ROOT" FM_SEND_SETTLE=0 FM_SSH_BIN="$fb/fake-ssh" \
+    FM_SSH_LOG="$ssh_log" FM_SSH_COUNT="$ssh_log.count" FM_REMOTE_CODE_ROOT="$ROOT" \
+    bash -c "$resend_cmd" >/dev/null 2>"$dir/resend.err" || rc=$?
+  expect_code 0 "$rc" "the printed resend must deliver: $(cat "$dir/resend.err")"
+  [ "$(sandbox_records "$th" | grep -c .)" = 1 ] \
+    || fail "the printed resend must land on the existing record: $(sandbox_records "$th")"
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" FM_SEND_REQUEST_ID=not-a-request \
+    "$SEND" sbx "rebase onto main" >/dev/null 2>"$dir/bad.err" || rc=$?
+  [ "$rc" -ne 0 ] || fail "a malformed FM_SEND_REQUEST_ID was accepted"
+  assert_contains "$(cat "$dir/bad.err")" "FM_SEND_REQUEST_ID must be 16 lowercase hex characters" \
+    "a malformed request id is named"
+  pass "fm-send sandbox: an ambiguous transport retries onto one record, and the printed resend reuses it"
+}
+
+test_sandbox_resolve_key_closes_in_this_home() {
+  local dir fb ssh_log home th rc err out
+  dir="$TMP_ROOT/sandbox-resolve"; mkdir -p "$dir"
+  fb=$(make_stubs "$dir"); ssh_log="$dir/ssh.log"; : > "$ssh_log"
+  th=$(setup_sandbox_task_home sandbox-resolve)
+  home=$(setup_sandbox_parent_home sandbox-resolve "$th")
+  printf 'needs-decision [key=pick-base]: rebase onto main or release?\n' > "$home/state/sbx.status"
+  printf 'needs-decision [key=pick-base]: rebase onto main or release?\n' > "$th/state/sbx.status"
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" "$SEND" sbx --resolve-key pick-base "rebase onto main" >"$dir/out" 2>"$dir/err" || rc=$?
+  err=$(cat "$dir/err")
+  expect_code 0 "$rc" "a sandbox answer must exit 0 once recorded: $err"
+  assert_equals "rebase onto main" "$(record_body "$(sandbox_records "$th")")" "the answer reaches the task inbox"
+  sed -E 's/ \[at=[0-9]+\]//' "$home/state/sbx.status" | grep -qF 'resolved [key=pick-base]: answered: rebase onto main' \
+    || fail "the answer must close the decision in this home's mirrored log: $(cat "$home/state/sbx.status")"
+  out=$(drain_out "$home")
+  assert_not_contains "$out" "[key=pick-base]" "the answered sandbox decision must leave OPEN DECISIONS"
+  assert_no_grep 'resolved' "$th/state/sbx.status" "the close stays in this home; only the answer crosses"
+  rc=0
+  send_env "$fb" "$home" "$ssh_log" "$SEND" remote:sbx "typed at its window" >/dev/null 2>"$dir/window.err" || rc=$?
+  [ "$rc" -ne 0 ] || fail "a steer typed at a sandbox task's recorded window was accepted"
+  assert_contains "$(cat "$dir/window.err")" "the recorded window of sandbox task sbx on sbx-host, not an endpoint in this home" \
+    "the window refusal names the task"
+  [ "$(sandbox_records "$th" | grep -c .)" = 1 ] || fail "a refused window steer reached the task inbox"
+  pass "fm-send sandbox: --resolve-key closes in this home at enqueue, and the recorded window is refused"
+}
+
 test_remote_steer_lands_in_remote_inbox
 test_remote_rerun_is_idempotent
 test_remote_retry_failure_preserves_ambiguous_expectation
@@ -801,5 +937,8 @@ test_remote_send_budget_bounds_busy_lane
 test_local_pending_reports_delivered_unconfirmed
 test_local_pending_does_not_close_resolve_key
 test_local_secondmate_pending_keeps_expectation_armed
+test_sandbox_steer_lands_unmarked_in_the_task_inbox
+test_sandbox_steer_retry_and_printed_resend_are_idempotent
+test_sandbox_resolve_key_closes_in_this_home
 
 echo "all fm-send-remote-delivery tests passed"

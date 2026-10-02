@@ -281,7 +281,8 @@
 #   through bin/fm-on.sh's task route and that host's own control plane
 #   (bin/fm-remote-task-control.sh); docs/remote-sandboxes.md owns the operator
 #   view. Before anything exists it refuses, each by name, --secondmate, --mode
-#   local-only, an explicit --backend other than tmux, a raw or unverified
+#   local-only, a task id too long to name its status mirror's process-event
+#   source, an explicit --backend other than tmux, a raw or unverified
 #   harness, Claude pending the PR7 real-host smoke test, a Pi harness whose
 #   --model names no provider or no credential for it, a brief carrying the --herdr-lab isolation contract or not naming the
 #   sandbox home's status file, an unregistered project or one with no clonable
@@ -310,9 +311,12 @@
 #   failure, a malformed route block, or a failed record update or backlog
 #   transition - the sandbox is held and the record kept, so the route stays
 #   reachable for reconciliation. An SSH exit 255 from the readiness gate,
-#   provisioning, or launch is returned unchanged either way. The status
-#   mirror and the remote supervision verbs are later stages
-#   (docs/remote-sandboxes.md, "Current status").
+#   provisioning, or launch is returned unchanged either way. Last, spawn arms
+#   the task's status mirror (bin/fm-procevent-remote-reply.sh arm), which
+#   copies the worker's host-side status lines into this home's
+#   state/<id>.status; a failed arm keeps the launched task and its record and
+#   names the arm to rerun. Teardown, lifecycle control, and stale-pane
+#   supervision are later stages (docs/remote-sandboxes.md, "Current status").
 #   --relaunch keeps the recorded placement: a --placement that differs from it
 #   is refused, and a sandbox task's relaunch is refused until its control plane
 #   routes there.
@@ -1742,6 +1746,15 @@ spawn_sandbox_task() {
     echo "error: --placement sandbox takes <task-id> <project-dir> [<harness>]" >&2
     exit 2
   fi
+  # The status mirror follows the task through a process-event source named
+  # for it, so an id too long to name one is refused before its worker could
+  # launch unmirrored. The 64-character bound is bin/fm-procevent-lib.sh's
+  # fm_procevent_source_id_valid, which register enforces.
+  if ! out=$("$SCRIPT_DIR/fm-procevent-remote-reply.sh" source-id "$ID" 2>/dev/null) ||
+    [ "${#out}" -gt 64 ]; then
+    echo "error: --placement sandbox refused: task id $ID is too long to name its status mirror's process-event source, so its status could never reach this home; choose a shorter task id" >&2
+    exit 1
+  fi
   PROJ_ABS=$(cd "$(resolve_project_dir_arg "${POS[1]}")" 2>/dev/null && pwd) || {
     echo "error: project directory cannot be resolved: ${POS[1]}" >&2
     exit 1
@@ -2083,10 +2096,17 @@ spawn_sandbox_task() {
 
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
   [ ! -e "$CONFIG/fleet-ledger" ] || "$SCRIPT_DIR/fm-fleet-ledger.sh" dispatched "$ID" "$KIND" "$SBX_PROJECT" "$SBX_HARNESS" "$MODEL" || true
+  # Arm the status mirror for the worker's state/<id>.status on the host. The
+  # worker is already running and recorded, so a failure keeps everything and
+  # names the arm that recovers the mirror.
+  if ! out=$("$SCRIPT_DIR/fm-procevent-remote-reply.sh" arm "$ID" 2>&1); then
+    echo "error: task $ID launched in sandbox $SANDBOX_NAME and is recorded, but its status mirror could not be armed ($(first_line "${out#error: }")); its status stays on $SANDBOX_ALIAS until bin/fm-procevent-remote-reply.sh arm $ID succeeds" >&2
+    exit 1
+  fi
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: status mirroring arrives in PR4b; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
+  echo "notice: teardown, lifecycle control, and stale-pane supervision of a sandbox task are later stages; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
   echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$SBX_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 

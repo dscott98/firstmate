@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
-# Remote-secondmate reply adapter for the generic process-event runner.
+# Remote status-stream adapter for the generic process-event runner: the reply
+# channel of a remote secondmate and the status mirror of a sandbox task.
 #
 # Usage:
-#   fm-procevent-remote-reply.sh arm <secondmate-id>
-#   fm-procevent-remote-reply.sh handle <secondmate-id> <sequence> <result-file>
+#   fm-procevent-remote-reply.sh arm <id>
+#   fm-procevent-remote-reply.sh handle <id> <sequence> <result-file>
 #   fm-procevent-remote-reply.sh autohandle <source-id> <sequence> <result-file>
 #   fm-procevent-remote-reply.sh classify <result-file>
 #   fm-procevent-remote-reply.sh terminal <result-file>
 #   fm-procevent-remote-reply.sh self-announcing
-#   fm-procevent-remote-reply.sh source-id <secondmate-id>
+#   fm-procevent-remote-reply.sh source-id <id>
 #   fm-procevent-remote-reply.sh relisten
-#   fm-procevent-remote-reply.sh retire <secondmate-id>
+#   fm-procevent-remote-reply.sh retire <id>
+#
+# <id> names one route, and bin/fm-remote-route-lib.sh decides its kind. A
+# configured remote secondmate's channel is its remote home's
+# state/parent-replies.status. A sandbox task's channel is its one-task home's
+# state/<id>.status, which its worker appends to: a task record that records a
+# placement is read through the route library, exactly as bin/fm-on.sh selects
+# its transport, so only placement=sandbox with remote_kind=task is a task
+# route, and an id that is both a task route and a configured secondmate route
+# is refused as ambiguous. Both kinds mirror into this home's state/<id>.status
+# through everything below; what a task route changes is listed under "A
+# sandbox task's mirror".
 #
 # `arm` registers one blocking, non-destructive delta source for the remote
-# home's state/parent-replies.status log. The process-event runner owns blocking,
+# channel log. The process-event runner owns blocking,
 # capture, publication, and one machine-wide source owner. Each captured delta is
 # terminal for that exact registration; `handle` validates and idempotently
 # ingests it, acknowledges the captured generation, then registers the next
@@ -69,6 +81,22 @@
 #     wrote (see WINDOW_CLOSED_EMPTY below)
 # Line framing and size bounding belong to bin/fm-remote-delta-read.sh, which
 # delivers only whole lines and breaks continuity on an over-long one.
+#
+# A sandbox task's mirror. Its worker's lines are untrusted data about its own
+# task, and this home's mirrored copy is that task's authoritative status log,
+# because only this copy holds the resolved lines an answerer appends here. So
+# a task route keeps cursor continuity, normalization, replay deduplication,
+# the self-announcing contract, and the relisten window unchanged, and it
+# drops everything that serves a secondmate's correlated replies: no line
+# offers a document (a `report=` pointer mirrors verbatim), no corr= token
+# settles a pending reply, and no caught-up watermark is published. Instead,
+# for a kind=scout task, a delta carrying a done or failed line first fetches
+# the fixed path data/<id>/report.md, at most 1 MiB, through the same
+# path-confined reader into this home's data/<id>/report.md, so the scout's
+# terminal line reaches the status log, and its wake, only after the report it
+# announces is local. A refused fetch fails open exactly as a refused offered
+# document does: the lines still mirror and one unkeyed note says why. An SSH
+# exit 255 or a local storage failure leaves the delta uncommitted for retry.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,6 +108,7 @@ CURSOR_DIR="$STATE/remote-replies"
 REMOTE_LOG='state/parent-replies.status'
 WAIT_SECONDS=${FM_REMOTE_REPLY_WAIT_SECONDS:-55}
 MAX_DOC_BYTES=${FM_REMOTE_REPLY_MAX_DOC_BYTES:-262144}
+MAX_SCOUT_REPORT_BYTES=1048576
 # fm-on.sh returns ssh's status unchanged, so 255 alone means unavailable
 # transport or unknown remote completion. Any other nonzero status is the remote
 # reader's own refusal of that path at that moment. The reader has no permanence
@@ -95,9 +124,11 @@ DOCUMENT_LOCAL_FAILURE=2
 . "$SCRIPT_DIR/fm-secondmate-registry-lib.sh"
 # shellcheck source=bin/fm-pending-reply-lib.sh
 . "$SCRIPT_DIR/fm-pending-reply-lib.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,66p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,/^set -u$/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 2; }
 
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
@@ -118,7 +149,7 @@ empty_hash() {
 }
 
 validate_id() {
-  case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid secondmate id: $1" ;; esac
+  case "$1" in ''|*[!A-Za-z0-9._-]*) die "invalid remote route id: $1" ;; esac
 }
 
 source_id() {
@@ -228,10 +259,45 @@ remote_route_exists() {
   [ "$remote" = 1 ] || die "secondmate $id is not a configured remote route"
 }
 
+# The route kind <id> names (header): sets REPLY_KIND to task or secondmate,
+# REMOTE_LOG to that kind's channel log, and REPLY_TASK_KIND to a task's
+# ship or scout. Only a record that records a placement is consulted, by the
+# same test bin/fm-on.sh applies, so every other id keeps the secondmate route
+# exactly as before; a record whose placement is malformed is refused.
+REPLY_KIND=secondmate
+REPLY_TASK_KIND=
+reply_route_kind() { # <id>
+  local id=$1 meta="$STATE/$1.meta"
+  REPLY_KIND=secondmate
+  REPLY_TASK_KIND=
+  REMOTE_LOG='state/parent-replies.status'
+  if [ -f "$meta" ] && [ ! -L "$meta" ] && LC_ALL=C grep -q '^placement=' "$meta" 2>/dev/null; then
+    fm_remote_route_resolve "$meta" "$id" || die "$FM_REMOTE_ROUTE_ERROR"
+    if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+      REPLY_KIND=task
+      REPLY_TASK_KIND=$(fm_backend_meta_exact_value "$meta" kind) || die "sandbox task $id records no single kind"
+      REMOTE_LOG="state/$id.status"
+    fi
+  fi
+}
+
+# Arming checks that the route still exists: a secondmate in the registry, or
+# a task route that no registry route shadows, which bin/fm-on.sh refuses too.
+reply_route_require() { # <id>
+  local id=$1 remote
+  reply_route_kind "$id"
+  if [ "$REPLY_KIND" = task ]; then
+    remote=$(secondmate_registry_field "$DATA/secondmates.md" "$id" remote 2>/dev/null || true)
+    [ "$remote" != 1 ] || die "remote route $id names a sandbox task and also a configured secondmate route; refusing the ambiguous route"
+    return 0
+  fi
+  remote_route_exists "$id"
+}
+
 cmd_arm_locked() {
   local id=${1:-} sid
   validate_id "$id"
-  remote_route_exists "$id"
+  reply_route_require "$id"
   read_cursor "$id"
   sid=$(source_id "$id")
   "$SCRIPT_DIR/fm-procevent.sh" register remote-reply "$sid" -- \
@@ -270,12 +336,14 @@ JOB_PREEMPTED=76
 cmd_source() {
   local id=${1:-} started rc=0
   validate_id "$id"
+  reply_route_kind "$id"
   read_cursor "$id"
   started=$(fm_pending_reply_now)
   "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-delta-read.sh \
     "$REMOTE_LOG" "$CURSOR_OFFSET" "$CURSOR_HASH" "$WAIT_SECONDS" < /dev/null || rc=$?
   if [ "$rc" -eq "$WINDOW_CLOSED_EMPTY" ]; then
-    fm_pending_reply_note_remote_channel_caught_up "$STATE" "$id" "$started" || true
+    [ "$REPLY_KIND" != secondmate ] \
+      || fm_pending_reply_note_remote_channel_caught_up "$STATE" "$id" "$started" || true
   elif [ "$rc" -eq "$JOB_PREEMPTED" ]; then
     rc=$WINDOW_CLOSED_EMPTY
   fi
@@ -376,20 +444,15 @@ summarize_fetch_reason() { # <stderr-file> <remote-relative>
   printf '%s' "$reason"
 }
 
-# Fetch one referenced remote document. Returns 0 on success, 1 when the remote
-# reader refused the path or size, DOCUMENT_LOCAL_FAILURE when local storage
-# failed, and SSH_UNAVAILABLE when transport completion is unknown. A refusal
-# leaves the reader's own explanation in FETCH_DOC_REASON.
+# Fetch one remote file through the path-confined reader into <destination>,
+# whose directory must resolve inside <base>. Returns 0 on success, 1 when the
+# remote reader refused the path or size, DOCUMENT_LOCAL_FAILURE when local
+# storage failed, and SSH_UNAVAILABLE when transport completion is unknown. A
+# refusal leaves the reader's own explanation in FETCH_DOC_REASON.
 FETCH_DOC_REASON=''
-fetch_document() { # <id> <remote-relative> <result-var>
-  local id=$1 rel=$2 result_var=$3 base destination parent parent_real tmp err local_rel rc=0
+fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
+  local id=$1 rel=$2 base=$3 destination=$4 max=$5 parent parent_real tmp err rc=0
   FETCH_DOC_REASON=''
-  if ! safe_doc_path "$rel"; then
-    FETCH_DOC_REASON='pointer is not a confined data/*.md path'
-    return 1
-  fi
-  base="$DATA/remote-secondmates/$id"
-  destination="$base/$rel"
   parent=$(dirname "$destination")
   mkdir -p "$parent" || return "$DOCUMENT_LOCAL_FAILURE"
   [ ! -L "$base" ] && [ ! -L "$parent" ] || return "$DOCUMENT_LOCAL_FAILURE"
@@ -398,7 +461,7 @@ fetch_document() { # <id> <remote-relative> <result-var>
   [ ! -L "$destination" ] || return "$DOCUMENT_LOCAL_FAILURE"
   err=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-doc-reason.XXXXXX") || return "$DOCUMENT_LOCAL_FAILURE"
   tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$MAX_DOC_BYTES" < /dev/null > "$tmp" 2> "$err" || rc=$?
+  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" < /dev/null > "$tmp" 2> "$err" || rc=$?
   if [ "$rc" -ne 0 ]; then
     FETCH_DOC_REASON=$(summarize_fetch_reason "$err" "$rel")
     rm -f -- "$tmp" "$err"
@@ -408,8 +471,41 @@ fetch_document() { # <id> <remote-relative> <result-var>
   rm -f -- "$err"
   chmod 600 "$tmp" || { rm -f -- "$tmp"; return "$DOCUMENT_LOCAL_FAILURE"; }
   mv -f -- "$tmp" "$destination" || { rm -f -- "$tmp"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  local_rel="data/remote-secondmates/$id/$rel"
-  printf -v "$result_var" '%s' "$local_rel"
+}
+
+# Fetch one document a secondmate's line offers into its mirror tree, with
+# fetch_remote_file's statuses.
+fetch_document() { # <id> <remote-relative> <result-var>
+  local id=$1 rel=$2 result_var=$3 base rc=0
+  FETCH_DOC_REASON=''
+  if ! safe_doc_path "$rel"; then
+    FETCH_DOC_REASON='pointer is not a confined data/*.md path'
+    return 1
+  fi
+  base="$DATA/remote-secondmates/$id"
+  fetch_remote_file "$id" "$rel" "$base" "$base/$rel" "$MAX_DOC_BYTES" || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf -v "$result_var" '%s' "data/remote-secondmates/$id/$rel"
+}
+
+# Fetch a scout task's report from its fixed path into this home's own
+# data/<id>/report.md, where scout completion reads it, with fetch_remote_file's
+# statuses.
+fetch_scout_report() { # <id>
+  local base="$DATA/$1"
+  fetch_remote_file "$1" "data/$1/report.md" "$base" "$base/report.md" "$MAX_SCOUT_REPORT_BYTES"
+}
+
+# 0 when the normalized delta carries a line whose verb ends a task, done or
+# failed (bin/fm-classify-lib.sh owns verb parsing).
+payload_has_terminal_line() { # <normalized-payload>
+  local line verb
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    status_line_verb "$line" verb
+    case "$verb" in done|failed) return 0 ;; esac
+  done < "$1"
+  return 1
 }
 
 # The one adaptation a machine boundary forces on the mirrored bytes: NUL and
@@ -485,6 +581,7 @@ cmd_ingest() {
   local fetch_rc append_rc offered='' delivered_map='' mirrored='' status_additions='' source_additions='' undelivered=''
   validate_id "$id"
   [ -f "$result" ] && [ ! -L "$result" ] || die "result file is unavailable or unsafe: $result"
+  reply_route_kind "$id"
   class=$(classify_result "$result")
   [ "$class" != malformed ] || die "remote reply result is malformed"
   schema=$(result_field "$result" schema) || die "result schema is ambiguous"
@@ -544,7 +641,11 @@ cmd_ingest() {
     die "result does not continue the current cursor for $id"
   fi
   if [ "$class" = continuity-broken ]; then
-    line="blocked [key=remote-reply-continuity-$id]: remote reply continuity broke for $id ($reason)"
+    if [ "$REPLY_KIND" = task ]; then
+      line="blocked [key=remote-reply-continuity-$id]: status mirror continuity broke for sandbox task $id ($reason)"
+    else
+      line="blocked [key=remote-reply-continuity-$id]: remote reply continuity broke for $id ($reason)"
+    fi
     append_rc=0
     if status_event_recorded "$status_file" "$line"; then
       append_rc=1
@@ -557,14 +658,33 @@ cmd_ingest() {
     return 3
   fi
   [ "$status" = delta ] && [ "$payload_bytes" -gt 0 ] || { fm_lock_release "$lock"; die "delta result has no payload"; }
-  # Every document this delta OFFERS, deduplicated across the whole delta, is
-  # attempted exactly once.
-  if ! offered=$(extract_document_pointers "$normalized_payload"); then
-    fm_lock_release "$lock"
-    die "cannot extract remote document pointers"
-  fi
   delivered_map="$tmp/delivered.map"
   : > "$delivered_map" || { fm_lock_release "$lock"; die "cannot stage the delivered document map"; }
+  if [ "$REPLY_KIND" = task ]; then
+    # A task's lines offer no documents (header), so their pointers mirror
+    # verbatim. A scout's terminal line fetches its report first, and a refusal
+    # fails open with one note, exactly as an offered document's does.
+    if [ "$REPLY_TASK_KIND" = scout ] && payload_has_terminal_line "$normalized_payload"; then
+      doc="data/$id/report.md"
+      fetch_rc=0
+      fetch_scout_report "$id" || fetch_rc=$?
+      if [ "$fetch_rc" -eq 1 ]; then
+        undelivered="${doc}"$'\t'"${FETCH_DOC_REASON}"
+      else
+        [ "$fetch_rc" -ne "$SSH_UNAVAILABLE" ] \
+          || { fm_lock_release "$lock"; die "remote transport was unavailable while fetching $doc"; }
+        [ "$fetch_rc" -eq 0 ] \
+          || { fm_lock_release "$lock"; die "could not store the scout report locally: $doc"; }
+      fi
+    fi
+  else
+    # Every document this delta OFFERS, deduplicated across the whole delta, is
+    # attempted exactly once.
+    if ! offered=$(extract_document_pointers "$normalized_payload"); then
+      fm_lock_release "$lock"
+      die "cannot extract remote document pointers"
+    fi
+  fi
   while IFS= read -r doc || [ -n "$doc" ]; do
     [ -n "$doc" ] || continue
     fetch_rc=0
@@ -621,10 +741,12 @@ EOF
   done <<EOF
 $undelivered
 EOF
-  while IFS= read -r corr; do
-    [ -n "$corr" ] || continue
-    fm_pending_reply_try_resolve "$STATE" "$corr" "$status_file" >/dev/null 2>&1 || true
-  done < <(grep -Eo 'corr=[A-Fa-f0-9]{16}' "$normalized_payload" | cut -d= -f2- | tr 'A-F' 'a-f' | awk '!seen[$0]++')
+  if [ "$REPLY_KIND" = secondmate ]; then
+    while IFS= read -r corr; do
+      [ -n "$corr" ] || continue
+      fm_pending_reply_try_resolve "$STATE" "$corr" "$status_file" >/dev/null 2>&1 || true
+    done < <(grep -Eo 'corr=[A-Fa-f0-9]{16}' "$normalized_payload" | cut -d= -f2- | tr 'A-F' 'a-f' | awk '!seen[$0]++')
+  fi
   if [ -n "$seq" ]; then
     write_ingest_receipt "$id" "$seq" "$result" \
       || { fm_lock_release "$lock"; die "cannot commit remote reply ingestion receipt"; }

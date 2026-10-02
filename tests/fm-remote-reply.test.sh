@@ -56,8 +56,12 @@ fi
 host=$1
 entry=$2
 shift 2
-[ "$host" = remote-mac ] || exit 91
+case "$host" in remote-mac|sbx-task) ;; *) exit 91 ;; esac
 [ "$entry" = fm-remote-entrypoint.sh ] || exit 92
+if [ "${FM_REMOTE_REPLY_FAIL_FILE:-}" = 1 ]; then
+  command=$(printf '%s' "$4" | base64 --decode | tr '\0' '\n' | head -n 1)
+  [ "$command" != fm-remote-file.sh ] || exit 255
+fi
 exec "$FM_FAKE_REMOTE_ENTRYPOINT" "$@"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
@@ -1034,5 +1038,210 @@ assert_absent "$PARENT/state/remote-replies/ios.cursor" "adapter retirement left
 assert_absent "$PARENT/state/remote-replies/ios.caught-up" \
   "adapter retirement left a caught-up watermark a later route could inherit"
 pass "remote reply retirement quiesces and refuses unhandled captured results"
+
+# ---------------------------------------------------------------------------
+# A sandbox task is the adapter's second route kind. Its one-task home's
+# state/<id>.status mirrors into this home's state/<id>.status through the same
+# cursor, normalization, and replay identity, while offered documents, corr=
+# settlement, and the caught-up watermark stay secondmate-only, and a scout's
+# terminal line fetches its fixed report first.
+TASK_REMOTE="$TMP_ROOT/task-remote"
+mkdir -p "$TASK_REMOTE/state" "$TASK_REMOTE/data/sbxship" "$TASK_REMOTE/data/sbxscout"
+write_sandbox_record() { # <id> <ship|scout> [extra key=value...]
+  local id=$1 kind=$2
+  shift 2
+  fm_write_meta "$PARENT/state/$id.meta" "window=remote:$id" "endpoint_task_id=$id" \
+    "worktree=$TASK_REMOTE/projects/alpha-wt" "project=$PARENT/projects/alpha" "harness=pi" \
+    "kind=$kind" "tasktmp=" "model=minimax/m2" "effort=default" "placement=sandbox" "remote_kind=task" \
+    "remote_host=sbx-task" "remote_root=$ROOT" "remote_home=$TASK_REMOTE" "remote_backend=tmux" \
+    "remote_target=firstmate:fm-$id" "sandbox_provider=pve-sandbox" "sandbox_name=sbx-$id" \
+    "sandbox_profile=default" "$@"
+}
+await_source_result() { # <source-id> <result-path>
+  local sid=$1 result=$2 handled=${2%.result}.handled owner
+  owner=$(remote_env "$ROOT/bin/fm-procevent.sh" list 2>/dev/null \
+    | awk -v id="$sid" 'NR > 1 && $1 == id { print $3; exit }')
+  if [ "$owner" != live ]; then
+    remote_env "$ROOT/bin/fm-procevent.sh" start "$sid" >/dev/null 2>&1 &
+  fi
+  for _ in $(seq 1 800); do
+    [ -s "$result" ] && [ -f "$handled" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+stop_source_listener() { # <source-id>
+  local pid
+  pid=$(sed -n '2p' "$CLAIMS/$1.claim" 2>/dev/null || true)
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 80); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.05
+  done
+  return 1
+}
+SHIP_GEN=0
+mirror_ship_lines() { # <line>...
+  SHIP_GEN=$((SHIP_GEN + 1))
+  printf '%s\n' "$@" >> "$TASK_REMOTE/state/sbxship.status"
+  await_source_result remote-reply-sbxship "$PARENT/state/procevent-inbox/remote-reply-sbxship.$SHIP_GEN.result" \
+    || fail "sandbox ship generation $SHIP_GEN was not captured and applied"
+}
+SCOUT_GEN=0
+mirror_scout_lines() { # <line>...
+  SCOUT_GEN=$((SCOUT_GEN + 1))
+  printf '%s\n' "$@" >> "$TASK_REMOTE/state/sbxscout.status"
+  await_source_result remote-reply-sbxscout "$PARENT/state/procevent-inbox/remote-reply-sbxscout.$SCOUT_GEN.result" \
+    || fail "sandbox scout generation $SCOUT_GEN was not captured and applied"
+}
+scout_note() { # <reason-fragment>: the scout's report-transfer note, stamps removed
+  sed -E 's/ \[at=[0-9]+\]//' "$PARENT/state/sbxscout.status" \
+    | grep -F "note: remote document did not transfer for sbxscout: data/sbxscout/report.md - $1"
+}
+
+write_sandbox_record sbxship ship mode=direct-PR yolo=off branch=fm/sbxship
+write_sandbox_record sbxscout scout
+assert_equals remote-reply-sbxship "$(remote_env "$ADAPTER" source-id sbxship)" \
+  "a sandbox task's source id is the adapter's canonical one"
+out=$(remote_env "$ADAPTER" arm sbxship)
+assert_contains "$out" "armed: remote-reply-sbxship offset=0" "a sandbox task's mirror arms at the empty cursor"
+grep -qxF "$ROOT/bin/fm-procevent-remote-reply.sh" "$PARENT/state/procevent/remote-reply-sbxship.source" \
+  || fail "the armed task source does not run this adapter"
+write_sandbox_record sbxbad ship mode=direct-PR yolo=off branch=fm/sbxbad "placement=sandbox"
+set +e
+out=$(remote_env "$ADAPTER" arm sbxbad 2>&1)
+bad_rc=$?
+set -e
+[ "$bad_rc" -ne 0 ] || fail "a task record with a repeated placement was armed"
+assert_contains "$out" "must record placement= exactly once" "a malformed placement is refused with the route library's reason"
+assert_absent "$PARENT/state/procevent/remote-reply-sbxbad.source" "a malformed placement registered a source"
+rm -f "$PARENT/state/sbxbad.meta"
+write_sandbox_record sbxdup ship mode=direct-PR yolo=off branch=fm/sbxdup
+cp "$PARENT/data/secondmates.md" "$TMP_ROOT/secondmates-before-dup"
+printf -- '- sbxdup - duplicate route (host: remote-mac; root: %s; home: %s; scope: duplicate; projects: alpha; added 2026-10-02)\n' \
+  "$ROOT" "$REMOTE" >> "$PARENT/data/secondmates.md"
+set +e
+out=$(remote_env "$ADAPTER" arm sbxdup 2>&1)
+dup_rc=$?
+set -e
+[ "$dup_rc" -ne 0 ] || fail "an id that is both a sandbox task and a secondmate route was armed"
+assert_contains "$out" "names a sandbox task and also a configured secondmate route" "the ambiguous route is named"
+mv "$TMP_ROOT/secondmates-before-dup" "$PARENT/data/secondmates.md"
+rm -f "$PARENT/state/sbxdup.meta"
+pass "a sandbox task's status mirror arms from its record and refuses a malformed or ambiguous route"
+
+# A ship's lines mirror verbatim into this home's own status log for that task.
+printf '# a report the worker never offers\n' > "$TASK_REMOTE/data/sbxship/report.md"
+SHIP_PENDING=$(fm_pending_reply_create "$PARENT" "$PARENT/state" ios 'a request only the secondmate may answer')
+[ -n "$SHIP_PENDING" ] || fail "could not create the secondmate pending-reply record"
+fm_pending_reply_mark_delivered "$PARENT/state" "$SHIP_PENDING" \
+  || fail "could not mark the secondmate request delivered"
+mirror_ship_lines \
+  'working [at=1700000400]: rebasing onto main' \
+  "needs-decision [key=base] [at=1700000500]: keep or drop the shim? report=data/sbxship/report.md" \
+  "working [corr=$SHIP_PENDING]: a sandbox line echoing another route's correlation" \
+  $'blocked [key=ctl]: bell \007 here'
+assert_grep 'working [at=1700000400]: rebasing onto main' "$PARENT/state/sbxship.status" \
+  "the sandbox ship's progress line did not reach its status log"
+assert_grep 'keep or drop the shim? report=data/sbxship/report.md' "$PARENT/state/sbxship.status" \
+  "a sandbox line's pointer was rewritten as though it offered a document"
+assert_absent "$PARENT/data/remote-secondmates/sbxship" "a sandbox task line fetched an offered document"
+assert_grep 'blocked [key=ctl]: bell ? here' "$PARENT/state/sbxship.status" \
+  "a sandbox line's control byte was not normalized"
+printf '%s' "$(status_open_decisions "$PARENT/state/sbxship.status")" | grep -q '^base	needs-decision	' \
+  || fail "the sandbox ship's decision is not open in this home's fold"
+[ "$(fm_pending_reply_get "$PARENT/state/pending-replies/$SHIP_PENDING" phase)" != resolved ] \
+  || fail "a sandbox task's line settled a secondmate's pending reply"
+ship_offset=$(LC_ALL=C wc -c < "$TASK_REMOTE/state/sbxship.status" | tr -d ' ')
+assert_grep "offset=$ship_offset" "$PARENT/state/remote-replies/sbxship.cursor" \
+  "the sandbox ship's cursor did not advance to the end of its log"
+[ ! -e "$PARENT/state/ios.status" ] \
+  || assert_no_grep 'sbxship' "$PARENT/state/ios.status" "a sandbox task's lines leaked into another route's log"
+remote_env "$ADAPTER" handle sbxship "$SHIP_GEN" \
+  "$PARENT/state/procevent-inbox/remote-reply-sbxship.$SHIP_GEN.result" >/dev/null \
+  || fail "replaying the sandbox ship's generation failed"
+[ "$(grep -cF 'needs-decision [key=base]' "$PARENT/state/sbxship.status")" -eq 1 ] \
+  || fail "replaying the sandbox ship's generation duplicated its decision"
+stop_source_listener remote-reply-sbxship || fail "the sandbox ship's listener did not stop"
+rm -f "$PARENT/state/remote-replies/sbxship.caught-up"
+set +e
+FM_REMOTE_REPLY_WAIT_SECONDS=1 remote_env "$ADAPTER" source sbxship >/dev/null 2>&1
+ship_quiet_rc=$?
+set -e
+[ "$ship_quiet_rc" -eq 75 ] || fail "a quiet sandbox window exited with an unexpected status: $ship_quiet_rc"
+assert_absent "$PARENT/state/remote-replies/sbxship.caught-up" \
+  "a sandbox task's quiet window published a reply watermark"
+pass "a sandbox ship's lines mirror verbatim, offer nothing, settle nothing, and replay once"
+
+# A scout's terminal line fetches its report into this home's data/<id>/ first.
+out=$(remote_env "$ADAPTER" arm sbxscout)
+assert_contains "$out" "armed: remote-reply-sbxscout offset=0" "the sandbox scout's mirror did not arm"
+mirror_scout_lines 'working [at=1700000600]: reading the cache layer'
+assert_absent "$PARENT/data/sbxscout/report.md" "a non-terminal scout line fetched a report"
+head -c 300000 /dev/zero | tr '\0' 'r' > "$TASK_REMOTE/data/sbxscout/report.md"
+mirror_scout_lines 'done [at=1700000700]: report ready'
+cmp -s "$TASK_REMOTE/data/sbxscout/report.md" "$PARENT/data/sbxscout/report.md" \
+  || fail "the scout's report, larger than a secondmate document's bound, did not arrive byte for byte"
+assert_grep 'done [at=1700000700]: report ready' "$PARENT/state/sbxscout.status" "the scout's terminal line did not mirror"
+assert_no_grep 'did not transfer' "$PARENT/state/sbxscout.status" "a delivered report left a transfer note"
+printf '# revised after done\n' > "$TASK_REMOTE/data/sbxscout/report.md"
+mirror_scout_lines 'needs-decision [key=scope] [at=1700000800]: widen the audit?'
+[ "$(head -c 1 "$PARENT/data/sbxscout/report.md")" = r ] \
+  || fail "a scout decision line refetched the report"
+pass "a sandbox scout's terminal line fetches its report, beyond the document bound, before mirroring"
+
+head -c 1048577 /dev/zero | tr '\0' 'o' > "$TASK_REMOTE/data/sbxscout/report.md"
+mirror_scout_lines 'done [at=1700000900]: oversize report written'
+scout_note 'file exceeds max-bytes' >/dev/null \
+  || fail "an oversize scout report left no note naming the reader's refusal"
+assert_grep 'done [at=1700000900]: oversize report written' "$PARENT/state/sbxscout.status" \
+  "a refused report held the scout's terminal line back"
+rm -f "$TASK_REMOTE/data/sbxscout/report.md"
+mirror_scout_lines 'failed [at=1700001000]: could not reproduce'
+scout_note 'file is not a non-symlink regular file' >/dev/null \
+  || fail "a missing scout report left no note"
+assert_grep 'failed [at=1700001000]: could not reproduce' "$PARENT/state/sbxscout.status" \
+  "a missing report held the scout's failed line back"
+if status_open_decisions "$PARENT/state/sbxscout.status" | grep -q 'remote-reply-'; then
+  fail "a refused scout report opened a decision"
+fi
+scout_offset=$(LC_ALL=C wc -c < "$TASK_REMOTE/state/sbxscout.status" | tr -d ' ')
+assert_grep "offset=$scout_offset" "$PARENT/state/remote-replies/sbxscout.cursor" \
+  "a refused report held the scout's cursor back"
+pass "a refused scout report fails open: the line mirrors, one note says why, and no decision opens"
+
+# Transport loss while fetching leaves the whole delta uncommitted for retry,
+# so the terminal line never lands ahead of its report.
+stop_source_listener remote-reply-sbxscout || fail "the sandbox scout's listener did not stop"
+printf '# final findings\n' > "$TASK_REMOTE/data/sbxscout/report.md"
+scout_cursor_before=$(cat "$PARENT/state/remote-replies/sbxscout.cursor")
+printf 'done [at=1700001100]: final report ready\n' >> "$TASK_REMOTE/state/sbxscout.status"
+SCOUT_GEN=$((SCOUT_GEN + 1))
+FM_REMOTE_REPLY_FAIL_FILE=1 remote_env "$ROOT/bin/fm-procevent.sh" start remote-reply-sbxscout >/dev/null 2>&1 || true
+SCOUT_LOST="$PARENT/state/procevent-inbox/remote-reply-sbxscout.$SCOUT_GEN.result"
+assert_present "$SCOUT_LOST" "the scout's terminal line was not captured"
+assert_absent "${SCOUT_LOST%.result}.handled" "a capture whose report fetch lost its transport was acknowledged"
+assert_no_grep 'final report ready' "$PARENT/state/sbxscout.status" "the terminal line landed while its report was in doubt"
+[ "$(cat "$PARENT/state/remote-replies/sbxscout.cursor")" = "$scout_cursor_before" ] \
+  || fail "a lost report fetch advanced the scout's cursor"
+assert_grep "procevent remote-reply remote-reply-sbxscout $SCOUT_GEN" "$PARENT/state/.wake-queue" \
+  "an unapplied scout capture lost its check wake"
+remote_env "$ADAPTER" handle sbxscout "$SCOUT_GEN" "$SCOUT_LOST" >/dev/null \
+  || fail "the scout's capture did not apply once the transport returned"
+assert_equals '# final findings' "$(cat "$PARENT/data/sbxscout/report.md")" "the retried fetch did not deliver the final report"
+assert_grep 'final report ready' "$PARENT/state/sbxscout.status" "the retried terminal line did not mirror"
+pass "a lost report fetch keeps the scout's terminal line uncommitted until the report arrives"
+
+# A sandbox task's continuity break names the task's mirror.
+stop_source_listener remote-reply-sbxship || fail "the sandbox ship's listener did not stop before the break"
+printf 'working: replaced log\n' > "$TASK_REMOTE/state/sbxship.status"
+SHIP_GEN=$((SHIP_GEN + 1))
+remote_env "$ROOT/bin/fm-procevent.sh" start remote-reply-sbxship >/dev/null 2>&1 || true
+sed -E 's/ \[at=[0-9]+\]//' "$PARENT/state/sbxship.status" \
+  | grep -qF 'blocked [key=remote-reply-continuity-sbxship]: status mirror continuity broke for sandbox task sbxship (truncated)' \
+  || fail "a sandbox task's continuity break was not escalated as its mirror's"
+assert_absent "$PARENT/state/procevent/remote-reply-sbxship.source" "a broken sandbox mirror was re-armed"
+pass "a sandbox task's continuity break escalates once and is not silently rebased"
 
 echo "ALL TESTS PASSED"

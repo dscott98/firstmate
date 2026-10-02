@@ -34,9 +34,15 @@
 #      recovery-grade state (fm-on.sh + fm-remote-secondmate-control.sh state).
 #      alive falls through to the routed status log; dead/missing report the
 #      remote verdict; an unreachable or unreadable remote reports
-#      unknown-remote, never a false gone/dead. A sandbox task record, or a
-#      record whose placement is malformed, reports unknown · none with the
-#      route library's reason and is never probed locally.
+#      unknown-remote, never a false gone/dead. A sandbox task's worktree,
+#      runs, and pane live on its sandbox host too, while this home's mirrored
+#      status log is its authoritative fold, so its host's crew-state verb
+#      (fm-remote-task-control.sh) supplies only the run-step or pane reading
+#      it computed without its own log, plus its busy verdict, and steps 3-4
+#      below reconcile those with the local fold (the sandbox arm's comment
+#      owns the mapping). A record whose placement is malformed reports
+#      unknown · none with the route library's reason and is never probed
+#      locally.
 #   2. Matching no-mistakes run for this crew's branch AND current code identity,
 #      active or terminal (from `axi status`, or the coarse `no-mistakes runs`
 #      fallback)? Branch name alone is not enough: a historical run on a reused
@@ -228,17 +234,21 @@ KIND=$(meta_value kind)
 HARNESS=$(meta_value harness)
 [ -n "$KIND" ] || KIND=ship
 
-# bin/fm-remote-route-lib.sh owns remote dispatch. A sandbox task's worktree
-# and endpoint live on its VM and this version does not yet route a
-# current-state read to that host, and
-# a record whose placement is malformed has no trustworthy location at all, so
-# both report unknown here, before any local probe could misread them as torn
-# down or dead.
+# bin/fm-remote-route-lib.sh owns remote dispatch. A record whose placement is
+# malformed has no trustworthy location at all, so it reports unknown here,
+# before any local probe could misread it as torn down or dead. A remote
+# secondmate's or sandbox task's worktree and endpoint live on its host, so
+# neither is ever probed locally.
 if ! fm_remote_route_resolve "$META" "$ID"; then
   emit unknown none "$FM_REMOTE_ROUTE_ERROR"
 fi
+SANDBOX_HOST=
 case "$FM_REMOTE_ROUTE_KIND" in
-  task) emit unknown none "$(fm_remote_route_unsupported "$ID" "reading its current state") (not proof of death)" ;;
+  task)
+    REMOTE_HOST=
+    SANDBOX_HOST=$FM_REMOTE_ROUTE_HOST
+    REMOTE_CONTROL=$FM_REMOTE_ROUTE_CONTROL
+    ;;
   secondmate)
     REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
     REMOTE_CONTROL=$FM_REMOTE_ROUTE_CONTROL
@@ -247,9 +257,10 @@ case "$FM_REMOTE_ROUTE_KIND" in
 esac
 
 # A torn-down (or never-created) worktree has no current state to read. A
-# remote secondmate's recorded worktree is a path on ITS host, so the local
-# probe proves nothing for it - the remote arm below reads the true source.
-if [ -z "$REMOTE_HOST" ] && { [ -z "$WT" ] || [ ! -d "$WT" ]; }; then
+# remote secondmate's or sandbox task's recorded worktree is a path on ITS
+# host, so the local probe proves nothing for it - the remote arms below read
+# the true source.
+if [ -z "$REMOTE_HOST" ] && [ -z "$SANDBOX_HOST" ] && { [ -z "$WT" ] || [ ! -d "$WT" ]; }; then
   emit unknown none "worktree gone (torn down?)"
 fi
 
@@ -932,6 +943,142 @@ nm_run_head_matches_worktree() {
   run_head=$(strip_quotes "$(nm_field head)")
   fm_nm_head_matches_worktree "$WT" "$run_head"
 }
+
+# --- sandbox task: the local fold plus the host's run-step and busy ---------
+# A sandbox task's worktree, no-mistakes runs, and pane live on its sandbox
+# host, while this home's mirrored state/<id>.status is its authoritative
+# status log: only this copy holds the resolved lines an answerer appends
+# here. The host's crew-state verb (bin/fm-remote-task-control.sh) therefore
+# reports its run-step attribution or pane fallback computed with its own log
+# left out, plus its busy verdict, and this arm reconciles them with the local
+# fold the way the local paths below reconcile a local run and pane:
+#   - A host run-step reading is authoritative. A refused-daemon-socket
+#     blocker at the log's tip still reads blocked, an open decision the run
+#     moved past is flagged superseded, and an unknown run reading cannot
+#     close an open decision, so the log answers then.
+#   - With no run on the host, busy reads working and idle falls back to the
+#     local declaration. A ship's done passes bin/fm-dod-lib.sh's gate only
+#     through a PR recorded in this home, because its worktree is not here.
+#   - The host's endpoint-gone verdict is the only death evidence it reports,
+#     read as unknown with that reason; an unreachable host or a block that
+#     fails validation is unknown-remote, never death.
+# The block is untrusted input about its own task: it must carry exactly
+# schema, crew_state, busy, and busy_source, once each, with recognized values
+# and no control bytes.
+sandbox_crew_state_parse() {  # <block>
+  local line key value seen=' ' schema='' crew='' rest
+  SANDBOX_DEFECT=
+  SANDBOX_STATE=
+  SANDBOX_SOURCE=
+  SANDBOX_DETAIL=
+  SANDBOX_BUSY=
+  SANDBOX_BUSY_SOURCE=
+  while IFS= read -r line; do
+    case "$line" in *=*) ;; *) SANDBOX_DEFECT="a line that is not key=value"; return 1 ;; esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in ''|*[!a-z_]*) SANDBOX_DEFECT="an unknown field"; return 1 ;; esac
+    case "$seen" in *" $key "*) SANDBOX_DEFECT="field $key appears more than once"; return 1 ;; esac
+    seen="$seen$key "
+    case "$value" in *[[:cntrl:]]*) SANDBOX_DEFECT="field $key holds a control character"; return 1 ;; esac
+    case "$key" in
+      schema) schema=$value ;;
+      crew_state) crew=$value ;;
+      busy) SANDBOX_BUSY=$value ;;
+      busy_source) SANDBOX_BUSY_SOURCE=$value ;;
+      *) SANDBOX_DEFECT="unknown field $key"; return 1 ;;
+    esac
+  done <<EOF
+$1
+EOF
+  for key in schema crew_state busy busy_source; do
+    case "$seen" in *" $key "*) ;; *) SANDBOX_DEFECT="field $key is missing"; return 1 ;; esac
+  done
+  [ "$schema" = fm-remote-task-control.v1 ] || { SANDBOX_DEFECT="schema is not fm-remote-task-control.v1"; return 1; }
+  case "$SANDBOX_BUSY" in
+    busy|idle|unknown|dead) ;;
+    *) SANDBOX_DEFECT="busy is not busy, idle, unknown, or dead"; return 1 ;;
+  esac
+  case "$SANDBOX_BUSY_SOURCE" in
+    ''|*[!A-Za-z0-9._-]*) SANDBOX_DEFECT="busy_source is not a source token"; return 1 ;;
+  esac
+  [ "${#SANDBOX_BUSY_SOURCE}" -le 64 ] || { SANDBOX_DEFECT="busy_source is not a source token"; return 1; }
+  case "$crew" in "state: "*) ;; *) SANDBOX_DEFECT="crew_state is not a current-state line"; return 1 ;; esac
+  rest=${crew#state: }
+  SANDBOX_STATE=${rest%%"$SEP"*}
+  rest=${rest#"$SANDBOX_STATE"}
+  case "$rest" in "${SEP}source: "*) ;; *) SANDBOX_DEFECT="crew_state is not a current-state line"; return 1 ;; esac
+  rest=${rest#"${SEP}source: "}
+  SANDBOX_SOURCE=${rest%%"$SEP"*}
+  rest=${rest#"$SANDBOX_SOURCE"}
+  case "$rest" in
+    '') ;;
+    "$SEP"*) SANDBOX_DETAIL=${rest#"$SEP"} ;;
+    *) SANDBOX_DEFECT="crew_state is not a current-state line"; return 1 ;;
+  esac
+  case "$SANDBOX_STATE" in
+    working|parked|done|blocked|paused|failed|unknown) ;;
+    *) SANDBOX_DEFECT="crew_state names an unknown state"; return 1 ;;
+  esac
+  case "$SANDBOX_SOURCE" in
+    run-step|pane|status-log|remote-endpoint|none) ;;
+    *) SANDBOX_DEFECT="crew_state names an unknown source"; return 1 ;;
+  esac
+  [ "${#SANDBOX_DETAIL}" -le 300 ] || SANDBOX_DETAIL="${SANDBOX_DETAIL:0:297}..."
+}
+
+if [ -n "$SANDBOX_HOST" ]; then
+  SANDBOX_NOTE="sandbox host $SANDBOX_HOST"
+  SANDBOX_OUT=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-on.sh" "$ID" \
+    "$REMOTE_CONTROL" crew-state "$ID" < /dev/null 2>/dev/null) || SANDBOX_OUT=
+  [ -n "$SANDBOX_OUT" ] \
+    || emit unknown remote-endpoint "unknown-remote: $SANDBOX_HOST unreachable or crew state unreadable (not proof of death)"
+  sandbox_crew_state_parse "$SANDBOX_OUT" \
+    || emit unknown remote-endpoint "unknown-remote: $SANDBOX_HOST returned an unusable crew-state block: $SANDBOX_DEFECT (not proof of death)"
+  if [ "$SANDBOX_SOURCE" = run-step ]; then
+    RUN_STATE=$SANDBOX_STATE
+    RUN_DETAIL=$SANDBOX_DETAIL
+    case "$LOG_VERB" in
+      needs-decision|blocked)
+        LOG_LATEST=$(last_status_line "$LOG")
+        if [ "$LOG_VERB" = blocked ] \
+          && [ "$(status_line_verb "$LOG_LATEST")" = blocked ] \
+          && log_reports_daemon_socket_down "$LOG_LATEST"; then
+          emit blocked status-log "$(status_line_note "$LOG_LATEST")${SEP}daemon socket down despite attributed run record${SEP}$SANDBOX_NOTE"
+        fi
+        case "$RUN_STATE" in
+          parked) ;;
+          unknown)
+            emit "$(map_log_state "$LOG_LINE")" status-log \
+              "$(status_line_note "$LOG_LINE")${SEP}run-step unknown on $SANDBOX_NOTE${RUN_DETAIL:+: $RUN_DETAIL}"
+            ;;
+          working) RUN_DETAIL="${RUN_DETAIL:+$RUN_DETAIL$SEP}status-log superseded by active run" ;;
+          *) RUN_DETAIL="${RUN_DETAIL:+$RUN_DETAIL$SEP}status-log superseded (run $RUN_STATE)" ;;
+        esac
+        ;;
+    esac
+    emit "$RUN_STATE" run-step "${RUN_DETAIL:+$RUN_DETAIL$SEP}$SANDBOX_NOTE"
+  fi
+  case "$SANDBOX_BUSY" in
+    dead) emit unknown remote-endpoint "endpoint gone on $SANDBOX_NOTE ($SANDBOX_BUSY_SOURCE)" ;;
+    busy) emit working pane "harness busy ($SANDBOX_BUSY_SOURCE)${SEP}$SANDBOX_NOTE" ;;
+    idle) ;;
+    *) emit unknown pane "harness state unavailable ($SANDBOX_BUSY $SANDBOX_BUSY_SOURCE)${SEP}$SANDBOX_NOTE" ;;
+  esac
+  if [ -n "$LOG_VERB" ]; then
+    if [ "$LOG_VERB" = "done" ]; then
+      if fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META" >/dev/null; then
+        emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
+      fi
+      emit blocked status-log "named head cannot be verified from this home: no PR recorded here carries it, and task $ID's worktree is on $SANDBOX_NOTE"
+    fi
+    LOG_STATE=$(map_log_state "$LOG_LINE")
+    if [ "$LOG_STATE" != unknown ]; then
+      emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
+    fi
+  fi
+  emit unknown none "no current-state source available${SEP}$SANDBOX_NOTE"
+fi
 
 HAVE_RUN=0
 # RUN_SOURCE distinguishes the two ways HAVE_RUN=1 can happen: "full" means

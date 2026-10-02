@@ -4,7 +4,7 @@ This page covers how to configure and operate the provider that runs Firstmate t
 It is for operators who wire a sandbox provider into a firstmate home and for anyone checking the adapter's safety behavior.
 
 Sandbox placement runs an ordinary ship or scout in a one-task Firstmate home on a disposable VM, with the supervising home as its only supervisor.
-Spawn places and launches such a task today; mirroring its status, supervising it, and cleaning it up are later stages, as [current status](#current-status) lists.
+Spawn places and launches such a task and mirrors its status today; lifecycle control, stale-pane supervision, and cleanup are later stages, as [current status](#current-status) lists.
 
 ## Find a topic
 
@@ -16,6 +16,7 @@ Spawn places and launches such a task today; mirroring its status, supervising i
 | Drive the lifecycle by hand | [Operate](#operate) |
 | Place a task in a sandbox | [Placement](#placement) |
 | Understand task routes and readiness | [Task routes](#task-routes) and [task readiness](#task-readiness) |
+| Read, steer, or check a placed task | [Status mirror and routed verbs](#status-mirror-and-routed-verbs) |
 | Understand what a sandbox host runs | [Host-side task control](#host-side-task-control) |
 | Handle capacity or failures | [Capacity and failures](#capacity-and-failures) |
 | Run the tests | [Verification](#verification) |
@@ -30,10 +31,11 @@ What is wired today:
 - [Task readiness](#task-readiness): the readiness doctor checks a sandbox host against a task profile.
 - [Host-side task control](#host-side-task-control): everything a sandbox host runs for its one task, from provisioning its home to retiring it, and briefs rendered for that home.
 - [Placement](#placement): `bin/fm-spawn.sh --placement sandbox` creates a sandbox, converges and gates it, provisions its home with the task's credentials, launches the task, and records its route.
+- [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, a scout's report arrives before its terminal line, and peek, steering, and current-state reads route to the task's host.
 
-Status mirroring arrives in PR4b; sandbox placement is not for real use until then.
-Peek, steering, lifecycle control, current-state reads, teardown, and supervision of a placed task land in later stages of the plan.
-Until then a placed task's status lines stay on its host, and cleaning one up is a manual operator step: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
+Sandbox placement is not for real use until the remaining stages land.
+Lifecycle control, stale-pane and liveness supervision, teardown, and orphan and TTL handling of a placed task arrive in later stages of the plan.
+Until then lifecycle control and teardown refuse a sandbox task, and cleaning one up is a manual operator step: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
 
 ## Principles
 
@@ -103,6 +105,7 @@ Read-only provider exec calls then verify exact HEAD equality and clean tracked 
 The template must use `/opt/firstmate` for its code root and `/home/agent/fm-home` for its task home.
 A mismatched or dirty code root refuses the spawn without resetting, checking out, or discarding changes.
 [Host-side task control](#host-side-task-control) then provisions the home and launches the task, and spawn checks the route block it returns field by field before it publishes the final record and moves the backlog item to In flight.
+Last, spawn arms the task's [status mirror](#status-mirror-and-routed-verbs); an arm that fails keeps the launched task and its record and names the arm command to rerun.
 
 A failure before launch destroys the sandbox, which holds no work yet, and removes the provisional record.
 Once launch may have started, including an SSH exit 255 that leaves its completion unknown, the sandbox is held and its record kept so the route stays reachable for reconciliation; spawn never destroys a sandbox that may hold work.
@@ -115,14 +118,36 @@ A sandbox task's explicit placement and route come from this home's `state/<id>.
 - `bin/fm-on.sh <task-id> <fm-command>` resolves the route from the task's record, selected by its exact task id.
   It applies the same transport checks as a second-mate registry route, refuses a code root and home that overlap, and refuses a task id that also names a registry route.
   Second-mate registry routes are unchanged.
-- Until the primary routes these verbs to [host-side task control](#host-side-task-control), peek, steering, lifecycle control, and teardown refuse a sandbox task record by name, and teardown refuses it even with `--force`.
-  The current-state read reports it as unknown, never as dead, and second-mate liveness and the watcher's queue checks skip it.
+- Peek, steering, and the current-state read route a sandbox task to [host-side task control](#host-side-task-control), as [status mirror and routed verbs](#status-mirror-and-routed-verbs) describes.
+- Until the primary routes the remaining verbs there, lifecycle control and teardown refuse a sandbox task record by name, and teardown refuses it even with `--force`.
+  Second-mate liveness and the watcher's queue checks skip it.
   None of them treats a sandbox task as a local task or as a remote second mate.
 
 ## Task readiness
 
 `bin/fm-on.sh <task-id> fm-remote-doctor.sh --profile task` checks a sandbox host against the task profile; add `--fix` to repair its automatable gaps.
 The [doctor's header and tool declarations](../bin/fm-remote-doctor.sh) own the profile's requirements, Herdr exclusions, repair boundaries, and line protocol.
+
+## Status mirror and routed verbs
+
+The worker appends status lines to its own home's `state/<id>.status` on the sandbox host.
+[`bin/fm-procevent-remote-reply.sh`](../bin/fm-procevent-remote-reply.sh) mirrors them into this home's `state/<id>.status`, whose ordinary signal scan wakes Firstmate, and its header owns the route kinds and the mirror contract.
+
+- The mirror is the [remote second-mate mirror](remote-secondmates.md#how-remote-lines-are-mirrored) with the task's status log as its source: the same cursor continuity, byte normalization, replay identity, one wake per mirrored line, and continuity-break escalation.
+- This home's copy is the task's authoritative status log, because only it holds the `resolved` lines an answer writes here.
+- A task's lines offer no documents and settle no correlated reply, so a `report=` pointer in them mirrors as written.
+- For a scout, a mirrored `done` or `failed` line first fetches `data/<id>/report.md`, at most 1 MiB, through the path-confined reader into this home's `data/<id>/report.md`, so scout completion reads a local report before the line wakes anyone.
+  A refused fetch still mirrors the line and adds one unkeyed note with the reader's reason, and an SSH exit 255 leaves the delta for the runner's retry.
+
+Peek, steering, and the current-state read route by task id to [host-side task control](#host-side-task-control):
+
+- `bin/fm-peek.sh <task-id>` reads the worker's pane through `capture`; an unreachable host fails loudly and is never a death claim.
+- `bin/fm-send.sh <task-id>` delivers through `send` into the worker's durable inbox, unmarked and keyed by a per-request id, so a retry lands on the same record while an identical later steer is a new instruction.
+  [Its header](../bin/fm-send.sh) owns the unconfirmed-delivery resend; `--resolve-key` closes the decision in this home's status log, and `--key` crosses to the pane.
+- `bin/fm-crew-state.sh <task-id>` combines this home's status fold with the run-step and busy readings `crew-state` reports from the host; [its header](../bin/fm-crew-state.sh) owns the composition.
+- A sandbox task's recorded window, `remote:<task-id>`, names no endpoint here, so peek and steering refuse it.
+
+Turn-ended notifications stay on the host, so mirrored status lines remain the supervision signal until stale-pane supervision lands.
 
 ## Host-side task control
 
@@ -132,7 +157,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
   The same manifest again changes nothing, another task's home or a different manifest is refused, and a failed attempt removes what it created.
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
   Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
-- `state`, `observe`, `capture`, `send`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox, and replace its brief.
+- `state`, `observe`, `capture`, `send`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, and replace its brief.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
 Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
@@ -160,12 +185,15 @@ bin/fm-test-run.sh tests/fm-sandbox.test.sh
 bin/fm-test-run.sh tests/fm-remote-route-lib.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-control.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-spawn.test.sh
+bin/fm-test-run.sh tests/fm-remote-task-lifecycle-e2e.test.sh
 ```
 
 The adapter suite drives every verb against a fake provider, including the refusal paths, the home-tag filtering, the capacity distinction, and argv-only invocation.
-The route suite pins the task record contract and the consumer behavior described under [task routes](#task-routes), checking that unsupported operations never reach the transport or a local backend and leave the task record unchanged.
+The route suite pins the task record contract and the consumer behavior described under [task routes](#task-routes), checking that routed verbs cross only the transport to the task's own host and that unsupported operations never reach the transport or a local backend, all leaving the task record unchanged.
 The task control suite drives every host-side verb against a fixture home with fake tmux, including provision idempotence and rollback, foreign-home refusal, credential file modes, and a search of every output and record for planted credential values.
-The placement suite drives `bin/fm-spawn.sh --placement sandbox` against a fake provider and a fake SSH transport that runs the real host-side control plane with fake tmux, covering the refusal matrix, the record fields, destroy before launch, the hold once launch may have started, SSH exit 255, and a search of every output, record, log, and argument for planted credential values.
+The placement suite drives `bin/fm-spawn.sh --placement sandbox` against a fake provider and a fake SSH transport that runs the real host-side control plane with fake tmux, covering the refusal matrix, the record fields, destroy before launch, the hold once launch may have started, SSH exit 255, the mirror armed at publish, and a search of every output, record, log, and argument for planted credential values.
+The lifecycle suite drives a placed ship and scout on the same harness through the real process-event runner: a mirrored decision, a steer that answers it with `--resolve-key`, peek, the composed current state, and a scout report that is local before its terminal line lands.
+The status mirror's route kind, peek, steering, and the current-state composition are also covered by `tests/fm-remote-reply.test.sh`, `tests/fm-peek-remote.test.sh`, `tests/fm-send-remote-delivery.test.sh`, and `tests/fm-crew-state.test.sh`.
 Brief rendering for a sandbox home and the spawn refusal are covered by `tests/fm-brief.test.sh` and `tests/fm-task-delivery.test.sh`.
 Task route resolution and the task readiness profile are covered by `tests/fm-on.test.sh` and `tests/fm-remote-doctor.test.sh`, part of the [remote second-mate suite](remote-secondmates.md#portable-tests).
 A real-cluster smoke run lands with the final stage of the plan.
