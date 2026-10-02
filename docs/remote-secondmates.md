@@ -5,7 +5,8 @@ It is for operators who run a remote second mate and for anyone checking its tra
 
 Remote second mates place a whole persistent Firstmate home on another SSH-reachable host.
 The primary still owns routing and supervision, while the remote home owns its own projects, backlog, and workers.
-Firstmate does not support placing an individual worker remotely or failing a remote route over to a local replacement.
+For individual remote workers, see [the current sandbox support](remote-sandboxes.md#current-status).
+Firstmate never fails a remote route over to a local replacement.
 
 ## Find a topic
 
@@ -207,6 +208,7 @@ chmod +x ~/.local/bin/tasks-axi
 ## Readiness, repair, and the human steps
 
 `bin/fm-remote-doctor.sh` is the single owner of what "ready for a remote second mate" means.
+This page describes its default second-mate profile; its `--profile task` mode readies a sandbox task host instead ([remote-sandboxes.md](remote-sandboxes.md#task-readiness)).
 
 ### Check a host
 
@@ -519,6 +521,7 @@ A fire-and-forget record, such as a reconcile ask, gets its single retry ring on
 ### Remote reads
 
 `fm-peek.sh` and `fm-crew-state.sh` route remote-secondmate reads to the endpoint's host instead of consulting local worktree or backend state.
+[`bin/fm-remote-route-lib.sh`](../bin/fm-remote-route-lib.sh) decides which records are remote second mates for these reads and for every other command that branches on remote placement.
 An unreachable or unreadable remote read is unknown, not evidence that the endpoint is dead.
 
 ### Replies and the parent channel

@@ -48,7 +48,7 @@ cleanup() {
     . "$ROOT/bin/fm-remote-job-lib.sh"
     fm_remote_job_stop_worker_tree "$worker_pid" || true
   fi
-  rm -rf -- "$TMP_ROOT"
+  fm_test_remove_tree "$TMP_ROOT"
 }
 trap cleanup EXIT
 
@@ -206,6 +206,10 @@ command_fields=$(perl -MMIME::Base64=decode_base64 -e '
 IFS=$'\t' read -r command_name _command_action command_rel <<EOF
 $command_fields
 EOF
+# A caller waiting on a barrier names its own trace, so the wait can tell a slow
+# runner that is still making transport calls from a stalled operation.
+[ -z "${FM_FAKE_SSH_TRACE:-}" ] \
+  || printf '%s %s %s %s\n' "$(date +%s)" "$command_name" "$_command_action" "$command_rel" >> "$FM_FAKE_SSH_TRACE"
 case "${FM_FAKE_SSH_MODE:-normal}:$command_name:$command_rel" in
   inherit-partial:fm-remote-inherit.sh:config/crew-harness) exit 255 ;;
   inherit-block:fm-remote-inherit.sh:data/captain-shared.md)
@@ -341,6 +345,42 @@ remote_env() {
   FM_FAKE_LAUNCH_RELEASE="$TMP_ROOT/launch.release" \
   FM_SEND_SETTLE=0 FM_SEND_SLEEP=0 FM_REMOTE_REPLY_WAIT_SECONDS=10 \
   "$@"
+}
+
+# barrier_wait <barrier-file> <operation-pid> <trace-file> <exited-message> <never-reached-message> <operation-output>
+# Wait for a backgrounded remote operation to reach the barrier its fake
+# transport blocks on. Readiness, sync, and inheritance each cross the worker
+# before that barrier, so a loaded runner can need well over any fixed
+# deadline while still progressing. The wait therefore fails only after
+# BARRIER_NO_PROGRESS_SECS with no new call in the operation's own trace, or
+# once the whole wait passes BARRIER_HARD_CAP_SECS, so a genuine stall or a
+# runaway operation still fails within a bound. A failure prints the trace and
+# the operation's output, because fixture cleanup removes both.
+BARRIER_NO_PROGRESS_SECS=30
+BARRIER_HARD_CAP_SECS=240
+barrier_evidence() { # <trace-file> <operation-output>
+  printf -- '--- transport trace ---\n%s\n--- operation output ---\n%s\n' \
+    "$(cat "$1" 2>/dev/null)" "$(tail -n 40 "$2" 2>/dev/null)"
+}
+barrier_wait() {
+  local barrier=$1 pid=$2 trace=$3 exited=$4 never=$5 output=$6 start now last calls seen=-1
+  start=$(date +%s)
+  last=$start
+  while [ ! -f "$barrier" ]; do
+    kill -0 "$pid" 2>/dev/null || fail "$exited"$'\n'"$(barrier_evidence "$trace" "$output")"
+    now=$(date +%s)
+    calls=$(wc -l < "$trace" 2>/dev/null | tr -d ' ')
+    [ -n "$calls" ] || calls=0
+    if [ "$calls" != "$seen" ]; then
+      seen=$calls
+      last=$now
+    fi
+    [ $((now - last)) -lt "$BARRIER_NO_PROGRESS_SECS" ] \
+      || fail "$never: no transport call for ${BARRIER_NO_PROGRESS_SECS}s after $calls calls"$'\n'"$(barrier_evidence "$trace" "$output")"
+    [ $((now - start)) -lt "$BARRIER_HARD_CAP_SECS" ] \
+      || fail "$never within the ${BARRIER_HARD_CAP_SECS}s overall cap after $calls calls"$'\n'"$(barrier_evidence "$trace" "$output")"
+    sleep 0.05
+  done
 }
 
 reply_owner() {
@@ -1049,18 +1089,15 @@ It is read-only in secondmate homes and must not be edited there.
 Changes return through a marked status document pointer.
 stale spawn preference
 EOF
-FM_FAKE_SSH_MODE=inherit-block remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate \
+rm -f "$TMP_ROOT/spawn-concurrent.trace"
+FM_FAKE_SSH_TRACE="$TMP_ROOT/spawn-concurrent.trace" FM_FAKE_SSH_MODE=inherit-block \
+  remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate \
   > "$TMP_ROOT/spawn-concurrent.out" 2>&1 &
 spawn_concurrent=$!
-spawn_inherit_wait=0
-# Earlier inherited files traverse the worker before captain-shared.md, so give
-# a loaded portable runner 30 seconds to reach this deliberately blocked write.
-while [ ! -f "$TMP_ROOT/inherit.entered" ]; do
-  kill -0 "$spawn_concurrent" 2>/dev/null || fail "remote spawn exited before its blocked inheritance write"
-  spawn_inherit_wait=$((spawn_inherit_wait + 1))
-  [ "$spawn_inherit_wait" -le 1500 ] || fail "remote spawn never reached its blocked inheritance write"
-  sleep 0.02
-done
+# Earlier inherited files traverse the worker before captain-shared.md.
+barrier_wait "$TMP_ROOT/inherit.entered" "$spawn_concurrent" "$TMP_ROOT/spawn-concurrent.trace" \
+  "remote spawn exited before its blocked inheritance write" \
+  "remote spawn never reached its blocked inheritance write" "$TMP_ROOT/spawn-concurrent.out"
 cat > "$PARENT/data/captain-shared.md" <<'EOF'
 # Shared captain preferences
 This file is main-authoritative and maintained by the main firstmate.
@@ -1160,18 +1197,14 @@ It is read-only in secondmate homes and must not be edited there.
 Changes return through a marked status document pointer.
 stale concurrent preference
 EOF
-FM_FAKE_SSH_MODE=inherit-block remote_env "$ROOT/bin/fm-config-push.sh" \
+rm -f "$TMP_ROOT/config-concurrent-first.trace"
+FM_FAKE_SSH_TRACE="$TMP_ROOT/config-concurrent-first.trace" FM_FAKE_SSH_MODE=inherit-block \
+  remote_env "$ROOT/bin/fm-config-push.sh" \
   > "$TMP_ROOT/config-concurrent-first.out" 2>&1 &
 config_first=$!
-inherit_wait=0
-while [ ! -f "$TMP_ROOT/inherit.entered" ]; do
-  kill -0 "$config_first" 2>/dev/null || fail "first inheritance transaction exited before its blocked write"
-  inherit_wait=$((inherit_wait + 1))
-  # Match the earlier spawn/inheritance wait: a loaded portable runner can
-  # spend several seconds in the remote entrypoint before reaching this write.
-  [ "$inherit_wait" -le 1500 ] || fail "first inheritance transaction never reached its blocked write"
-  sleep 0.02
-done
+barrier_wait "$TMP_ROOT/inherit.entered" "$config_first" "$TMP_ROOT/config-concurrent-first.trace" \
+  "first inheritance transaction exited before its blocked write" \
+  "first inheritance transaction never reached its blocked write" "$TMP_ROOT/config-concurrent-first.out"
 cat > "$PARENT/data/captain-shared.md" <<'EOF'
 # Shared captain preferences
 This file is main-authoritative and maintained by the main firstmate.
@@ -1640,18 +1673,15 @@ while [ ! -f "$TMP_ROOT/handoff.entered" ]; do
   sleep 0.02
 done
 rm -f "$TMUX_STATE" "$TMP_ROOT/launch.entered" "$TMP_ROOT/launch.release"
-FM_FAKE_SSH_MODE=launch-block remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate \
+rm -f "$TMP_ROOT/spawn-retirement.trace"
+FM_FAKE_SSH_TRACE="$TMP_ROOT/spawn-retirement.trace" FM_FAKE_SSH_MODE=launch-block \
+  remote_env "$ROOT/bin/fm-spawn.sh" ios --secondmate \
   > "$TMP_ROOT/spawn-retirement.out" 2>&1 &
 spawn_retirement_pid=$!
-launch_wait=0
-# The respawn performs readiness and inheritance jobs before launch, so allow
-# the same 30-second loaded-runner bound as the earlier blocked worker path.
-while [ ! -f "$TMP_ROOT/launch.entered" ]; do
-  kill -0 "$spawn_retirement_pid" 2>/dev/null || fail "remote respawn exited before its blocked launch"
-  launch_wait=$((launch_wait + 1))
-  [ "$launch_wait" -le 1500 ] || fail "remote respawn never reached its blocked launch"
-  sleep 0.02
-done
+# The respawn performs readiness and inheritance jobs before launch.
+barrier_wait "$TMP_ROOT/launch.entered" "$spawn_retirement_pid" "$TMP_ROOT/spawn-retirement.trace" \
+  "remote respawn exited before its blocked launch" \
+  "remote respawn never reached its blocked launch" "$TMP_ROOT/spawn-retirement.out"
 remote_env "$ROOT/bin/fm-teardown.sh" ios > "$TMP_ROOT/teardown-serialized.out" 2>&1 &
 teardown_pid=$!
 sleep 0.2

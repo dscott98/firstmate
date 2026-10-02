@@ -537,7 +537,7 @@ Test cleanup must use the guarded path in [`docs/cmux-backend.md`](cmux-backend.
 ## Sandbox provider (`config/sandbox-provider`)
 
 Remote task sandboxes run on an external provider, and `config/sandbox-provider` is the local, gitignored file that wires one provider into a home.
-The file is absent by default: with no provider configured, every sandbox request refuses and nothing else changes, so the whole feature is opt-in per home.
+The file is absent by default: with no provider configured, every provider-adapter request refuses, so provider operations are opt-in per home.
 [`docs/remote-sandboxes.md`](remote-sandboxes.md) owns the operator guide and security posture.
 
 The first line holds the provider command's absolute path, then `key=value` lines configure the adapter:

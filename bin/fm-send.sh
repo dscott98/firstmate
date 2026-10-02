@@ -152,6 +152,12 @@
 # FM_SEND_EXPECTED_REMOTE_HOST to require that sampled identity to still match
 # during the final locked remote-route validation; unset or empty guards do not
 # change ordinary sends.
+# bin/fm-remote-route-lib.sh decides whether a recorded target is remote. A
+# sandbox task record, or a record whose placement is malformed, has no
+# steering leg in this version, so a steer or key to one - selected by id or by
+# its recorded window - is refused before anything is marked, recorded, or
+# typed, and the final locked validation refuses a record that stopped being
+# local or stopped being the same remote secondmate.
 #
 # Decision closure (answerer-closes): pass --resolve-key <key> (repeatable,
 # before the message) when this send answers an open keyed needs-decision: or
@@ -245,6 +251,8 @@ fi
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-marker-lib.sh
@@ -339,6 +347,24 @@ fm_send_count_colons() { # <string>
   printf '%s' $((${#s} - ${#no_colons}))
 }
 
+# bin/fm-remote-route-lib.sh owns remote dispatch. A record that is neither
+# local nor a remote secondmate - a sandbox task, or a record whose placement
+# is malformed - has no steering leg here, so the steer is refused before
+# anything is marked, recorded, or typed, whether the record was selected by
+# id or by its recorded window.
+fm_send_refuse_unroutable() { # <meta>
+  local meta=$1 id
+  id=$(fm_send_id_from_meta "$meta")
+  if ! fm_remote_route_resolve "$meta" "$id"; then
+    echo "error: steer not sent to $id: $FM_REMOTE_ROUTE_ERROR (tried meta=$meta)" >&2
+    return 1
+  fi
+  if [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    echo "error: steer not sent: $(fm_remote_route_unsupported "$id" "steering it") (tried meta=$meta)" >&2
+    return 1
+  fi
+}
+
 fm_send_resolve_target() { # <raw-target>
   local raw=$1 meta pane_meta target backend assumed colons id session hint
 
@@ -350,11 +376,13 @@ fm_send_resolve_target() { # <raw-target>
   TARGET_SELECTOR=""
   TARGET_REMOTE_ID=""
   TARGET_REMOTE_HOST=""
+  TARGET_REMOTE_CONTROL=""
   RESOLUTION_TRIED=""
 
   meta=$(fm_backend_meta_for_selector "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
-    if [ -n "$(fm_meta_get "$meta" remote_host)" ]; then
+    fm_send_refuse_unroutable "$meta" || return 1
+    if [ "$FM_REMOTE_ROUTE_KIND" = secondmate ]; then
       id=$(fm_send_id_from_meta "$meta")
       RESOLVED_TARGET="remote:$id"
       TARGET_BACKEND=remote
@@ -363,7 +391,8 @@ fm_send_resolve_target() { # <raw-target>
       EXPECTED_LABEL="fm-$id"
       TARGET_SELECTOR=1
       TARGET_REMOTE_ID=$id
-      TARGET_REMOTE_HOST=$(fm_meta_get "$meta" remote_host)
+      TARGET_REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
+      TARGET_REMOTE_CONTROL=$FM_REMOTE_ROUTE_CONTROL
       RESOLUTION_TRIED="meta=$meta; placement=remote"
       return 0
     fi
@@ -407,6 +436,7 @@ fm_send_resolve_target() { # <raw-target>
 
   meta=$(fm_backend_meta_for_window "$raw" "$STATE" 2>/dev/null || true)
   if [ -n "$meta" ]; then
+    fm_send_refuse_unroutable "$meta" || return 1
     target=$(fm_backend_target_of_meta "$meta")
     if [ -z "$target" ]; then
       echo "error: no backend target recorded in $meta (tried explicit target '$raw' via recorded window/terminal; backend=from-meta)" >&2
@@ -783,7 +813,7 @@ if [ "${1:-}" = "--key" ]; then
       ;;
     esac
     if ! fm_run_timed "$FM_SEND_REMOTE_BUDGET" "$SCRIPT_DIR/fm-on.sh" "$TARGET_REMOTE_ID" \
-      fm-remote-secondmate-control.sh key "$TARGET_REMOTE_ID" "$key" </dev/null; then
+      "$TARGET_REMOTE_CONTROL" key "$TARGET_REMOTE_ID" "$key" </dev/null; then
       echo "error: key '$key' not sent to remote secondmate $TARGET_REMOTE_ID; completion may be unknown" >&2
       exit 1
     fi
@@ -915,7 +945,10 @@ else
     CURRENT_REMOTE_SPAWN_GEN=
     if [ -f "$TARGET_META" ]; then
       CURRENT_REMOTE_ID=$(fm_send_id_from_meta "$TARGET_META")
-      CURRENT_REMOTE_HOST=$(fm_meta_get "$TARGET_META" remote_host)
+      if fm_remote_route_resolve "$TARGET_META" "$CURRENT_REMOTE_ID" &&
+        [ "$FM_REMOTE_ROUTE_KIND" = secondmate ]; then
+        CURRENT_REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
+      fi
       CURRENT_REMOTE_SPAWN_GEN=$(fm_meta_get "$TARGET_META" spawn_gen)
     fi
     if [ "$CURRENT_REMOTE_ID" != "$TARGET_REMOTE_ID" ] ||
@@ -944,14 +977,14 @@ else
     # remote job's own timeout also relays as 124; treating it as unconfirmed
     # stays safe because the remote enqueue deduplicates.)
     fm_run_timed "$FM_SEND_REMOTE_BUDGET" "$SCRIPT_DIR/fm-on.sh" "$TARGET_REMOTE_ID" \
-      fm-remote-secondmate-control.sh send "${REMOTE_SEND_ARGS[@]}" </dev/null || remote_rc=$?
+      "$TARGET_REMOTE_CONTROL" send "${REMOTE_SEND_ARGS[@]}" </dev/null || remote_rc=$?
     if [ "$remote_rc" -eq 124 ]; then
       remote_completion_unknown=1
     elif [ "$remote_rc" -eq 255 ]; then
       remote_completion_unknown=1
       remote_rc=0
       fm_run_timed "$FM_SEND_REMOTE_BUDGET" "$SCRIPT_DIR/fm-on.sh" "$TARGET_REMOTE_ID" \
-        fm-remote-secondmate-control.sh send "${REMOTE_SEND_ARGS[@]}" </dev/null || remote_rc=$?
+        "$TARGET_REMOTE_CONTROL" send "${REMOTE_SEND_ARGS[@]}" </dev/null || remote_rc=$?
     fi
     fm_lock_release "$REMOTE_META_LOCK"
     if [ "$remote_rc" -ne 0 ] && [ "$remote_completion_unknown" -eq 1 ]; then
@@ -1020,16 +1053,22 @@ else
     CURRENT_INBOX_TARGET=
     CURRENT_INBOX_BACKEND=
     CURRENT_INBOX_SPAWN_GEN=
+    CURRENT_INBOX_ROUTE=
     if [ -f "$TARGET_META" ]; then
       CURRENT_INBOX_TARGET=$(fm_backend_target_of_meta "$TARGET_META")
       CURRENT_INBOX_BACKEND=$(fm_backend_of_meta "$TARGET_META")
       CURRENT_INBOX_SPAWN_GEN=$(fm_meta_get "$TARGET_META" spawn_gen)
+      if fm_remote_route_resolve "$TARGET_META" "$INBOX_TASK_ID"; then
+        CURRENT_INBOX_ROUTE=$FM_REMOTE_ROUTE_KIND
+      else
+        CURRENT_INBOX_ROUTE=invalid
+      fi
     fi
     if [ "$CURRENT_INBOX_TARGET" != "$T" ] ||
       [ "$CURRENT_INBOX_BACKEND" != "$TARGET_BACKEND" ] ||
       { [ -n "${FM_SEND_EXPECTED_SPAWN_GEN:-}" ] &&
         [ "$CURRENT_INBOX_SPAWN_GEN" != "$FM_SEND_EXPECTED_SPAWN_GEN" ]; } ||
-      [ -n "$(fm_meta_get "$TARGET_META" remote_host)" ]; then
+      [ "$CURRENT_INBOX_ROUTE" != none ]; then
       fm_lock_release "$INBOX_META_LOCK"
       if [ "$PENDING_REPLY_CREATED" = 1 ] && [ -n "$PENDING_REPLY_CORR" ]; then
         fm_pending_reply_discard_undelivered "$STATE" "$PENDING_REPLY_CORR" || true

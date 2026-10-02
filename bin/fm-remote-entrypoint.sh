@@ -31,7 +31,7 @@
 set -eu
 
 PROTOCOL=1
-DOCTOR_SHA256=4ab92ac099111e9915bf3679e7ad67734fd81c477d2c534beab2d407e261db5f
+DOCTOR_SHA256=dadd726cf355ae698050c1298e945d6689c712816b7ac2319d473895dd50c753
 REAL_SOURCE=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${BASH_SOURCE[0]}" 2>/dev/null) ||
   REAL_SOURCE=$(realpath "${BASH_SOURCE[0]}" 2>/dev/null) ||
   REAL_SOURCE=${BASH_SOURCE[0]}
