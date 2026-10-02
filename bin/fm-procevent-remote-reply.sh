@@ -453,99 +453,8 @@ summarize_fetch_reason() { # <stderr-file> <remote-relative>
 # DOCUMENT_LOCAL_FAILURE when local storage or the local receiver failed, and
 # SSH_UNAVAILABLE when transport completion is unknown. A refusal leaves its
 # reason in FETCH_DOC_REASON.
-#
-# The host's reader bounds its own output, but nothing a host sends is trusted,
-# so the receiver below enforces the bounds again here: it stops reading and
-# refuses once stdout passes <max-bytes> or stderr passes MAX_FETCH_ERR_BYTES,
-# and it refuses a transfer still unfinished after FM_REMOTE_REPLY_FETCH_SECONDS
-# (default 120), killing the transport either way. Only a complete, in-bounds
-# transfer the reader exited 0 on is installed, so an oversized, cut-off, or
-# stalled one never becomes the document. The receiver reports its outcome
-# through a status file rather than its exit code, so no remote exit status can
-# pose as a local failure; any failure of the receiver itself, such as a local
-# write error or a missing interpreter, is DOCUMENT_LOCAL_FAILURE, which keeps
-# the delta uncommitted for retry. It is perl, which the process-event runner
-# already requires.
 FETCH_DOC_REASON=''
 MAX_FETCH_ERR_BYTES=65536
-# shellcheck disable=SC2016  # Perl source; perl expands its own variables.
-FETCH_RECEIVER='
-use strict;
-use warnings;
-use IO::Select;
-use POSIX ();
-use Time::HiRes qw(time);
-my ($limit, $error_limit, $seconds, $status_file, @command) = @ARGV;
-sub finish {
-  open(my $status, ">", $status_file) or exit 3;
-  print {$status} "$_[0]\n" or exit 3;
-  close($status) or exit 3;
-  exit 0;
-}
-pipe(my $out_r, my $out_w) or exit 3;
-pipe(my $err_r, my $err_w) or exit 3;
-my $pid = fork;
-defined $pid or exit 3;
-if (!$pid) {
-  setpgrp(0, 0);
-  close($out_r);
-  close($err_r);
-  open(STDIN, "<", "/dev/null") or POSIX::_exit(127);
-  open(STDOUT, ">&", $out_w) or POSIX::_exit(127);
-  open(STDERR, ">&", $err_w) or POSIX::_exit(127);
-  exec { $command[0] } @command or POSIX::_exit(127);
-}
-setpgrp($pid, $pid);
-close($out_w);
-close($err_w);
-binmode(STDOUT);
-binmode(STDERR);
-my $select = IO::Select->new($out_r, $err_r);
-my %left = (fileno($out_r) => $limit, fileno($err_r) => $error_limit);
-my $errors = "";
-my $deadline = time + $seconds;
-my $outcome;
-while (!defined $outcome && $select->count) {
-  my $wait = $deadline - time;
-  if ($wait <= 0) { $outcome = "timeout"; last; }
-  for my $handle ($select->can_read($wait)) {
-    my $fd = fileno($handle);
-    my $want = $left{$fd} + 1;
-    $want = 65536 if $want > 65536;
-    my $read = sysread($handle, my $chunk, $want);
-    if (!defined $read) {
-      next if $!{EINTR} || $!{EAGAIN};
-      exit 3;
-    }
-    if ($read == 0) { $select->remove($handle); next; }
-    $left{$fd} -= $read;
-    if ($left{$fd} < 0) {
-      $outcome = $fd == fileno($out_r) ? "over:stdout" : "over:stderr";
-      last;
-    }
-    if ($fd == fileno($out_r)) { print STDOUT $chunk or exit 3; }
-    else { $errors .= $chunk; }
-  }
-}
-sub stop {
-  kill("KILL", -$pid);
-  waitpid($pid, 0);
-  finish($_[0]);
-}
-stop($outcome) if defined $outcome;
-my $status;
-while (1) {
-  my $done = waitpid($pid, POSIX::WNOHANG());
-  if ($done == $pid) { $status = $?; last; }
-  exit 3 if $done < 0;
-  stop("timeout") if time >= $deadline;
-  select(undef, undef, undef, 0.05);
-}
-close(STDOUT) or exit 3;
-print STDERR $errors or exit 3;
-close(STDERR) or exit 3;
-finish("exit:" . (($status & 127) ? 128 + ($status & 127) : $status >> 8));
-'
 fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
   local id=$1 rel=$2 base=$3 destination=$4 max=$5 parent parent_real tmp err status_file outcome seconds
   FETCH_DOC_REASON=''
@@ -562,7 +471,7 @@ fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
     || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
   tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") \
     || { rm -f -- "$err" "$status_file"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  if ! perl -e "$FETCH_RECEIVER" "$max" "$MAX_FETCH_ERR_BYTES" "$seconds" "$status_file" \
+  if ! bash "$SCRIPT_DIR/fm-remote-receive.sh" "$seconds" "$max" "$MAX_FETCH_ERR_BYTES" "$status_file" \
     "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" < /dev/null > "$tmp" 2> "$err"; then
     rm -f -- "$tmp" "$err" "$status_file"
     return "$DOCUMENT_LOCAL_FAILURE"

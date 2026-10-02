@@ -3291,6 +3291,11 @@ setup_sandbox_case() {  # <name> [kind] -> echoes case dir with a sandbox task r
 cat > /dev/null
 while [ "$#" -gt 0 ]; do case "$1" in -o) shift 2 ;; --) shift; break ;; *) break ;; esac; done
 { printf '%s ' "$1"; printf '%s' "${6:-}" | base64 --decode | tr '\0' ' '; printf '\n'; } >> "$FM_FAKE_SSH_ARGV"
+case "${FM_FAKE_SANDBOX_STREAM:-}" in
+  oversized) head -c 65537 /dev/zero; exit 0 ;;
+  endless) exec yes x ;;
+  stalled) exec sleep 60 ;;
+esac
 [ -z "${FM_FAKE_SANDBOX_BLOCK:-}" ] || printf '%s\n' "$FM_FAKE_SANDBOX_BLOCK"
 exit "${FM_FAKE_SSH_RC:-0}"
 SH
@@ -3408,6 +3413,19 @@ test_sandbox_crew_state_busy_component_and_done_gate() {
   assert_contains "$out" "state: done · source: status-log · report ready · sandbox host sbx-host" \
     "an idle sandbox scout's done reads done"
   pass "fm-crew-state sandbox: the host's busy component composes, and a ship's done needs this home's PR record"
+}
+
+test_sandbox_crew_state_bounds_remote_output() {
+  local d mode out start
+  d=$(setup_sandbox_case sandbox-bounded)
+  for mode in oversized endless stalled; do
+    start=$SECONDS
+    out=$(FM_FAKE_SANDBOX_STREAM=$mode FM_CREW_STATE_REMOTE_SECONDS=1 run_sandbox_crew_state "$d")
+    assert_contains "$out" "unknown-remote:" "$mode host output is unknown"
+    assert_contains "$out" "not proof of death" "$mode host output is never death"
+    [ "$((SECONDS - start))" -lt 8 ] || fail "$mode host output exceeded the read budget"
+  done
+  pass "sandbox crew-state bounds remote bytes and duration"
 }
 
 test_sandbox_crew_state_unreachable_or_untrusted_host_is_unknown() {
@@ -5785,6 +5803,7 @@ test_sandbox_crew_state_reads_the_host_and_never_the_local_worktree
 test_sandbox_crew_state_host_run_step_reconciles_with_the_local_fold
 test_sandbox_ci_ready_log_reconciles_monitoring_run
 test_sandbox_crew_state_busy_component_and_done_gate
+test_sandbox_crew_state_bounds_remote_output
 test_sandbox_crew_state_unreachable_or_untrusted_host_is_unknown
 test_missing_meta
 test_provably_working_via_runs_list_fallback

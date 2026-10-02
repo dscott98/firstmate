@@ -1314,6 +1314,20 @@ assert_equals '# report delivered earlier' "$(cat "$PARENT/data/sbxscout/report.
 if compgen -G "$PARENT/data/sbxscout/.remote-doc.*" >/dev/null; then
   fail "a local receiver failure left a partial staging file"
 fi
+MISSING_HELPER_ROOT="$TMP_ROOT/missing-helper"
+mkdir -p "$MISSING_HELPER_ROOT"
+cp -R "$ROOT/bin" "$MISSING_HELPER_ROOT/bin"
+rm "$MISSING_HELPER_ROOT/bin/fm-on.sh"
+if remote_env "$MISSING_HELPER_ROOT/bin/fm-procevent-remote-reply.sh" handle sbxscout "$SCOUT_GEN" "$SCOUT_LOCALFAIL" >/dev/null; then
+  fail "missing local fm-on.sh accepted the delta"
+fi
+assert_equals '# report delivered earlier' "$(cat "$PARENT/data/sbxscout/report.md")" \
+  "missing local fm-on.sh removed the report"
+assert_equals "$localfail_cursor_before" "$(cat "$PARENT/state/remote-replies/sbxscout.cursor")" \
+  "missing local fm-on.sh committed the delta"
+assert_no_grep 'report rewritten' "$PARENT/state/sbxscout.status" "missing helper mirrored a terminal line"
+assert_equals "$localfail_notes_before" "$(grep -c 'did not transfer' "$PARENT/state/sbxscout.status" || true)" \
+  "missing helper wrote a remote refusal note"
 remote_env "$ADAPTER" handle sbxscout "$SCOUT_GEN" "$SCOUT_LOCALFAIL" >/dev/null \
   || fail "the scout's capture did not apply once the local receiver recovered"
 cmp -s "$TASK_REMOTE/data/sbxscout/report.md" "$PARENT/data/sbxscout/report.md" \

@@ -489,6 +489,30 @@ test_idempotent_write_follows_concurrent_ack() {
   pass "inbox: idempotent enqueue follows a record concurrently moved to handled"
 }
 
+test_idempotent_request_header_follows_concurrent_ack() {
+  local state rec result
+  state="$TMP_ROOT/request-ack-race/state"
+  mkdir -p "$state"
+  rec=$(inbox_lib "$state" fm_task_inbox_write_idempotent "$state" t1 "header race" '' 0123456789abcdef)
+  result=$(bash -c '
+    . "$1"
+    awk() {
+      case "${2:-}" in
+        */t1.inbox/*.msg)
+          case "$2" in
+            */handled/*) ;;
+            *) mv "$2" "${2%/*}/handled/" || return 1 ;;
+          esac ;;
+      esac
+      command awk "$@"
+    }
+    fm_task_inbox_write_idempotent "$2" t1 "header race" "" 0123456789abcdef
+  ' _ "$ROOT/bin/fm-task-inbox-lib.sh" "$state") || fail "header race retry failed"
+  [ "$result" = "$state/t1.inbox/handled/${rec##*/}" ] || fail "header race lost the original request"
+  [ "$(find "$state/t1.inbox" -name '*.msg' | wc -l | tr -d ' ')" = 1 ] || fail "header race duplicated the request"
+  pass "inbox: request header follows acknowledgement between existence check and open"
+}
+
 test_handled_mv_dedups_by_sequence() {
   local state r1 r2 oldest r3
   state="$TMP_ROOT/dedup/state"; mkdir -p "$state"
@@ -998,6 +1022,7 @@ test_ring_submits_its_own_stuck_doorbell
 test_idempotent_write_dedups_exact_body
 test_idempotent_write_keys_unmarked_steers_by_request_id
 test_idempotent_write_follows_concurrent_ack
+test_idempotent_request_header_follows_concurrent_ack
 test_handled_mv_dedups_by_sequence
 test_concurrent_writers_never_clobber
 test_writer_retries_after_a_vanished_lock_collision

@@ -184,10 +184,13 @@ fm_task_inbox_request_of() {  # <record-path>
     rec="${rec%/*}/handled/${rec##*/}"
     [ -f "$rec" ] || return 1
   fi
-  awk '
+  local header='
     $0 == "--" { exit }
     index($0, "request=") == 1 { print substr($0, 9); exit }
-  ' "$rec"
+  '
+  awk "$header" "$rec" 2>/dev/null && return 0
+  case "$rec" in */handled/*) return 1 ;; esac
+  awk "$header" "${rec%/*}/handled/${rec##*/}"
 }
 
 # Write one record into the next sequence slot: temp-write, then atomic

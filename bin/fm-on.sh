@@ -40,7 +40,11 @@
 # is doing, so a legitimately long-but-alive remote command is never falsely
 # killed. FM_SSH_ALIVE_INTERVAL and FM_SSH_ALIVE_COUNT_MAX override the
 # defaults; the worst-case detection window is roughly interval * count.
-set -eu
+set -euo pipefail
+
+if [ -n "${FM_ON_LOCAL_STATUS:-}" ]; then
+  trap 'printf "local\n" > "$FM_ON_LOCAL_STATUS"' EXIT
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM_ROOT="${FM_ROOT_OVERRIDE:-$(cd "$SCRIPT_DIR/.." && pwd)}"
@@ -146,6 +150,8 @@ SSH_ARGS=(
   -o "ServerAliveCountMax=$ALIVE_COUNT_MAX"
   -- "$HOST" fm-remote-entrypoint.sh "$PROTOCOL" "$ROOT_B64" "$HOME_B64" "$ARGV_B64"
 )
+[ -z "${FM_ON_LOCAL_STATUS:-}" ] || printf 'remote\n' > "$FM_ON_LOCAL_STATUS"
+shopt -s execfail
 if [ "$STDIN_MODE" = caller ]; then
   exec "$SSH_BIN" "${SSH_ARGS[@]}"
 fi

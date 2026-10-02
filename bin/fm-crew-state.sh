@@ -1038,8 +1038,18 @@ EOF
 
 if [ -n "$SANDBOX_HOST" ]; then
   SANDBOX_NOTE="sandbox host $SANDBOX_HOST"
-  SANDBOX_OUT=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-on.sh" "$ID" \
-    "$REMOTE_CONTROL" crew-state "$ID" < /dev/null 2>/dev/null) || SANDBOX_OUT=
+  SANDBOX_SECONDS=${FM_CREW_STATE_REMOTE_SECONDS:-10}
+  case "$SANDBOX_SECONDS" in ''|*[!0-9]*|0) SANDBOX_SECONDS=10 ;; esac
+  SANDBOX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-crew-remote.XXXXXX") \
+    || emit unknown remote-endpoint "unknown-remote: $SANDBOX_HOST crew state unreadable (not proof of death)"
+  SANDBOX_OUT=
+  if FM_HOME="$FM_HOME" bash "$SCRIPT_DIR/fm-remote-receive.sh" "$SANDBOX_SECONDS" 65536 65536 "$SANDBOX_TMP/status" \
+    "$SCRIPT_DIR/fm-on.sh" "$ID" "$REMOTE_CONTROL" crew-state "$ID" \
+    < /dev/null > "$SANDBOX_TMP/out" 2>/dev/null \
+    && [ "$(cat "$SANDBOX_TMP/status")" = exit:0 ]; then
+    SANDBOX_OUT=$(cat "$SANDBOX_TMP/out") || SANDBOX_OUT=
+  fi
+  rm -rf -- "$SANDBOX_TMP"
   [ -n "$SANDBOX_OUT" ] \
     || emit unknown remote-endpoint "unknown-remote: $SANDBOX_HOST unreachable or crew state unreadable (not proof of death)"
   sandbox_crew_state_parse "$SANDBOX_OUT" \
