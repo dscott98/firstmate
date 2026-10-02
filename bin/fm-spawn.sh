@@ -22,11 +22,11 @@
 #   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
 #   placeholders, an empty Task, an incomplete pair of Task subsections, a
 #   `## Captain's intent` line opening with a Captain label or address, or a
-#   status-append command naming any status file but this home's
-#   state/<task-id>.status (bin/fm-brief-heading-lib.sh's
-#   fm_brief_foreign_status_file), so a brief rendered for a sandbox task's
-#   home or copied from another home cannot launch a worker that reports where
-#   this task's supervisor never reads.
+#   status-append command naming any status file but
+#   <selected-home>/state/<task-id>.status (bin/fm-brief-heading-lib.sh's
+#   local and remote status validators), so the brief's reporting path agrees
+#   with where the worker runs. Sandbox status mirroring is still deferred
+#   (docs/remote-sandboxes.md, "Current status").
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's

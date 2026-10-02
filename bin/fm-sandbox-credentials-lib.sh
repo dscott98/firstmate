@@ -11,8 +11,8 @@
 # selection rules; this header owns the mechanics. The file is local, gitignored,
 # and captain-owned. An absent file selects nothing.
 #
-# select validates the whole file before choosing anything, so one malformed
-# entry refuses every sandbox spawn rather than being skipped. <mode> is the
+# select checks every entry's structure and source-file safety, and checks
+# credential values for matching entries only. <mode> is the
 # ship's delivery mode, or scout for a scout; <model-provider> is the provider an
 # explicit --model <provider>/<id> names, or empty. It sets
 # FM_SANDBOX_CREDENTIAL_GH_NAME and FM_SANDBOX_CREDENTIAL_GH_SOURCE for the one

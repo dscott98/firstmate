@@ -37,8 +37,7 @@ Until then a placed task's status lines stay on its host, and cleaning one up is
 
 ## Principles
 
-- Placement is an explicit, per-task choice.
-  Nothing infers it, and a sandbox outage is a blocker; firstmate never falls back silently to local placement.
+- [Placement](#placement) owns per-task selection, backlog recording, and the no-fallback rule.
 - The feature is default-off.
   Provider operations require [provider configuration](configuration.md#sandbox-provider-configsandbox-provider); task transport requires an explicit [task route](#task-routes).
 - The contract is provider-neutral.
@@ -61,8 +60,8 @@ Until then a placed task's status lines stay on its host, and cleaning one up is
 ## Credentials
 
 Sandbox credentials are Pi API-key providers plus per-repository GitHub tokens only.
-Project origins containing embedded passwords are refused before sandbox creation.
 They reach a sandbox only in its provisioning manifest, are written only on the sandbox host with mode 0600, and never appear in output, logs, or task records; [host-side task control](#host-side-task-control) owns where they land.
+Project origins containing embedded passwords are refused before sandbox creation.
 The local, captain-owned `config/sandbox-credentials` selects which of them each task receives, by harness, model provider, delivery mode, and project; [the configuration reference](configuration.md#sandbox-credentials-configsandbox-credentials) owns its format.
 Host keys are pinned by the provider, not trusted on first use, and the SSH configuration the sandbox aliases live in is provider-managed.
 
@@ -99,8 +98,8 @@ The provider command must satisfy the invocation, record framing, ownership-labe
   This home's worker account pins do not apply, because a sandbox's credentials come only from `config/sandbox-credentials`.
 
 Spawn checks the backlog item before anything exists, then creates the sandbox and publishes a provisional task record carrying its [route](#task-routes).
-One provider `exec` fast-forwards the sandbox's Firstmate code root to this home's default-branch commit before any `bin/fm-on.sh` call, and the [task readiness](#task-readiness) gate checks the host.
-Read-only provider exec calls then verify exact HEAD equality and clean tracked files before readiness or launch.
+One provider `exec` fast-forwards the sandbox's Firstmate code root to this home's default-branch commit before any `bin/fm-on.sh` call.
+Read-only provider exec calls then verify exact HEAD equality and clean tracked files before the [task readiness](#task-readiness) gate checks the host.
 The template must use `/opt/firstmate` for its code root and `/home/agent/fm-home` for its task home.
 A mismatched or dirty code root refuses the spawn without resetting, checking out, or discarding changes.
 [Host-side task control](#host-side-task-control) then provisions the home and launches the task, and spawn checks the route block it returns field by field before it publishes the final record and moves the backlog item to In flight.
@@ -141,8 +140,7 @@ Provision requires gh when a GitHub token is supplied, passes the token to `gh a
 Storing the repository token in gh deliberately replaces passing `GH_TOKEN`: gh and git authenticate with the stored token exactly as they would with `GH_TOKEN`.
 Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees; the token never enters command arguments or the launch environment.
 
-A sandbox brief is rendered with `bin/fm-brief.sh --for-home <remote-home> --for-root <remote-root>`, which names the sandbox's status file, inbox, and report while writing the brief in the supervising home.
-Spawn refuses any ship or scout brief that names another home's status file, so such a brief launches only in the home it was rendered for.
+Use the remote-rendered brief described under [placement](#placement); [the brief header](../bin/fm-brief.sh) owns its path substitution contract.
 A sandbox brief must be self-contained, because the sandbox cannot read the supervising home's reports.
 
 ## Capacity and failures

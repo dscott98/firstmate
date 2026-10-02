@@ -549,9 +549,10 @@ The first line holds the provider command's absolute path, then `key=value` line
 | `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
 | `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into; whitespace is refused. |
 
-`default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative or whitespace-bearing provider path, `ssh_include`, and a malformed duration are refused with the concrete problem named.
+`default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative provider path, a relative or whitespace/control-character-bearing `ssh_include`, and a malformed duration are refused with the concrete problem named.
 Blank lines and `#` comments are accepted after the first line.
 The provider path may contain spaces and must name an executable file.
+For `config` and sandbox placement, its file name must be a printable token without whitespace, `=`, or a leading `-`, because task records use that name to identify the provider; parent directories may still contain spaces.
 `default_profile` must be a non-empty printable token without whitespace, `=`, or a leading `-`.
 The adapter validates `ssh_include` but does not write it, pass it to the provider, or install an SSH `Include` directive; configure the provider and SSH client consistently with that path.
 
@@ -579,13 +580,14 @@ minimax       pi:minimax  /home/me/.config/firstmate/minimax.key
 | --- | --- |
 | `<name>` | A unique label, used in messages and the spawn's success line; letters, digits, `.`, `_`, and `-`. |
 | `<destination>` | `github` for the GitHub token the sandbox account stores for github.com, or `pi:<provider>` for one API-key entry of the sandbox account's Pi credential file. |
-| `<source>` | The absolute path of a regular file owned by this account, with no group or other permission bits (mode 0600 or 0400), holding the value as one line of printable ASCII without spaces. |
+| `<source>` | The absolute path of a readable regular file, not a symlink, owned by this account, with no group or other permission bits (for example mode 0600 or 0400), holding the value as one line of printable ASCII without spaces. |
 | `<condition>` | Optional `harness=`, `provider=`, `mode=`, or `project=`, each at most once, each holding one or more comma-separated values. |
 
 A credential is sent when every condition it carries matches the task: its harness, the provider its `--model <provider>/<id>` names, its delivery mode (`scout` for a scout), and its project.
 A `pi:<provider>` entry is additionally sent only to a `pi` or `pi-signed` worker whose model names that provider, so a sandboxed Pi worker needs an explicit `--model <provider>/<id>` and a matching entry, or the spawn refuses.
-At most one `github` entry and one Pi entry may match a task, and the whole file is validated on every sandbox spawn, so a malformed entry refuses the spawn rather than being skipped.
-Values travel only in the provisioning manifest on the transport's stdin; they never appear in arguments, output, task records, or logs.
+At most one `github` entry and one Pi entry may match a task.
+Every entry's structure and source-file safety are validated on every sandbox spawn, including entries that do not match; credential values are validated only for selected entries.
+See [sandbox credentials](remote-sandboxes.md#credentials) for transport and secrecy guarantees.
 
 ## Away-mode supervisor backend (FM_SUPERVISOR_BACKEND / FM_SUPERVISOR_TARGET)
 

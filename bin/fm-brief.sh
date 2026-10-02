@@ -36,8 +36,9 @@
 #   refuses any profile but the provider's configured default unless the brief
 #   records it, and refuses a brief whose recorded profile disagrees with the
 #   spawn's, so a non-default profile such as open needs this task's own brief.
-#   bin/fm-spawn.sh refuses to launch a brief naming another home's status file,
-#   so a brief rendered for a sandbox launches only in that sandbox's home.
+#   bin/fm-spawn.sh checks the status file against the selected placement's
+#   home: a remote-rendered brief needs --placement sandbox on the supervising
+#   host, then launches locally inside the sandbox home it names.
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   It offers the Lavish review loop only when `fm-bootstrap.sh lavish-compatible`

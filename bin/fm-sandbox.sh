@@ -28,7 +28,7 @@
 # gitignored; FM_HOME selects the home, FM_CONFIG_OVERRIDE redirects
 # config/). With no config file every verb except --help refuses with exit 3
 # and changes nothing else. docs/configuration.md, "Sandbox provider",
-# owns the file format, required and optional keys, and default-profile
+# owns the file format, required keys, and default-profile
 # restrictions.
 #
 # config never invokes the provider: it validates the file and the provider
