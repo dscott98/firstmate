@@ -757,18 +757,23 @@ EOT
 # line names, so it is stored outside the disposable sandbox - or when a
 # remote-tracking ref in this home's project clone contains it. A published
 # Gerrit change is refused, because its published-tree check needs the copy's
-# objects, which only the sandbox holds. 1 when the claim is refused; stdout
-# then holds a one-line reason and no other output.
+# objects, which only the sandbox holds, and a published-for-review report
+# naming no Gerrit change is refused as the local gate refuses it. 1 when the
+# claim is refused; stdout then holds a one-line reason and no other output.
 fm_dod_accept_sandbox_ship_done() {  # <kind> <mode> <project> <line> <state> <id> <meta> <control-script> <forge-head>
-  local kind=$1 mode=$2 project=$3 line=$4 state=$5 id=$6 meta=$7 control=$8 forge_head=$9 note url sha
+  local kind=$1 mode=$2 project=$3 line=$4 state=$5 id=$6 meta=$7 control=$8 forge_head=$9 note url sha gerrit=0
   fm_dod_should_gate_ship_done "$kind" "$mode" "$line" || return 0
   note=$(status_line_note "$line")
   url=$(fm_dod_pr_url_from_done_note "$note") || url=
   if [ -n "$url" ] && fm_dod_recorded_pr_on_forge "$state" "$id" "$meta" "$mode" "$url"; then
     return 0
   fi
-  if fm_dod_note_reports_published_change "$note" \
-    || { [ -n "$url" ] && fm_pr_url_parse "$url" && [ "$FM_PR_PROVIDER" = gerrit ]; }; then
+  [ -n "$url" ] && fm_pr_url_parse "$url" && [ "$FM_PR_PROVIDER" = gerrit ] && gerrit=1
+  if [ "$gerrit" = 0 ] && fm_dod_note_reports_published_change "$note"; then
+    printf '%s\n' "the published-for-review report does not name a Gerrit change in the canonical https://<host>/c/<project>/+/<number> form"
+    return 1
+  fi
+  if [ "$gerrit" = 1 ]; then
     printf '%s\n' "a published Gerrit change cannot be verified for a sandbox task: its published-tree check needs the worker copy, which only the sandbox holds"
     return 1
   fi

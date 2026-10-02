@@ -369,6 +369,26 @@ EOF
 
 # The draft check the DoD hands a worker must be the gh-axi path that rule 3 of
 # every ship brief requires for GitHub operations, never raw gh (issue 5325).
+# A sandbox ship's published-for-review claim is refused before any host read:
+# a Gerrit change because only the sandbox copy can compare its published tree,
+# and a report naming no Gerrit change with the same reason the local gate gives.
+test_sandbox_published_change_claims_are_refused_by_cause() {
+  local reason
+  reason=$(fm_dod_accept_sandbox_ship_done ship direct-PR "$TMP_ROOT/no-project" \
+    'done: PR https://gerrit.example/c/group/app/+/4201 published for review' \
+    "$TMP_ROOT" task-s "$TMP_ROOT/no-meta" fm-remote-task-control.sh '') \
+    && fail "a sandbox Gerrit change was accepted"
+  assert_contains "$reason" "a published Gerrit change cannot be verified for a sandbox task" \
+    "the Gerrit refusal does not name its cause"
+  reason=$(fm_dod_accept_sandbox_ship_done ship direct-PR "$TMP_ROOT/no-project" \
+    'done: PR https://github.com/o/r/pull/4 published for review' \
+    "$TMP_ROOT" task-s "$TMP_ROOT/no-meta" fm-remote-task-control.sh '') \
+    && fail "a sandbox published-for-review report naming no Gerrit change was accepted"
+  assert_contains "$reason" "the published-for-review report does not name a Gerrit change" \
+    "a non-Gerrit published-for-review report got the Gerrit-specific refusal"
+  pass "a sandbox published-for-review claim is refused before any host read, naming its real cause"
+}
+
 test_pr_based_dod_draft_check_uses_gh_axi() {
   local mode out
   for mode in direct-PR no-mistakes; do
@@ -392,6 +412,7 @@ test_recorded_merged_pr_is_landed_after_prune
 test_merge_marker_binds_to_the_named_pr
 test_forge_recorded_head_is_accepted_without_local_object
 test_direct_pr_recorded_head_does_not_cover_unpushed_commit
+test_sandbox_published_change_claims_are_refused_by_cause
 test_ci_ready_variants_are_gated
 test_keyed_and_spaced_done_lines_are_gated
 test_local_only_linked_branch_is_accepted
