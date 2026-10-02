@@ -5,10 +5,11 @@
 # clone, and the receiving host re-validates whatever reached it, so this file
 # is the single owner of which origins are accepted. Nothing here discovers an
 # origin, so no caller has to create a local clone just to learn one. It is
-# sourced by both the sending parent (bin/fm-remote-home-seed.sh) and the
-# receiving host (bin/fm-remote-home-provision.sh), so an unsafe value is
-# refused at each end rather than trusted because the other end already looked
-# at it.
+# sourced by both sending parents (bin/fm-remote-home-seed.sh, and
+# bin/fm-spawn.sh for a sandbox task) and both receiving hosts
+# (bin/fm-remote-home-provision.sh and bin/fm-remote-task-control.sh), so an
+# unsafe value is refused at each end rather than trusted because the other end
+# already looked at it.
 #
 # Validation is STRUCTURE AND SAFETY ONLY, never the forge or the domain.
 # Firstmate is a shared template, so any host must be able to serve a project:
@@ -18,7 +19,7 @@
 # here, and there must never be one.
 #
 # Accepted forms:
-#   https://[userinfo@]host[:port]/path, http://…, ssh://…, git://…
+#   https://[user@]host[:port]/path, http://…, ssh://…, git://…
 #                                 a non-option-shaped plain host or bracketed
 #                                 IPv6 literal, an optional numeric port, and
 #                                 any path
@@ -62,7 +63,7 @@ fm_project_origin_safe() { # <url>; 0 when the URL is an accepted clone URL
           userpart=${authority%@*}
           hostpart=${authority##*@}
           case $userpart in
-            '' | -* | *'['* | *']'*) return 1 ;;
+            '' | -* | *:* | *@* | *'['* | *']'*) return 1 ;;
           esac
           ;;
       esac

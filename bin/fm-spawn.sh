@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Spawn a direct report: a crewmate in a treehouse or Orca worktree, or a
 # secondmate in its isolated firstmate home.
-# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
-#        fm-spawn.sh <task-id> <project-dir> --scout [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>]
+# Usage: fm-spawn.sh <task-id> <project-dir> --mode <no-mistakes|direct-PR|local-only> --yolo <on|off> [--branch-prefix <prefix>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--placement <local|sandbox> [--sandbox-profile <name>]]
+#        fm-spawn.sh <task-id> <project-dir> --scout [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] [--placement <local|sandbox> [--sandbox-profile <name>]]
 #        fm-spawn.sh <task-id> [<firstmate-home>] [--harness <name>|harness|launch-command] [--model <name>] [--effort <level>] [--backend <name>] --secondmate
 #   --mode and --yolo are this task's delivery contract, REQUIRED for every ship
 #   spawn and refused on --scout and --secondmate spawns. Firstmate resolves both
@@ -22,11 +22,11 @@
 #   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
 #   placeholders, an empty Task, an incomplete pair of Task subsections, a
 #   `## Captain's intent` line opening with a Captain label or address, or a
-#   status-append command naming any status file but this home's
-#   state/<task-id>.status (bin/fm-brief-heading-lib.sh's
-#   fm_brief_foreign_status_file), so a brief rendered for a sandbox task's
-#   home or copied from another home cannot launch a worker that reports where
-#   this task's supervisor never reads.
+#   status-append command naming any status file but
+#   <selected-home>/state/<task-id>.status (bin/fm-brief-heading-lib.sh's
+#   local and remote status validators), so the brief's reporting path agrees
+#   with where the worker runs. Sandbox status mirroring is still deferred
+#   (docs/remote-sandboxes.md, "Current status").
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
@@ -274,12 +274,55 @@
 #   containment test reads local refs only and never fetches, so this gate stays
 #   usable offline; a stale remote-tracking ref can therefore make an unpushed
 #   commit look contained, which is exactly why no remedy command is printed.
+#   --placement <local|sandbox> is this task's explicit placement, chosen per task
+#   at intake and never inferred; local, the default, is everything above.
+#   sandbox runs an ordinary ship or scout in a one-task Firstmate home on a
+#   disposable host that the provider adapter (bin/fm-sandbox.sh) creates, driven
+#   through bin/fm-on.sh's task route and that host's own control plane
+#   (bin/fm-remote-task-control.sh); docs/remote-sandboxes.md owns the operator
+#   view. Before anything exists it refuses, each by name, --secondmate, --mode
+#   local-only, an explicit --backend other than tmux, a raw or unverified
+#   harness, Claude pending the PR7 real-host smoke test, a Pi harness whose
+#   --model names no provider or no credential for it, a brief carrying the --herdr-lab isolation contract or not naming the
+#   sandbox home's status file, an unregistered project or one with no clonable
+#   origin, an existing task record, a missing or invalid config/sandbox-provider
+#   (read through bin/fm-sandbox.sh config, whose remote_root and remote_home are
+#   fixed at /opt/firstmate and /home/agent/fm-home), and an unauthorized profile:
+#   --sandbox-profile <name> defaults to the provider's default_profile, any
+#   other profile must be the one the brief records (fm-brief.sh
+#   --sandbox-profile), and a recorded profile must match the spawn's. A sandbox
+#   outage or refusal is a blocker, never a local fallback.
+#   The sequence is the backlog preflight (no sandbox exists before it), create,
+#   a provisional task record carrying the route, one provider exec that
+#   fast-forwards the host's code root to this home's default-branch commit
+#   (`git -C <remote_root> pull --quiet --ff-only --no-rebase --no-tags origin
+#   <commit>`), read-only provider exec checks of exact HEAD and tracked-file
+#   cleanliness, the task readiness gate, provision, launch, a strict check of the
+#   returned route block, then the final record and the backlog transition under
+#   the task's meta lock. The provisioning manifest carries the brief's exact
+#   bytes, the project's origin and registry line, the harness profile, this
+#   home's claude-permission-mode, keep-ai-trailers, and launch-env-allowlist, and
+#   the credentials config/sandbox-credentials selects for this task
+#   (bin/fm-sandbox-credentials-lib.sh); it exists only in this process and the
+#   transport's stdin, never in a file, an argument, or the record.
+#   A failure before launch destroys the sandbox, which holds no work, and
+#   removes the provisional record. Once launch may have started - any launch
+#   failure, a malformed route block, or a failed record update or backlog
+#   transition - the sandbox is held and the record kept, so the route stays
+#   reachable for reconciliation. An SSH exit 255 from the readiness gate,
+#   provisioning, or launch is returned unchanged either way. The status
+#   mirror and the remote supervision verbs are later stages
+#   (docs/remote-sandboxes.md, "Current status").
+#   --relaunch keeps the recorded placement: a --placement that differs from it
+#   is refused, and a sandbox task's relaunch is refused until its control plane
+#   routes there.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
-#   source of truth; shared --scout/--harness/--model/--effort/--backend/--mode/--yolo
-#   applies to every pair. A ship batch therefore carries one delivery contract, and each
-#   pair still checks it against its own brief; a batch spanning modes is two invocations.
+#   source of truth; shared --scout/--harness/--model/--effort/--backend/--mode/--yolo/
+#   --placement/--sandbox-profile applies to every pair. A ship batch therefore
+#   carries one delivery contract, and each pair still checks it against its own
+#   brief; a batch spanning modes or placements is two invocations.
 #   If config/crew-dispatch.json exists, shared --harness is required for crewmate
 #   and scout batches. The loop lives here, in bash, so callers never hand-write a
 #   multi-task shell loop (the tool shell is zsh, which does not word-split unquoted
@@ -338,7 +381,9 @@
 #   receives this process's own CLAUDE_CONFIG_DIR when it is set, and Pi the
 #   destination pane's ambient account. A present file pins every launch of
 #   that runner from this home - ship, scout, local secondmate, raw Claude
-#   command, and relaunch - to the declared account root, and the spawn
+#   command, and relaunch, but never a --placement sandbox launch, whose
+#   credentials come only from config/sandbox-credentials - to the declared
+#   account root, and the spawn
 #   refuses before any endpoint, worktree, or record exists when the file is
 #   malformed, the root is unusable, or the runner's own check says it is not
 #   signed in. A pinned Claude launch sheds the environment credentials Claude
@@ -618,16 +663,15 @@ fi
 . "$SCRIPT_DIR/fm-ff-lib.sh"
 # shellcheck source=bin/fm-wake-lib.sh
 . "$SCRIPT_DIR/fm-wake-lib.sh"
-# shellcheck source=bin/fm-classify-lib.sh
-. "$SCRIPT_DIR/fm-classify-lib.sh"
 fm_backlog_directory_present "$STATE" "state directory" || {
   echo "error: spawn refused: $FM_BACKLOG_TRANSITION_ERROR" >&2
   exit 1
 }
 # shellcheck source=bin/fm-secondmate-nudge-lib.sh
 . "$SCRIPT_DIR/fm-secondmate-nudge-lib.sh"
-# shellcheck source=bin/fm-backend.sh
-. "$SCRIPT_DIR/fm-backend.sh"
+# The route library loads fm-backend.sh; avoid analyzing it twice.
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
 . "$SCRIPT_DIR/fm-control-lib.sh"
 # shellcheck source=bin/fm-gate-refuse-lib.sh
@@ -636,8 +680,8 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-cursor-lib.sh
 . "$SCRIPT_DIR/fm-cursor-lib.sh"
-# shellcheck source=bin/fm-pr-lib.sh
-. "$SCRIPT_DIR/fm-pr-lib.sh"
+# DoD loads the PR, classifier, and timeout libraries. Re-sourcing them here
+# duplicates ShellCheck's source graph and exceeds the per-root memory bound.
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
 # shellcheck source=bin/fm-trace-context-lib.sh
@@ -646,10 +690,12 @@ fm_backlog_directory_present "$STATE" "state directory" || {
 . "$SCRIPT_DIR/fm-remote-readiness-lib.sh"
 # shellcheck source=bin/fm-herdr-machine-lib.sh
 . "$SCRIPT_DIR/fm-herdr-machine-lib.sh"
-# shellcheck source=bin/fm-timeout-lib.sh
-. "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-worker-account-lib.sh
 . "$SCRIPT_DIR/fm-worker-account-lib.sh"
+# shellcheck source=bin/fm-project-origin-lib.sh
+. "$SCRIPT_DIR/fm-project-origin-lib.sh"
+# shellcheck source=bin/fm-sandbox-credentials-lib.sh
+. "$SCRIPT_DIR/fm-sandbox-credentials-lib.sh"
 # Fail closed before any fleet mutation: a no-mistakes gate agent must never spawn
 # a direct report (see bin/fm-gate-refuse-lib.sh).
 fm_refuse_if_gate_agent
@@ -666,6 +712,8 @@ MODE=
 YOLO=
 BRANCH_PREFIX=fm/
 TRACEPARENT_ARG=
+PLACEMENT=local
+SANDBOX_PROFILE_ARG=
 HARNESS_SET=0
 MODEL_SET=0
 EFFORT_SET=0
@@ -674,6 +722,8 @@ MODE_SET=0
 YOLO_SET=0
 BRANCH_PREFIX_SET=0
 TRACEPARENT_SET=0
+PLACEMENT_SET=0
+SANDBOX_PROFILE_SET=0
 RELAUNCH=0
 POS=()
 want_value=
@@ -717,6 +767,14 @@ for a in "$@"; do
     traceparent)
       TRACEPARENT_ARG=$a
       TRACEPARENT_SET=1
+      ;;
+    placement)
+      PLACEMENT=$a
+      PLACEMENT_SET=1
+      ;;
+    sandbox-profile)
+      SANDBOX_PROFILE_ARG=$a
+      SANDBOX_PROFILE_SET=1
       ;;
     *)
       echo "error: internal parser state for --$want_value" >&2
@@ -776,6 +834,16 @@ for a in "$@"; do
     TRACEPARENT_ARG=${a#--traceparent=}
     TRACEPARENT_SET=1
     ;;
+  --placement) want_value=placement ;;
+  --placement=*)
+    PLACEMENT=${a#--placement=}
+    PLACEMENT_SET=1
+    ;;
+  --sandbox-profile) want_value=sandbox-profile ;;
+  --sandbox-profile=*)
+    SANDBOX_PROFILE_ARG=${a#--sandbox-profile=}
+    SANDBOX_PROFILE_SET=1
+    ;;
   *) POS+=("$a") ;;
   esac
 done
@@ -809,6 +877,21 @@ done
 }
 [ "$TRACEPARENT_SET" -eq 0 ] || [ -n "$TRACEPARENT_ARG" ] || {
   echo "error: --traceparent requires a non-empty value" >&2
+  exit 1
+}
+case "$PLACEMENT" in
+local | sandbox) ;;
+*)
+  echo "error: --placement must be local or sandbox (got '$PLACEMENT')" >&2
+  exit 1
+  ;;
+esac
+[ "$SANDBOX_PROFILE_SET" -eq 0 ] || [ -n "$SANDBOX_PROFILE_ARG" ] || {
+  echo "error: --sandbox-profile requires a non-empty value" >&2
+  exit 1
+}
+[ "$SANDBOX_PROFILE_SET" -eq 0 ] || [ "$PLACEMENT" = sandbox ] || {
+  echo "error: --sandbox-profile applies only to --placement sandbox" >&2
   exit 1
 }
 # A parent-delivered carrier replaces this home's own resolution, so it is
@@ -857,6 +940,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch reuses the task's recorded ship branch; --branch-prefix cannot override it" >&2
     exit 1
   }
+  [ "$SANDBOX_PROFILE_SET" -eq 0 ] || {
+    echo "error: --relaunch reuses the task's recorded sandbox; --sandbox-profile cannot override it" >&2
+    exit 1
+  }
 else
   # Delivery contract (AGENTS.md section 7). A ship task's mode and yolo are
   # firstmate's per-task decision, so they are required and closed-set validated
@@ -903,6 +990,27 @@ else
       exit 1
     }
   fi
+fi
+
+# Sandbox placement refusals that need nothing but the command line (header:
+# --placement). Each names its reason and runs before any lock, sandbox, or
+# record exists; spawn_sandbox_task below owns every other check.
+if [ "$PLACEMENT" = sandbox ] && [ "$RELAUNCH" -eq 0 ]; then
+  [ "$KIND" != secondmate ] || {
+    echo "error: --placement sandbox refuses --secondmate: a persistent home belongs on an agent host as a remote second mate, never on a disposable sandbox" >&2
+    exit 1
+  }
+  [ "$MODE" != local-only ] || {
+    echo "error: --placement sandbox refuses --mode local-only: its landing fast-forwards this home's own clone, which a sandbox's branch never reaches" >&2
+    exit 1
+  }
+  case "${BACKEND_ARG:-tmux}" in
+  tmux) ;;
+  *)
+    echo "error: --placement sandbox runs its worker only on the tmux backend in this version, not '$BACKEND_ARG'" >&2
+    exit 1
+    ;;
+  esac
 fi
 
 spawn_remote_secondmate() {
@@ -1196,6 +1304,792 @@ spawn_remote_secondmate() {
   return 0
 }
 
+# --- shared validators -------------------------------------------------------
+# One owner for each check that a local spawn and a sandbox placement (below)
+# both apply to a ship or scout brief and its backlog item, so the two paths
+# cannot drift apart.
+
+spawn_check_brief_content() { # <brief>
+  local brief=$1 address_line
+  if fm_brief_task_placeholders_present "$brief"; then
+    echo "error: $brief still contains {TASK} or {FIRSTMATE_SPEC}; fill ## Captain's intent and ## Firstmate spec before spawn" >&2
+    exit 1
+  fi
+  if ! fm_brief_task_content_valid "$brief"; then
+    echo "error: $brief must contain nonempty ## Captain's intent and ## Firstmate spec subsections (or a nonempty legacy # Task body) before spawn" >&2
+    exit 1
+  fi
+  if address_line=$(fm_brief_intent_address_line "$brief"); then
+    echo "error: $brief ## Captain's intent has an operator-address line: $address_line; write the captain's actual words without a Captain label or address before spawn, since the heading already records provenance" >&2
+    exit 1
+  fi
+}
+
+# Sets CAPTAIN_INTENT for a no-mistakes ship, refusing a legacy brief that
+# carries no provenance-marked captain words to pass as --intent.
+spawn_resolve_captain_intent() { # <brief>
+  local brief=$1 legacy_task_body
+  if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
+    if fm_brief_task_heading_present "$brief" "## Captain's intent"; then
+      CAPTAIN_INTENT=$(fm_brief_task_heading_body "$brief" "## Captain's intent")
+    else
+      legacy_task_body=$(fm_brief_heading_body "$brief" "# Task")
+      CAPTAIN_INTENT=$(fm_brief_marked_captain_words "$legacy_task_body")
+      if [ -z "$(printf '%s' "$CAPTAIN_INTENT" | tr -d '[:space:]')" ]; then
+        echo "error: legacy mixed # Task brief has no provenance-marked captain words for no-mistakes --intent; add [captain] lines or migrate to ## Captain's intent and ## Firstmate spec" >&2
+        exit 1
+      fi
+    fi
+  fi
+}
+
+delivery_rigor_rank() { # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
+  case "$1" in
+  no-mistakes) echo 3 ;;
+  direct-PR) echo 2 ;;
+  local-only) echo 1 ;;
+  *) echo 0 ;;
+  esac
+}
+
+# Brief/spawn delivery agreement, checked before any endpoint exists.
+# fm-brief.sh records a ship brief's mode as a fixed "Delivery contract: mode=<mode>"
+# line, with " forge=<forge>" appended on a bound forge. A spawn that disagrees
+# would launch a worker whose instructions and whose recorded task delivery
+# differ, which is the exact drift this contract prevents.
+spawn_check_ship_delivery() { # <brief> <source-brief>
+  local brief=$1 source_brief=$2 PROJ_NAME STANDING_FORGE STANDING_MODE BRIEF_MODE BRIEF_FORGE BRIEF_BRANCH STANDING_BRANCH forge_scaffold
+  PROJ_NAME=$(basename "$PROJ_ABS")
+  # The parser's own refusal reaches the operator here rather than being
+  # discarded: an entry it refuses (an unknown forge token, or a forge on
+  # local-only) resolves to no posture at all, and launching on the silent
+  # default is how a mistyped forge would hand a Gerrit project the
+  # pull-request contract.
+  if ! STANDING_FORGE=$("$FM_ROOT/bin/fm-project-mode.sh" --forge "$PROJ_NAME" 2>/dev/null); then
+    "$FM_ROOT/bin/fm-project-mode.sh" --forge "$PROJ_NAME" >/dev/null || true
+    echo "error: $ID cannot launch: the registry entry for $PROJ_NAME does not resolve to a delivery posture (see the refusal above); correct data/projects.md and spawn again" >&2
+    exit 1
+  fi
+  [ -n "$STANDING_FORGE" ] || STANDING_FORGE=none
+  STANDING_MODE=$("$FM_ROOT/bin/fm-project-mode.sh" --raw "$PROJ_NAME" 2>/dev/null | cut -d' ' -f1) || STANDING_MODE=
+  BRIEF_MODE=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
+  BRIEF_FORGE=$(sed -n 's/^Delivery contract: mode=[^ ]*.*[[:space:]]forge=\([^ ]*\).*$/\1/p' "$brief" | head -n 1)
+  [ -n "$BRIEF_FORGE" ] || BRIEF_FORGE=none
+  BRIEF_BRANCH=$(sed -n 's/^Ship branch: //p' "$brief" | head -n 1)
+  if [ -n "$BRIEF_BRANCH" ]; then
+    [ "$BRIEF_BRANCH" = "$BRANCH" ] || {
+      echo "error: branch mismatch for $ID: the brief says branch=$BRIEF_BRANCH but this spawn selected branch=$BRANCH" >&2
+      exit 1
+    }
+  elif [ "$BRANCH" != "fm/$ID" ]; then
+    # A relaunch's branch comes from the meta record (--branch-prefix is refused
+    # there), so a promoted scout whose brief never carried a Ship branch line
+    # must relaunch on that recorded branch rather than be refused.
+    if [ "$RELAUNCH" -eq 1 ]; then
+      echo "warning: $brief records no ship branch; relaunching on the task's recorded branch $BRANCH" >&2
+    else
+      echo "error: $brief records no ship branch; regenerate it with --branch-prefix before spawning $BRANCH" >&2
+      exit 1
+    fi
+  else
+    echo "warning: $brief records no ship branch; defaulting to legacy branch $BRANCH" >&2
+  fi
+  if [ -z "$BRIEF_MODE" ]; then
+    echo "warning: $brief records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode $MODE - confirm its definition of done matches" >&2
+  elif [ "$BRIEF_MODE" != "$MODE" ]; then
+    echo "error: delivery mismatch for $ID: the brief says mode=$BRIEF_MODE but this spawn passed --mode $MODE; correct the flag or re-scaffold the brief so the worker's instructions and the task record agree" >&2
+    exit 1
+  fi
+  # The registered forge is the captain's confirmed binding (bin/fm-project-mode.sh)
+  # and is never inferred here from a remote, host, or protocol. A brief that
+  # disagrees with it would tell the worker to open a pull request a Gerrit
+  # server does not have, or to publish a change to a forge that is not Gerrit.
+  if [ "$BRIEF_FORGE" != "$STANDING_FORGE" ]; then
+    if [ "$STANDING_FORGE" = none ]; then
+      forge_scaffold="fm-brief.sh $ID $PROJ_NAME --mode $MODE"
+    else
+      forge_scaffold="fm-brief.sh $ID $PROJ_NAME --mode $MODE --forge $STANDING_FORGE"
+    fi
+    echo "error: forge mismatch for $ID: $PROJ_NAME is registered forge=$STANDING_FORGE but $source_brief records forge=$BRIEF_FORGE; keep the filled ## Captain's intent and ## Firstmate spec bodies, remove $source_brief, re-scaffold it with $forge_scaffold, then re-fill those two subsections, so the worker's publication matches the project's forge" >&2
+    exit 1
+  fi
+  # Merge authority on a Gerrit forge is refused rather than quietly dropped, on
+  # the captain's decision of 2026-09-15: a Code-Review+2 is a positive
+  # attributed claim that a named human approved, and firstmate must not
+  # manufacture one.
+  if [ "$STANDING_FORGE" = gerrit ] && [ "$YOLO" = on ]; then
+    echo "error: --yolo on is refused for $ID: $PROJ_NAME is registered forge=gerrit, where yolo is inactive because a Code-Review+2 is a positive attributed claim that a named human approved and firstmate must not manufacture one (captain's decision 2026-09-15); spawn with --yolo off" >&2
+    exit 1
+  fi
+  # The registry holds the captain's standing posture, so dropping below it is
+  # allowed (a current explicit captain instruction wins) but never silent. An
+  # unregistered project resolves to the same no-mistakes standing default, which
+  # is why the notice names the standing posture rather than the registry line. A
+  # conditional policy is excluded: both of its legs are legitimate classifications.
+  if [ -n "$STANDING_MODE" ] && [ "$STANDING_MODE" != no-mistakes-prod-only ] &&
+    [ "$(delivery_rigor_rank "$MODE")" -lt "$(delivery_rigor_rank "$STANDING_MODE")" ]; then
+    echo "notice: $ID ships mode=$MODE while the standing posture for $PROJ_NAME is $STANDING_MODE - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
+  fi
+  # The registered ship-branch prefix (bin/fm-project-mode.sh) is the captain's
+  # answer to "should this project's branches read as firstmate-authored", so a
+  # spawn that ships the legacy fm/ prefix past a registered override is
+  # announced, not refused: the brief-vs-spawn agreement above already
+  # guarantees the worker's instructions match the branch this spawn selected.
+  STANDING_BRANCH=$("$FM_ROOT/bin/fm-project-mode.sh" --branch-prefix "$PROJ_NAME" 2>/dev/null) || STANDING_BRANCH=
+  if [ "$BRANCH" != "$STANDING_BRANCH$ID" ]; then
+    echo "notice: $ID ships branch=$BRANCH while $PROJ_NAME registers the ship-branch prefix '$STANDING_BRANCH' (branch $STANDING_BRANCH$ID) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
+  fi
+}
+
+# Backlog preflight (bin/fm-backlog-transition-lib.sh). This spawn is about to
+# become the sole owner of the row's In-flight transition, so prove the row is
+# transitionable BEFORE any endpoint, worktree, or record exists: a refusal here
+# costs nothing to unwind, while the same refusal after publication would strand
+# a live pane. The authoritative mutation still runs under the meta lock below.
+spawn_backlog_preflight() {
+  local spawn_preflight_actor BACKLOG_GATE_STATUS
+  BACKLOG_TRANSITION=0
+  BACKLOG_ROW_STATE=
+  if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
+    BACKLOG_TRANSITION=1
+    if fm_backlog_row_probe "$DATA" "$ID"; then
+      BACKLOG_ROW_STATE=$FM_BACKLOG_ROW_STATE
+    elif [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
+      echo "error: task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (bin/fm-tasks-axi.sh add $ID '<title>' --kind $KIND) and re-run" >&2
+      exit 1
+    else
+      echo "error: task $ID's backlog item could not be read before dispatch ($FM_BACKLOG_ROW_ERROR)" >&2
+      exit 1
+    fi
+    spawn_preflight_actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
+    if [ "$spawn_preflight_actor" = branch ] && fm_lease_away_relocated; then
+      if [ "$BACKLOG_ROW_STATE" != "queued no no" ]; then
+        echo "error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task $ID has no dispatchable backlog item in this home" >&2
+        exit 1
+      fi
+    elif ! fm_backlog_row_dispatchable "$BACKLOG_ROW_STATE"; then
+      echo "error: this home's backlog item $ID is not dispatchable in state $BACKLOG_ROW_STATE; refusing before creating its endpoint or local copy" >&2
+      exit 1
+    fi
+  else
+    BACKLOG_GATE_STATUS=$?
+    if [ "$BACKLOG_GATE_STATUS" -eq 2 ]; then
+      echo "error: task $ID cannot be dispatched because its backlog data directory is inaccessible: $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      exit 1
+    fi
+  fi
+}
+
+resolve_project_dir_arg() {
+  local path=$1
+  case "$path" in
+  projects/*) printf '%s/%s\n' "$PROJECTS" "${path#projects/}" ;;
+  *) printf '%s\n' "$path" ;;
+  esac
+}
+
+# --- sandbox placement ---------------------------------------------------------
+# The --placement sandbox branch (header). Everything below runs on this host;
+# the sandbox host runs its own ordinary spawn through
+# bin/fm-remote-task-control.sh, reached by bin/fm-on.sh's task route.
+
+# What an exit does to a sandbox this spawn created: destroy it while nothing
+# can have launched in it, hold it and its record once a launch may have begun.
+SANDBOX_ON_EXIT=
+SANDBOX_NAME=
+SANDBOX_ALIAS=
+SANDBOX_RECORD_PUBLISHED=0
+SANDBOX_TMP=
+
+sandbox_abort_cleanup() { # <exit-status>
+  local status=$1 out
+  [ -z "$SANDBOX_TMP" ] || rm -rf -- "$SANDBOX_TMP" 2>/dev/null || true
+  SANDBOX_TMP=
+  case "$SANDBOX_ON_EXIT" in
+  destroy)
+    SANDBOX_ON_EXIT=
+    [ "$status" -ne 0 ] || return 0
+    # The record goes first: a crash between the two steps leaves a sandbox
+    # with no record, which session start reports, never a record that names
+    # a sandbox already gone.
+    if [ "$SANDBOX_RECORD_PUBLISHED" = 1 ]; then
+      if fm_backlog_atomic_transition remove "$STATE/$ID.meta" "provisional sandbox task record" "$STATE"; then
+        SANDBOX_RECORD_PUBLISHED=0
+      else
+        echo "warning: task $ID's provisional record could not be removed ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+      fi
+    fi
+    if out=$("$SCRIPT_DIR/fm-sandbox.sh" destroy "$SANDBOX_NAME" --expect-task "$ID" </dev/null 2>&1); then
+      echo "notice: task $ID never launched, so its sandbox $SANDBOX_NAME was destroyed" >&2
+    else
+      echo "error: task $ID never launched, but its sandbox $SANDBOX_NAME could not be destroyed ($(first_line "${out#refused: }")); it holds no work, so destroy it with bin/fm-sandbox.sh destroy $SANDBOX_NAME --expect-task $ID" >&2
+    fi
+    ;;
+  hold)
+    SANDBOX_ON_EXIT=
+    [ "$status" -ne 0 ] || return 0
+    echo "error: task $ID's launch may have started a worker on $SANDBOX_ALIAS, so its sandbox $SANDBOX_NAME is held and its task record kept for reconciliation; nothing was destroyed, and the task must not be dispatched again until it is reconciled" >&2
+    ;;
+  esac
+  return 0
+}
+
+# config/sandbox-provider is read through its one owner, bin/fm-sandbox.sh
+# config, which refuses a missing or invalid file with the reason.
+sandbox_config_load() {
+  local out line
+  if ! out=$("$SCRIPT_DIR/fm-sandbox.sh" config </dev/null 2>&1); then
+    echo "error: --placement sandbox refused: $(first_line "${out#refused: }")" >&2
+    exit 1
+  fi
+  SBX_PROVIDER_NAME=
+  SBX_DEFAULT_PROFILE=
+  SBX_REMOTE_ROOT=
+  SBX_REMOTE_HOME=
+  while IFS= read -r line; do
+    case "$line" in
+    provider=*) SBX_PROVIDER_NAME=${line#provider=} ;;
+    default_profile=*) SBX_DEFAULT_PROFILE=${line#default_profile=} ;;
+    remote_root=*) SBX_REMOTE_ROOT=${line#remote_root=} ;;
+    remote_home=*) SBX_REMOTE_HOME=${line#remote_home=} ;;
+    esac
+  done <<EOF
+$out
+EOF
+  if [ -z "$SBX_PROVIDER_NAME" ] || [ -z "$SBX_DEFAULT_PROFILE" ] || [ -z "$SBX_REMOTE_ROOT" ] || [ -z "$SBX_REMOTE_HOME" ]; then
+    echo "error: --placement sandbox refused: bin/fm-sandbox.sh config returned incomplete settings" >&2
+    exit 1
+  fi
+  if ! fm_remote_route_check_path_shape "$SBX_REMOTE_ROOT" "$SBX_REMOTE_HOME" ||
+    ! fm_remote_route_check_disjoint "$SBX_REMOTE_ROOT" "$SBX_REMOTE_HOME"; then
+    echo "error: --placement sandbox refused: the sandbox code root and home do not form a task route: $FM_REMOTE_ROUTE_ERROR" >&2
+    exit 1
+  fi
+}
+
+# The task record: a provisional one carries only the route bin/fm-on.sh needs
+# to reach the host, and the final one adds what the host's launch reported.
+sandbox_write_record() { # <path> <provisional|final>
+  {
+    echo "window=remote:$ID"
+    echo "endpoint_task_id=$ID"
+    [ "$2" != final ] || echo "worktree=$SBX_ROUTE_WORKTREE"
+    echo "project=$PROJ_ABS"
+    echo "harness=$SBX_HARNESS"
+    echo "kind=$KIND"
+    if [ "$KIND" = ship ]; then
+      echo "mode=$MODE"
+      echo "yolo=$YOLO"
+      echo "branch=$BRANCH"
+    fi
+    echo "tasktmp="
+    echo "model=${MODEL:-default}"
+    echo "effort=${EFFORT:-default}"
+    [ "$2" != final ] || echo "spawn_gen=$SBX_ROUTE_SPAWN_GEN"
+    echo "placement=sandbox"
+    echo "remote_kind=task"
+    echo "remote_host=$SANDBOX_ALIAS"
+    echo "remote_root=$SBX_REMOTE_ROOT"
+    echo "remote_home=$SBX_REMOTE_HOME"
+    if [ "$2" = final ]; then
+      echo "remote_backend=$SBX_ROUTE_BACKEND"
+      echo "remote_target=$SBX_ROUTE_TARGET"
+    fi
+    echo "sandbox_provider=$SBX_PROVIDER_NAME"
+    echo "sandbox_name=$SANDBOX_NAME"
+    echo "sandbox_profile=$SBX_PROFILE"
+  } >"$1"
+}
+
+sandbox_b64() {
+  base64 | tr -d '\n'
+}
+
+# The fm-remote-task-provision.v1 manifest bin/fm-remote-task-control.sh's
+# header owns. The credential lines come last, straight from their files.
+sandbox_manifest() {
+  local name
+  printf 'schema=fm-remote-task-provision.v1\n'
+  printf 'task_id=%s\n' "$ID"
+  printf 'kind=%s\n' "$KIND"
+  printf 'project=%s\n' "$SBX_PROJECT"
+  printf 'origin_b64=%s\n' "$(printf '%s' "$SBX_ORIGIN" | sandbox_b64)"
+  printf 'registry_b64=%s\n' "$(printf '%s' "$SBX_REGISTRY_LINE" | sandbox_b64)"
+  printf 'harness=%s\n' "$SBX_HARNESS"
+  printf 'model=%s\n' "${MODEL:-default}"
+  printf 'effort=%s\n' "${EFFORT:-default}"
+  printf 'brief_b64=%s\n' "$(sandbox_b64 <"$SBX_BRIEF")"
+  if [ "$KIND" = ship ]; then
+    printf 'mode=%s\n' "$MODE"
+    printf 'yolo=%s\n' "$YOLO"
+    printf 'branch_prefix_b64=%s\n' "$(printf '%s' "$BRANCH_PREFIX" | sandbox_b64)"
+  fi
+  for name in $SBX_LAUNCH_CONFIG; do
+    printf 'config=%s|%s\n' "$name" "$(sandbox_b64 <"$CONFIG/$name")"
+  done
+  fm_sandbox_credentials_manifest_fields || {
+    echo "error: $FM_SANDBOX_CREDENTIAL_ERROR" >&2
+    return 1
+  }
+}
+
+# The route block the host's launch prints is untrusted input about its own
+# task: every field is checked, as the remote second-mate launch output is.
+sandbox_route_parse() { # <block>; sets SBX_ROUTE_*, or SBX_ROUTE_DEFECT and returns 1
+  local line key value seen=' '
+  SBX_ROUTE_DEFECT=
+  SBX_ROUTE_SCHEMA=
+  SBX_ROUTE_BACKEND=
+  SBX_ROUTE_TARGET=
+  SBX_ROUTE_WORKTREE=
+  SBX_ROUTE_BRANCH=
+  SBX_ROUTE_SPAWN_GEN=
+  SBX_ROUTE_BUSY_GEN=
+  SBX_ROUTE_HARNESS=
+  SBX_ROUTE_MODEL=
+  SBX_ROUTE_EFFORT=
+  while IFS= read -r line; do
+    case "$line" in
+    *=*) ;;
+    *) SBX_ROUTE_DEFECT="a line that is not key=value"; return 1 ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$seen" in *" $key "*) SBX_ROUTE_DEFECT="field $key appears more than once"; return 1 ;; esac
+    seen="$seen$key "
+    case "$value" in *[[:cntrl:]]*) SBX_ROUTE_DEFECT="field $key holds a control character"; return 1 ;; esac
+    case "$key" in
+    schema) SBX_ROUTE_SCHEMA=$value ;;
+    backend) SBX_ROUTE_BACKEND=$value ;;
+    target) SBX_ROUTE_TARGET=$value ;;
+    worktree) SBX_ROUTE_WORKTREE=$value ;;
+    branch) SBX_ROUTE_BRANCH=$value ;;
+    spawn_gen) SBX_ROUTE_SPAWN_GEN=$value ;;
+    busy_gen) SBX_ROUTE_BUSY_GEN=$value ;;
+    harness) SBX_ROUTE_HARNESS=$value ;;
+    model) SBX_ROUTE_MODEL=$value ;;
+    effort) SBX_ROUTE_EFFORT=$value ;;
+    *) SBX_ROUTE_DEFECT="unknown field '$key'"; return 1 ;;
+    esac
+  done <<EOF
+$1
+EOF
+  for key in schema backend target worktree branch spawn_gen busy_gen harness model effort; do
+    case "$seen" in *" $key "*) ;; *) SBX_ROUTE_DEFECT="field $key is missing"; return 1 ;; esac
+  done
+  [ "$SBX_ROUTE_SCHEMA" = fm-remote-task-control.v1 ] || {
+    SBX_ROUTE_DEFECT="schema '$SBX_ROUTE_SCHEMA', expected fm-remote-task-control.v1"
+    return 1
+  }
+  [ "$SBX_ROUTE_BACKEND" = tmux ] || {
+    SBX_ROUTE_DEFECT="backend '$SBX_ROUTE_BACKEND', expected tmux"
+    return 1
+  }
+  case "$SBX_ROUTE_TARGET" in
+  *[[:space:]]*) SBX_ROUTE_DEFECT="target '$SBX_ROUTE_TARGET' holds whitespace"; return 1 ;;
+  ?*":fm-$ID") ;;
+  *) SBX_ROUTE_DEFECT="target '$SBX_ROUTE_TARGET' is not window fm-$ID"; return 1 ;;
+  esac
+  case "$SBX_ROUTE_WORKTREE" in
+  /?*) ;;
+  *) SBX_ROUTE_DEFECT="worktree '$SBX_ROUTE_WORKTREE' is not an absolute path"; return 1 ;;
+  esac
+  case "/$SBX_ROUTE_WORKTREE/" in
+  */../* | */./*) SBX_ROUTE_DEFECT="worktree '$SBX_ROUTE_WORKTREE' holds a traversal component"; return 1 ;;
+  esac
+  if [ "$KIND" = ship ]; then
+    [ "$SBX_ROUTE_BRANCH" = "$BRANCH" ] || {
+      SBX_ROUTE_DEFECT="branch '$SBX_ROUTE_BRANCH', expected $BRANCH"
+      return 1
+    }
+  elif [ -n "$SBX_ROUTE_BRANCH" ]; then
+    SBX_ROUTE_DEFECT="a scout reported branch '$SBX_ROUTE_BRANCH'"
+    return 1
+  fi
+  case "$SBX_ROUTE_SPAWN_GEN" in
+  '' | *[!A-Za-z0-9.]*) SBX_ROUTE_DEFECT="spawn_gen '$SBX_ROUTE_SPAWN_GEN' is not an incarnation token"; return 1 ;;
+  esac
+  case "$SBX_ROUTE_BUSY_GEN" in
+  *[!A-Za-z0-9.]*) SBX_ROUTE_DEFECT="busy_gen '$SBX_ROUTE_BUSY_GEN' is not a generation token"; return 1 ;;
+  esac
+  [ "$SBX_ROUTE_HARNESS" = "$SBX_HARNESS" ] || {
+    SBX_ROUTE_DEFECT="harness '$SBX_ROUTE_HARNESS', expected $SBX_HARNESS"
+    return 1
+  }
+  [ "$SBX_ROUTE_MODEL" = "${MODEL:-default}" ] || {
+    SBX_ROUTE_DEFECT="model '$SBX_ROUTE_MODEL', expected ${MODEL:-default}"
+    return 1
+  }
+  [ "$SBX_ROUTE_EFFORT" = "${EFFORT:-default}" ] || {
+    SBX_ROUTE_DEFECT="effort '$SBX_ROUTE_EFFORT', expected ${EFFORT:-default}"
+    return 1
+  }
+  return 0
+}
+
+spawn_sandbox_task() {
+  local out err rc mismatch brief_profile field name config_name created_profile tmp manifest spawn_delivery credentials
+  local -a fields
+
+  # Every spawn of this task's commands below names this home explicitly, so
+  # the provider adapter, the transport, and the readiness gate cannot resolve
+  # another one.
+  export FM_HOME
+  export FM_STATE_OVERRIDE="$STATE" FM_DATA_OVERRIDE="$DATA" FM_CONFIG_OVERRIDE="$CONFIG"
+
+  # The command line: <task-id> <project-dir> [<harness>], as for a local spawn.
+  if [ "${#POS[@]}" -lt 2 ] || [ "${#POS[@]}" -gt 3 ]; then
+    echo "error: --placement sandbox takes <task-id> <project-dir> [<harness>]" >&2
+    exit 2
+  fi
+  PROJ_ABS=$(cd "$(resolve_project_dir_arg "${POS[1]}")" 2>/dev/null && pwd) || {
+    echo "error: project directory cannot be resolved: ${POS[1]}" >&2
+    exit 1
+  }
+  SBX_PROJECT=$(basename "$PROJ_ABS")
+  case "$SBX_PROJECT" in
+  '' | . | .. | *[!A-Za-z0-9._-]*)
+    echo "error: --placement sandbox needs a project whose name uses only letters, digits, '.', '_', and '-', not '$SBX_PROJECT'" >&2
+    exit 1
+    ;;
+  esac
+
+  # The harness profile: a verified crewmate adapter, never a raw command.
+  SBX_HARNESS=${HARNESS_ARG:-${POS[2]:-}}
+  if [ -z "$SBX_HARNESS" ]; then
+    if [ -f "$CONFIG/crew-dispatch.json" ]; then
+      echo "error: config/crew-dispatch.json is active - pass an explicit harness resolved from the dispatch rules (the consultation backstop, so the rules are never silently skipped)." >&2
+      exit 1
+    fi
+    SBX_HARNESS=$("$FM_ROOT/bin/fm-harness.sh" crew)
+  fi
+  case "$SBX_HARNESS" in
+  claude)
+    echo "error: Claude in sandboxes waits for the PR7 real-host smoke test" >&2
+    exit 1
+    ;;
+  codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
+  *)
+    echo "error: --placement sandbox needs a verified harness adapter, not '$SBX_HARNESS'; a raw launch command cannot run in a sandbox" >&2
+    exit 1
+    ;;
+  esac
+  case "${MODEL:-default}" in
+  -* | *[[:space:]]* | *[[:cntrl:]]*)
+    echo "error: --placement sandbox needs a model name without whitespace or a leading '-', not '$MODEL'" >&2
+    exit 1
+    ;;
+  esac
+  if [ "$EFFORT" = ultra ]; then
+    "$SCRIPT_DIR/fm-harness.sh" validate-native-effort "$SBX_HARNESS" "$MODEL" ultra || exit 1
+  fi
+  SBX_MODEL_PROVIDER=$(fm_worker_account_pi_provider "$MODEL") || SBX_MODEL_PROVIDER=
+  case "$SBX_HARNESS" in
+  pi | pi-signed)
+    [ -n "$SBX_MODEL_PROVIDER" ] || {
+      echo "error: a sandboxed $SBX_HARNESS worker needs --model <provider>/<id>, so the spawn sends exactly that provider's credential; '${MODEL:-default}' names no provider" >&2
+      exit 1
+    }
+    ;;
+  esac
+
+  sandbox_config_load
+  SBX_PROFILE=${SANDBOX_PROFILE_ARG:-$SBX_DEFAULT_PROFILE}
+
+  # The brief, written for the sandbox home and authorizing its profile.
+  SBX_BRIEF="$DATA/$ID/brief.md"
+  BRIEF=$SBX_BRIEF
+  [ -f "$SBX_BRIEF" ] || {
+    echo "error: task $ID has no brief at inaccessible data path $SBX_BRIEF" >&2
+    exit 1
+  }
+  spawn_check_brief_content "$SBX_BRIEF"
+  if fm_brief_herdr_lab_contract_present "$SBX_BRIEF"; then
+    echo "error: $SBX_BRIEF carries the fm-brief.sh --herdr-lab isolation contract, whose lab helper drives this host's Herdr, so a sandbox task cannot run it" >&2
+    exit 1
+  fi
+  if mismatch=$(fm_brief_remote_status_mismatch "$SBX_BRIEF" "$SBX_REMOTE_HOME/state" "$ID"); then
+    echo "error: $SBX_BRIEF must tell its worker to append status to the sandbox home's $SBX_REMOTE_HOME/state/$ID.status, but names $mismatch; render it with fm-brief.sh --for-home $SBX_REMOTE_HOME --for-root $SBX_REMOTE_ROOT" >&2
+    exit 1
+  fi
+  spawn_resolve_captain_intent "$SBX_BRIEF"
+  if ! brief_profile=$(fm_brief_sandbox_profile "$SBX_BRIEF"); then
+    echo "error: $SBX_BRIEF records more than one Sandbox profile line, or a malformed one" >&2
+    exit 1
+  fi
+  if [ -n "$brief_profile" ] && [ "$brief_profile" != "$SBX_PROFILE" ]; then
+    echo "error: profile mismatch for $ID: the brief records sandbox profile $brief_profile but this spawn selected $SBX_PROFILE" >&2
+    exit 1
+  fi
+  if [ "$SBX_PROFILE" != "$SBX_DEFAULT_PROFILE" ] && [ "$brief_profile" != "$SBX_PROFILE" ]; then
+    echo "error: sandbox profile $SBX_PROFILE is not authorized for $ID: any profile but the provider's default ($SBX_DEFAULT_PROFILE) needs an explicit captain instruction for this exact task, recorded in its brief with fm-brief.sh --sandbox-profile $SBX_PROFILE, never authority by analogy" >&2
+    exit 1
+  fi
+  if [ "$KIND" = ship ]; then
+    spawn_check_ship_delivery "$SBX_BRIEF" "$SBX_BRIEF"
+  fi
+
+  # What provisioning sends: the project's origin and registry line, this
+  # home's launch configuration, and the credentials this task needs.
+  SBX_REGISTRY_LINE=$(awk -v p="$SBX_PROJECT" '$1 == "-" && $2 == p { print; exit }' "$DATA/projects.md" 2>/dev/null || true)
+  [ -n "$SBX_REGISTRY_LINE" ] || {
+    echo "error: --placement sandbox needs $SBX_PROJECT registered in $DATA/projects.md, because the sandbox home checks the brief against that entry" >&2
+    exit 1
+  }
+  SBX_ORIGIN=$(git -C "$PROJ_ABS" remote get-url origin 2>/dev/null || true)
+  fm_project_origin_safe "$SBX_ORIGIN" || {
+    echo "error: project $SBX_PROJECT has no credential-free origin a sandbox can clone; embedded passwords are forbidden" >&2
+    exit 1
+  }
+  SBX_COMMIT=$(primary_head_commit "$FM_ROOT") || {
+    echo "error: --placement sandbox converges the sandbox's Firstmate code root to this home's default-branch commit, and $FM_ROOT has no resolvable default branch" >&2
+    exit 1
+  }
+  SBX_LAUNCH_CONFIG=
+  for config_name in claude-permission-mode keep-ai-trailers launch-env-allowlist; do
+    if [ -e "$CONFIG/$config_name" ] || [ -L "$CONFIG/$config_name" ]; then
+      [ -f "$CONFIG/$config_name" ] && [ -r "$CONFIG/$config_name" ] || {
+        echo "error: config/$config_name must be a readable regular file to reach a sandbox" >&2
+        exit 1
+      }
+      SBX_LAUNCH_CONFIG="$SBX_LAUNCH_CONFIG $config_name"
+    fi
+  done
+  if [ "$KIND" = ship ]; then
+    SBX_CREDENTIAL_MODE=$MODE
+  else
+    SBX_CREDENTIAL_MODE=scout
+  fi
+  if ! fm_sandbox_credentials_select "$CONFIG/sandbox-credentials" "$SBX_HARNESS" "$SBX_MODEL_PROVIDER" "$SBX_CREDENTIAL_MODE" "$SBX_PROJECT"; then
+    echo "error: --placement sandbox refused: $FM_SANDBOX_CREDENTIAL_ERROR" >&2
+    exit 1
+  fi
+  case "$SBX_HARNESS" in
+  pi | pi-signed)
+    [ -n "$FM_SANDBOX_CREDENTIAL_PI_NAME" ] || {
+      echo "error: no entry in config/sandbox-credentials supplies Pi provider $SBX_MODEL_PROVIDER for task $ID, so its sandboxed worker could not authenticate" >&2
+      exit 1
+    }
+    ;;
+  esac
+
+  # One task, one record: a sandbox spawn never adopts or replaces one.
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
+    echo "error: task $ID already has a record at $STATE/$ID.meta; a sandbox spawn never adopts or replaces one" >&2
+    exit 1
+  fi
+  SPAWN_TASK_LOCK="$STATE/.spawn-$ID.lock"
+  if ! fm_lock_try_acquire "$SPAWN_TASK_LOCK"; then
+    echo "error: another spawn is already creating task $ID" >&2
+    exit 1
+  fi
+  SPAWN_TASK_LOCK_HELD=1
+
+  # The backlog gate comes first: no sandbox exists until it passes.
+  spawn_backlog_preflight
+  SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1
+  fm_lock_acquire_wait "$SPAWN_META_LOCK"
+  SPAWN_META_LOCK_HELD=1
+  if [ -e "$STATE/$ID.backlog-close" ] || [ -L "$STATE/$ID.backlog-close" ]; then
+    echo "error: task $ID has a pending authoritative backlog close at $STATE/$ID.backlog-close; finish or repair that close before dispatching a new worker" >&2
+    exit 1
+  fi
+  if [ -e "$STATE/$ID.meta" ] || [ -L "$STATE/$ID.meta" ]; then
+    echo "error: task $ID gained a record at $STATE/$ID.meta while this spawn waited; refusing to replace it" >&2
+    exit 1
+  fi
+  SANDBOX_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-sandbox-spawn.XXXXXX") || {
+    echo "error: could not create private spawn state" >&2
+    exit 1
+  }
+
+  # Create.
+  if out=$("$SCRIPT_DIR/fm-sandbox.sh" create "$ID" --profile "$SBX_PROFILE" </dev/null 2>"$SANDBOX_TMP/create.err"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    err=$(cat "$SANDBOX_TMP/create.err" 2>/dev/null || true)
+    if [ "$rc" -eq 4 ]; then
+      echo "error: blocked: the sandbox provider has no capacity for task $ID, so nothing was created; surface the blocker, free a sandbox, or wait - never fall back to local placement" >&2
+    else
+      echo "error: sandbox creation for task $ID was refused ($(first_line "${err#refused: }")); a sandbox the provider created anyway is labelled for this task and listed by bin/fm-sandbox.sh list" >&2
+    fi
+    exit 1
+  fi
+  name=
+  SANDBOX_ALIAS=
+  created_profile=
+  read -r -a fields <<<"$out"
+  for field in ${fields[@]+"${fields[@]}"}; do
+    case "$field" in
+    name=*) name=${field#name=} ;;
+    ssh_alias=*) SANDBOX_ALIAS=${field#ssh_alias=} ;;
+    profile=*) created_profile=${field#profile=} ;;
+    esac
+  done
+  [ -n "$name" ] || {
+    echo "error: the sandbox provider created a sandbox for task $ID without naming it; bin/fm-sandbox.sh list shows it" >&2
+    exit 1
+  }
+  SANDBOX_NAME=$name
+  SANDBOX_ON_EXIT=destroy
+  if ! fm_remote_route_check_shape "$SANDBOX_ALIAS" "$SBX_REMOTE_ROOT" "$SBX_REMOTE_HOME"; then
+    echo "error: sandbox $SANDBOX_NAME cannot carry task $ID's route: $FM_REMOTE_ROUTE_ERROR" >&2
+    exit 1
+  fi
+  [ "$created_profile" = "$SBX_PROFILE" ] || {
+    echo "error: sandbox $SANDBOX_NAME runs profile '$created_profile', not the requested $SBX_PROFILE" >&2
+    exit 1
+  }
+
+  # The provisional record carries the route, so bin/fm-on.sh can reach the
+  # host from here on. Publishing it makes the task part of this home's set.
+  tmp="$STATE/.$ID.meta.sandbox.${BASHPID:-$$}"
+  SPAWN_META_TMP=$tmp
+  sandbox_write_record "$tmp" provisional || {
+    echo "error: task $ID's provisional record could not be prepared at $tmp" >&2
+    exit 1
+  }
+  if ! fm_backlog_atomic_transition publish "$tmp" "$STATE/$ID.meta" "task record" "$STATE"; then
+    echo "error: task $ID's provisional record could not be published ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    exit 1
+  fi
+  SPAWN_META_TMP=
+  SANDBOX_RECORD_PUBLISHED=1
+  if ! fm_remote_route_resolve "$STATE/$ID.meta" "$ID" || [ "$FM_REMOTE_ROUTE_KIND" != task ]; then
+    echo "error: task $ID's provisional record does not resolve to a sandbox task route: ${FM_REMOTE_ROUTE_ERROR:-kind $FM_REMOTE_ROUTE_KIND}" >&2
+    exit 1
+  fi
+  if [ "$SPAWN_TASK_SET_LOCK_HELD" = 1 ]; then
+    SPAWN_TASK_SET_LOCK_HELD=0
+    fm_lock_release "$SPAWN_TASK_SET_LOCK"
+  fi
+
+  # Converge the host's Firstmate code root to this home's commit before the
+  # first bin/fm-on.sh call, through the provider's one bootstrap exec.
+  if ! out=$("$SCRIPT_DIR/fm-sandbox.sh" exec "$SANDBOX_NAME" -- \
+    git -C "$SBX_REMOTE_ROOT" pull --quiet --ff-only --no-rebase --no-tags origin "$SBX_COMMIT" </dev/null 2>&1); then
+    echo "error: sandbox $SANDBOX_NAME's Firstmate code root $SBX_REMOTE_ROOT could not fast-forward to this home's default-branch commit $SBX_COMMIT: $(first_line "${out#refused: }")" >&2
+    exit 1
+  fi
+
+  local sandbox_head sandbox_status
+  if ! sandbox_head=$("$SCRIPT_DIR/fm-sandbox.sh" exec "$SANDBOX_NAME" -- \
+    git -C "$SBX_REMOTE_ROOT" rev-parse --verify HEAD </dev/null 2>/dev/null); then
+    echo "error: sandbox $SANDBOX_NAME code root verification failed: expected $SBX_COMMIT, actual HEAD unavailable" >&2
+    exit 1
+  fi
+  if [ "$sandbox_head" != "$SBX_COMMIT" ]; then
+    echo "error: sandbox $SANDBOX_NAME code root mismatch: expected $SBX_COMMIT, actual $sandbox_head" >&2
+    exit 1
+  fi
+  if ! sandbox_status=$("$SCRIPT_DIR/fm-sandbox.sh" exec "$SANDBOX_NAME" -- \
+    git --no-optional-locks -C "$SBX_REMOTE_ROOT" status --porcelain --untracked-files=no </dev/null 2>/dev/null) ||
+    [ -n "$sandbox_status" ]; then
+    echo "error: sandbox $SANDBOX_NAME tracked code root is dirty or unreadable: expected $SBX_COMMIT, actual $sandbox_head" >&2
+    exit 1
+  fi
+
+  # Gate the host on the task readiness profile.
+  rc=0
+  fm_remote_readiness_ensure "$SCRIPT_DIR" "$ID" task || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    if [ "$rc" -eq 255 ]; then
+      echo "error: sandbox host $SANDBOX_ALIAS's readiness for task $ID could not be confirmed (SSH exit 255)" >&2
+    else
+      echo "error: sandbox host $SANDBOX_ALIAS is not ready for task $ID" >&2
+    fi
+    [ -z "$FM_REMOTE_READINESS_OUT" ] || printf '%s\n' "$FM_REMOTE_READINESS_OUT" >&2
+    [ "$rc" -ne 255 ] || exit 255
+    exit 1
+  fi
+
+  # Provision the one-task home. The manifest lives only in this process and
+  # the transport's stdin, never in a file or an argument.
+  if ! manifest=$(sandbox_manifest); then
+    echo "error: task $ID's provisioning manifest could not be built" >&2
+    exit 1
+  fi
+  if out=$(printf '%s\n' "$manifest" | "$SCRIPT_DIR/fm-on.sh" --stdin "$ID" fm-remote-task-control.sh provision "$ID" 2>"$SANDBOX_TMP/provision.err"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  manifest=
+  if [ "$rc" -ne 0 ]; then
+    err=$(cat "$SANDBOX_TMP/provision.err" 2>/dev/null || true)
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    if [ "$rc" -eq 255 ]; then
+      echo "error: provisioning sandbox $SANDBOX_NAME for task $ID did not complete over SSH (exit 255)" >&2
+      exit 255
+    fi
+    echo "error: provisioning sandbox $SANDBOX_NAME for task $ID failed" >&2
+    exit 1
+  fi
+  case "$(printf '%s\n' "$out" | sed -n 's/^schema=//p'):$(printf '%s\n' "$out" | sed -n 's/^provision=//p'):$(printf '%s\n' "$out" | sed -n 's/^task_id=//p')" in
+  "fm-remote-task-control.v1:created:$ID" | "fm-remote-task-control.v1:current:$ID") ;;
+  *)
+    echo "error: provisioning sandbox $SANDBOX_NAME for task $ID returned an unexpected report" >&2
+    exit 1
+    ;;
+  esac
+
+  # Launch. From here a worker may exist, so every failure holds.
+  SANDBOX_ON_EXIT=hold
+  if out=$("$SCRIPT_DIR/fm-on.sh" "$ID" fm-remote-task-control.sh launch "$ID" </dev/null 2>"$SANDBOX_TMP/launch.err"); then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    err=$(cat "$SANDBOX_TMP/launch.err" 2>/dev/null || true)
+    [ -z "$err" ] || printf '%s\n' "$err" >&2
+    if [ "$rc" -eq 255 ]; then
+      echo "error: task $ID's launch on sandbox host $SANDBOX_ALIAS has unknown completion (SSH exit 255)" >&2
+    else
+      echo "error: task $ID's launch on sandbox host $SANDBOX_ALIAS failed (exit $rc)" >&2
+    fi
+    exit "$rc"
+  fi
+  if ! sandbox_route_parse "$out"; then
+    echo "error: task $ID's sandbox launch returned malformed route metadata: $SBX_ROUTE_DEFECT" >&2
+    exit 1
+  fi
+
+  # Publish the final record, then move the backlog item, under the meta lock.
+  tmp="$STATE/.$ID.meta.sandbox.${BASHPID:-$$}"
+  SPAWN_META_TMP=$tmp
+  sandbox_write_record "$tmp" final || {
+    echo "error: task $ID's record could not be prepared at $tmp" >&2
+    exit 1
+  }
+  if ! fm_backlog_atomic_transition publish "$tmp" "$STATE/$ID.meta" "task record" "$STATE"; then
+    echo "error: task $ID launched in sandbox $SANDBOX_NAME, but its record could not be updated with the launched route ($FM_BACKLOG_TRANSITION_ERROR)" >&2
+    exit 1
+  fi
+  SPAWN_META_TMP=
+  FM_TASKS_AXI_TIMEOUT=${FM_TASKS_AXI_TIMEOUT:-30}
+  if [ "$BACKLOG_TRANSITION" = 1 ] &&
+    ! fm_backlog_atomic_transition dispatch "$STATE/$ID.meta" "$DATA" "$ID" "$STATE" &&
+    ! fm_backlog_atomic_transition dispatch "$STATE/$ID.meta" "$DATA" "$ID" "$STATE"; then
+    echo "error: task $ID launched in sandbox $SANDBOX_NAME, but its backlog item could not be moved to In flight ($FM_BACKLOG_TRANSITION_ERROR); session start moves a queued item In flight to match the kept record" >&2
+    exit 1
+  fi
+  SANDBOX_ON_EXIT=
+  fm_lock_release "$SPAWN_META_LOCK"
+  SPAWN_META_LOCK_HELD=0
+
+  "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
+  [ ! -e "$CONFIG/fleet-ledger" ] || "$SCRIPT_DIR/fm-fleet-ledger.sh" dispatched "$ID" "$KIND" "$SBX_PROJECT" "$SBX_HARNESS" "$MODEL" || true
+  spawn_delivery=
+  [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
+  credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
+  echo "notice: status mirroring arrives in PR4b; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
+  echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$SBX_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
+}
+
 BACKEND=
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
@@ -1261,6 +2155,7 @@ parse_orca_worktree_result() {
 
 spawn_abort_cleanup() {
   local status=$?
+  sandbox_abort_cleanup "$status"
   if [ "$RELAUNCH_REPLACEMENT_PENDING" = 1 ] &&
     [ "$SPAWN_META_PUBLISH_STARTED" = 1 ] &&
     [ -n "$SPAWN_META_TMP" ] &&
@@ -1488,6 +2383,10 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   [ "$MODE_SET" -eq 0 ] || shared_args+=(--mode "$MODE")
   [ "$YOLO_SET" -eq 0 ] || shared_args+=(--yolo "$YOLO")
   [ "$BRANCH_PREFIX_SET" -eq 0 ] || shared_args+=(--branch-prefix "$BRANCH_PREFIX")
+  # Placement is per task, so a batch that names it passes it to every pair
+  # rather than letting one quietly launch locally.
+  [ "$PLACEMENT_SET" -eq 0 ] || shared_args+=(--placement "$PLACEMENT")
+  [ "$SANDBOX_PROFILE_SET" -eq 0 ] || shared_args+=(--sandbox-profile "$SANDBOX_PROFILE_ARG")
   for pair in "${POS[@]}"; do
     case "$pair" in
     *=*) : ;;
@@ -1660,6 +2559,10 @@ if [ "$KIND" = secondmate ]; then
   fi
   [ "$remote_spawn_rc" -eq 3 ] || exit "$remote_spawn_rc"
 fi
+if [ "$PLACEMENT" = sandbox ] && [ "$RELAUNCH" -eq 0 ]; then
+  spawn_sandbox_task
+  exit 0
+fi
 # Backend selection (data/fm-backend-design-d7): explicit --backend, else
 # FM_BACKEND env, else config/backend, else runtime auto-detection, else
 # default tmux (fm_backend_name). fm_backend_validate_spawn refuses unknown or
@@ -1728,6 +2631,23 @@ if [ "$RELAUNCH" -eq 1 ]; then
     echo "error: --relaunch refused after locking: $FM_BACKLOG_TRANSITION_ERROR" >&2
     exit 1
   }
+  # Placement is part of the task's identity, read from its own record
+  # (bin/fm-remote-route-lib.sh): a relaunch never moves a task, and a sandbox
+  # task's agent runs on its host, which this relaunch cannot reach yet.
+  if ! fm_remote_route_resolve "$RELAUNCH_META" "$ID"; then
+    echo "error: --relaunch refused: $FM_REMOTE_ROUTE_ERROR" >&2
+    exit 1
+  fi
+  RELAUNCH_PLACEMENT=local
+  [ "$FM_REMOTE_ROUTE_KIND" != task ] || RELAUNCH_PLACEMENT=sandbox
+  if [ "$PLACEMENT_SET" -eq 1 ] && [ "$PLACEMENT" != "$RELAUNCH_PLACEMENT" ]; then
+    echo "error: --relaunch keeps task $ID's recorded placement ($RELAUNCH_PLACEMENT); --placement $PLACEMENT cannot move it" >&2
+    exit 1
+  fi
+  if [ "$RELAUNCH_PLACEMENT" = sandbox ]; then
+    echo "error: $(fm_remote_route_unsupported "$ID" relaunch)" >&2
+    exit 1
+  fi
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
   BACKEND=$FM_BACKEND_VALIDATED_BACKEND
   RELAUNCH_TARGET=$FM_BACKEND_VALIDATED_TARGET
@@ -2850,14 +3770,6 @@ resolved_existing_dir() {
   cd "$path" && pwd -P
 }
 
-resolve_project_dir_arg() {
-  local path=$1
-  case "$path" in
-  projects/*) printf '%s/%s\n' "$PROJECTS" "${path#projects/}" ;;
-  *) printf '%s\n' "$path" ;;
-  esac
-}
-
 path_is_ancestor_of() {
   local ancestor=$1 path=$2
   [ -n "$ancestor" ] || return 1
@@ -3054,34 +3966,12 @@ fi
   exit 1
 }
 if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
-  if fm_brief_task_placeholders_present "$BRIEF"; then
-    echo "error: $BRIEF still contains {TASK} or {FIRSTMATE_SPEC}; fill ## Captain's intent and ## Firstmate spec before spawn" >&2
-    exit 1
-  fi
-  if ! fm_brief_task_content_valid "$BRIEF"; then
-    echo "error: $BRIEF must contain nonempty ## Captain's intent and ## Firstmate spec subsections (or a nonempty legacy # Task body) before spawn" >&2
-    exit 1
-  fi
-  if ADDRESS_LINE=$(fm_brief_intent_address_line "$BRIEF"); then
-    echo "error: $BRIEF ## Captain's intent has an operator-address line: $ADDRESS_LINE; write the captain's actual words without a Captain label or address before spawn, since the heading already records provenance" >&2
-    exit 1
-  fi
+  spawn_check_brief_content "$BRIEF"
   if FOREIGN_STATUS_FILE=$(fm_brief_foreign_status_file "$BRIEF" "$STATE" "$ID"); then
     echo "error: $BRIEF tells its worker to append status to $FOREIGN_STATUS_FILE, not to this home's $STATE/$ID.status; a brief rendered for another home (such as a sandbox task's, by fm-brief.sh --for-home) or copied from one would report where no supervisor of this task reads, so re-scaffold it for this home before spawn" >&2
     exit 1
   fi
-  if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
-    if fm_brief_task_heading_present "$BRIEF" "## Captain's intent"; then
-      CAPTAIN_INTENT=$(fm_brief_task_heading_body "$BRIEF" "## Captain's intent")
-    else
-      LEGACY_TASK_BODY=$(fm_brief_heading_body "$BRIEF" "# Task")
-      CAPTAIN_INTENT=$(fm_brief_marked_captain_words "$LEGACY_TASK_BODY")
-      if [ -z "$(printf '%s' "$CAPTAIN_INTENT" | tr -d '[:space:]')" ]; then
-        echo "error: legacy mixed # Task brief has no provenance-marked captain words for no-mistakes --intent; add [captain] lines or migrate to ## Captain's intent and ## Firstmate spec" >&2
-        exit 1
-      fi
-    fi
-  fi
+  spawn_resolve_captain_intent "$BRIEF"
   # Use the existing launch-brief overlay for every worker kind, including
   # pre-scope briefs and relaunches. Charters never enter this worker path.
   SOURCE_BRIEF=$BRIEF
@@ -3106,101 +3996,10 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   fi
 fi
 
-delivery_rigor_rank() { # <mode> -> 3 (most rigor) .. 1 (least); 0 = not a task mode
-  case "$1" in
-  no-mistakes) echo 3 ;;
-  direct-PR) echo 2 ;;
-  local-only) echo 1 ;;
-  *) echo 0 ;;
-  esac
-}
-
-# Brief/spawn delivery agreement, checked before any endpoint exists.
-# fm-brief.sh records a ship brief's mode as a fixed "Delivery contract: mode=<mode>"
-# line, with " forge=<forge>" appended on a bound forge. A spawn that disagrees
-# would launch a worker whose instructions and whose recorded task delivery
-# differ, which is the exact drift this contract prevents.
+# Brief/spawn delivery agreement for a ship (spawn_check_ship_delivery, defined
+# with the other shared validators above), checked before any endpoint exists.
 if [ "$KIND" = ship ]; then
-  PROJ_NAME=$(basename "$PROJ_ABS")
-  # The parser's own refusal reaches the operator here rather than being
-  # discarded: an entry it refuses (an unknown forge token, or a forge on
-  # local-only) resolves to no posture at all, and launching on the silent
-  # default is how a mistyped forge would hand a Gerrit project the
-  # pull-request contract.
-  if ! STANDING_FORGE=$("$FM_ROOT/bin/fm-project-mode.sh" --forge "$PROJ_NAME" 2>/dev/null); then
-    "$FM_ROOT/bin/fm-project-mode.sh" --forge "$PROJ_NAME" >/dev/null || true
-    echo "error: $ID cannot launch: the registry entry for $PROJ_NAME does not resolve to a delivery posture (see the refusal above); correct data/projects.md and spawn again" >&2
-    exit 1
-  fi
-  [ -n "$STANDING_FORGE" ] || STANDING_FORGE=none
-  STANDING_MODE=$("$FM_ROOT/bin/fm-project-mode.sh" --raw "$PROJ_NAME" 2>/dev/null | cut -d' ' -f1) || STANDING_MODE=
-  BRIEF_MODE=$(sed -n 's/^Delivery contract: mode=\([^ ]*\).*$/\1/p' "$BRIEF" | head -n 1)
-  BRIEF_FORGE=$(sed -n 's/^Delivery contract: mode=[^ ]*.*[[:space:]]forge=\([^ ]*\).*$/\1/p' "$BRIEF" | head -n 1)
-  [ -n "$BRIEF_FORGE" ] || BRIEF_FORGE=none
-  BRIEF_BRANCH=$(sed -n 's/^Ship branch: //p' "$BRIEF" | head -n 1)
-  if [ -n "$BRIEF_BRANCH" ]; then
-    [ "$BRIEF_BRANCH" = "$BRANCH" ] || {
-      echo "error: branch mismatch for $ID: the brief says branch=$BRIEF_BRANCH but this spawn selected branch=$BRANCH" >&2
-      exit 1
-    }
-  elif [ "$BRANCH" != "fm/$ID" ]; then
-    # A relaunch's branch comes from the meta record (--branch-prefix is refused
-    # there), so a promoted scout whose brief never carried a Ship branch line
-    # must relaunch on that recorded branch rather than be refused.
-    if [ "$RELAUNCH" -eq 1 ]; then
-      echo "warning: $BRIEF records no ship branch; relaunching on the task's recorded branch $BRANCH" >&2
-    else
-      echo "error: $BRIEF records no ship branch; regenerate it with --branch-prefix before spawning $BRANCH" >&2
-      exit 1
-    fi
-  else
-    echo "warning: $BRIEF records no ship branch; defaulting to legacy branch $BRANCH" >&2
-  fi
-  if [ -z "$BRIEF_MODE" ]; then
-    echo "warning: $BRIEF records no delivery contract line (scaffolded before ship briefs recorded one); launching on the explicit --mode $MODE - confirm its definition of done matches" >&2
-  elif [ "$BRIEF_MODE" != "$MODE" ]; then
-    echo "error: delivery mismatch for $ID: the brief says mode=$BRIEF_MODE but this spawn passed --mode $MODE; correct the flag or re-scaffold the brief so the worker's instructions and the task record agree" >&2
-    exit 1
-  fi
-  # The registered forge is the captain's confirmed binding (bin/fm-project-mode.sh)
-  # and is never inferred here from a remote, host, or protocol. A brief that
-  # disagrees with it would tell the worker to open a pull request a Gerrit
-  # server does not have, or to publish a change to a forge that is not Gerrit.
-  if [ "$BRIEF_FORGE" != "$STANDING_FORGE" ]; then
-    if [ "$STANDING_FORGE" = none ]; then
-      forge_scaffold="fm-brief.sh $ID $PROJ_NAME --mode $MODE"
-    else
-      forge_scaffold="fm-brief.sh $ID $PROJ_NAME --mode $MODE --forge $STANDING_FORGE"
-    fi
-    echo "error: forge mismatch for $ID: $PROJ_NAME is registered forge=$STANDING_FORGE but $SOURCE_BRIEF records forge=$BRIEF_FORGE; keep the filled ## Captain's intent and ## Firstmate spec bodies, remove $SOURCE_BRIEF, re-scaffold it with $forge_scaffold, then re-fill those two subsections, so the worker's publication matches the project's forge" >&2
-    exit 1
-  fi
-  # Merge authority on a Gerrit forge is refused rather than quietly dropped, on
-  # the captain's decision of 2026-09-15: a Code-Review+2 is a positive
-  # attributed claim that a named human approved, and firstmate must not
-  # manufacture one.
-  if [ "$STANDING_FORGE" = gerrit ] && [ "$YOLO" = on ]; then
-    echo "error: --yolo on is refused for $ID: $PROJ_NAME is registered forge=gerrit, where yolo is inactive because a Code-Review+2 is a positive attributed claim that a named human approved and firstmate must not manufacture one (captain's decision 2026-09-15); spawn with --yolo off" >&2
-    exit 1
-  fi
-  # The registry holds the captain's standing posture, so dropping below it is
-  # allowed (a current explicit captain instruction wins) but never silent. An
-  # unregistered project resolves to the same no-mistakes standing default, which
-  # is why the notice names the standing posture rather than the registry line. A
-  # conditional policy is excluded: both of its legs are legitimate classifications.
-  if [ -n "$STANDING_MODE" ] && [ "$STANDING_MODE" != no-mistakes-prod-only ] &&
-    [ "$(delivery_rigor_rank "$MODE")" -lt "$(delivery_rigor_rank "$STANDING_MODE")" ]; then
-    echo "notice: $ID ships mode=$MODE while the standing posture for $PROJ_NAME is $STANDING_MODE - less rigor than the captain's standing posture; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
-  fi
-  # The registered ship-branch prefix (bin/fm-project-mode.sh) is the captain's
-  # answer to "should this project's branches read as firstmate-authored", so a
-  # spawn that ships the legacy fm/ prefix past a registered override is
-  # announced, not refused: the brief-vs-spawn agreement above already
-  # guarantees the worker's instructions match the branch this spawn selected.
-  STANDING_BRANCH=$("$FM_ROOT/bin/fm-project-mode.sh" --branch-prefix "$PROJ_NAME" 2>/dev/null) || STANDING_BRANCH=
-  if [ "$BRANCH" != "$STANDING_BRANCH$ID" ]; then
-    echo "notice: $ID ships branch=$BRANCH while $PROJ_NAME registers the ship-branch prefix '$STANDING_BRANCH' (branch $STANDING_BRANCH$ID) - the task's branch and PR will read as firstmate-authored; proceed only on a current explicit captain instruction or an intake judgment you can state" >&2
-  fi
+  spawn_check_ship_delivery "$BRIEF" "$SOURCE_BRIEF"
 fi
 
 BRIEF_DIR_REAL=$(cd "$(dirname "$BRIEF")" && pwd -P)
@@ -3496,41 +4295,9 @@ herdr_projection_existing_meta_allows_flat() { # <meta>
   esac
 }
 
-# Backlog preflight (bin/fm-backlog-transition-lib.sh). This spawn is about to
-# become the sole owner of the row's In-flight transition, so prove the row is
-# transitionable BEFORE any endpoint, worktree, or record exists: a refusal here
-# costs nothing to unwind, while the same refusal after publication would strand
-# a live pane. The authoritative mutation still runs under the meta lock below.
-BACKLOG_TRANSITION=0
-BACKLOG_ROW_STATE=
-if fm_backlog_transition_applies "$CONFIG" "$DATA" "$KIND"; then
-  BACKLOG_TRANSITION=1
-  if fm_backlog_row_probe "$DATA" "$ID"; then
-    BACKLOG_ROW_STATE=$FM_BACKLOG_ROW_STATE
-  elif [ "$FM_BACKLOG_ROW_RESULT" = not_found ]; then
-    echo "error: task $ID has no backlog item in this home, so dispatching it would leave a worker no record owns; add it first (bin/fm-tasks-axi.sh add $ID '<title>' --kind $KIND) and re-run" >&2
-    exit 1
-  else
-    echo "error: task $ID's backlog item could not be read before dispatch ($FM_BACKLOG_ROW_ERROR)" >&2
-    exit 1
-  fi
-  spawn_preflight_actor=$(fm_lease_actor) || exit "$FM_LEASE_REFUSE_EXIT"
-  if [ "$spawn_preflight_actor" = branch ] && fm_lease_away_relocated; then
-    if [ "$BACKLOG_ROW_STATE" != "queued no no" ]; then
-      echo "error: spawn refused - the supervision branch under the away-posture record may dispatch only queued unblocked work (already queued, or filed by the branch from the captain's away words); task $ID has no dispatchable backlog item in this home" >&2
-      exit 1
-    fi
-  elif ! fm_backlog_row_dispatchable "$BACKLOG_ROW_STATE"; then
-    echo "error: this home's backlog item $ID is not dispatchable in state $BACKLOG_ROW_STATE; refusing before creating its endpoint or local copy" >&2
-    exit 1
-  fi
-else
-  BACKLOG_GATE_STATUS=$?
-  if [ "$BACKLOG_GATE_STATUS" -eq 2 ]; then
-    echo "error: task $ID cannot be dispatched because its backlog data directory is inaccessible: $DATA ($FM_BACKLOG_TRANSITION_ERROR)" >&2
-    exit 1
-  fi
-fi
+# Backlog preflight (spawn_backlog_preflight, defined with the other shared
+# validators above), before any endpoint, worktree, or record exists.
+spawn_backlog_preflight
 
 if [ "$SPAWN_META_LOCK_HELD" != 1 ]; then
   SPAWN_META_LOCK=$(fm_meta_lock_path "$STATE/$ID.meta") || exit 1

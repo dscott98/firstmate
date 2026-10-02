@@ -103,6 +103,7 @@ while IFS= read -r args; do
   [ "$RC" -eq 3 ] || fail "without config, '$args' must refuse with exit 3, got $RC"
   grep -q "config/sandbox-provider" "$ERR" || fail "without config, '$args' must name the missing config file"
 done <<'CASES'
+config
 create t1
 status sbx-1
 list
@@ -151,6 +152,8 @@ run create t1 --profile -open
 [ "$RC" -eq 2 ] || fail "a profile with a leading dash must be a usage error, got $RC"
 run extend sbx-1 extra
 [ "$RC" -eq 2 ] || fail "an unknown extend argument must be a usage error, got $RC"
+run config extra
+[ "$RC" -eq 2 ] || fail "config with an argument must be a usage error, got $RC"
 pass "ok - malformed invocations are usage errors (exit 2)"
 
 # --- config parsing refusals (exit 3) -----------------------------------------
@@ -202,6 +205,38 @@ set_fake 0 "" ""
 run list
 [ "$RC" -eq 0 ] || fail "a valid config must be accepted, got $RC (stderr: $(cat "$ERR"))"
 pass "ok - a valid config with comments and blank lines is accepted"
+
+# --- config -------------------------------------------------------------------
+
+write_config
+reset_argv_log
+run config
+[ "$RC" -eq 0 ] || fail "config must print a valid configuration, got $RC (stderr: $(cat "$ERR"))"
+printf '%s\n' provider=fake-provider.sh default_profile=default ttl=4h remote_root=/opt/firstmate remote_home=/home/agent/fm-home \
+  | cmp -s - "$OUT" || fail "config must print the provider name, profile, ttl, and the default code root and home, got: $(cat "$OUT")"
+[ ! -s "$ARGV_LOG" ] || fail "config must never invoke the provider"
+for key in remote_root remote_home; do
+  write_config
+  printf '%s=/srv/override\n' "$key" >> "$HOME_DIR/config/sandbox-provider"
+  run config
+  [ "$RC" -eq 3 ] || fail "$key configuration must be refused, got $RC"
+  grep -q "unknown key '$key'" "$ERR" || fail "the refusal must name $key"
+done
+write_config
+FM_TEST_SEAM=0 FM_TEST_SANDBOX_ROOT=/srv/ignored FM_TEST_SANDBOX_HOME=/srv/ignored-home run config
+grep -qx remote_root=/opt/firstmate "$OUT" || fail "test paths must be ignored outside the test seam"
+grep -qx remote_home=/home/agent/fm-home "$OUT" || fail "test home must be ignored outside the test seam"
+SPACED="$PROVIDER_DIR/spaced provider.sh"
+cp "$PROVIDER" "$SPACED"
+printf '%s\n' "$SPACED" default_profile=default ttl=4h ssh_include=/abs > "$HOME_DIR/config/sandbox-provider"
+run config
+[ "$RC" -eq 3 ] || fail "a provider file name that is not a safe token must be refused by config, got $RC"
+grep -q "file name 'spaced provider.sh'" "$ERR" || fail "the refusal must name the provider's file name"
+set_fake 0 "" ""
+run list
+[ "$RC" -eq 0 ] || fail "that provider must still serve the lifecycle verbs, got $RC"
+write_config
+pass "ok - config prints the validated settings without invoking the provider"
 
 # --- create -------------------------------------------------------------------
 

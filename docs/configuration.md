@@ -9,7 +9,7 @@ Start with the directory layout, then use the setting reference for the behavior
 | --- | --- |
 | Firstmate's code, private files, or project location | [FM_HOME](#fm_home) and [operational home layout](#operational-home-layout-and-state) |
 | Task windows and worker tools | [Runtime backend](#runtime-backend-configbackend--fm_backend) and [harness support](#harness-support) |
-| Remote task sandboxes | [Sandbox provider](#sandbox-provider-configsandbox-provider) |
+| Remote task sandboxes | [Sandbox provider](#sandbox-provider-configsandbox-provider) and [sandbox credentials](#sandbox-credentials-configsandbox-credentials) |
 | Worker permissions, accounts, or environment | [Claude permission mode](#claude-permission-mode-configclaude-permission-mode), [worker account pin](#worker-account-pin-configclaude-account-configpi-account), and [worker launch environment](#worker-launch-environment-configlaunch-env-allowlist) |
 | Backlog, preferences, and memory | [Backlog backend](#backlog-backend-taskstoml--configbacklog-backend), [captain preferences](#captain-preferences-datacaptainmd--datacaptain-sharedmd), and [startup memory budget](#startup-memory-budget-configstartup-memory-budget) |
 | Supervision and presentation | [Pi supervision branch](#pi-supervision-branch), [supervision host](#supervision-host-configsupervision-host), and [Calm preference](#calm-preference-configcalm) |
@@ -549,17 +549,45 @@ The first line holds the provider command's absolute path, then `key=value` line
 | `ttl=<duration>` | Default sandbox lifetime for `create` and `extend`, one integer plus one unit of `s`, `m`, `h`, `d`, or `w`. |
 | `ssh_include=<absolute path>` | The provider-managed SSH config include that sandbox aliases are written into; whitespace is refused. |
 
-All three keys are required; unknown or duplicate keys, a relative provider path or `ssh_include`, and a malformed duration are refused with the concrete problem named.
+`default_profile`, `ttl`, and `ssh_include` are required; unknown or duplicate keys, a relative provider path, a relative or whitespace/control-character-bearing `ssh_include`, and a malformed duration are refused with the concrete problem named.
 Blank lines and `#` comments are accepted after the first line.
 The provider path may contain spaces and must name an executable file.
+For `config` and sandbox placement, its file name must be a printable token without whitespace, `=`, or a leading `-`, because task records use that name to identify the provider; parent directories may still contain spaces.
 `default_profile` must be a non-empty printable token without whitespace, `=`, or a leading `-`.
 The adapter validates `ssh_include` but does not write it, pass it to the provider, or install an SSH `Include` directive; configure the provider and SSH client consistently with that path.
 
 `bin/fm-sandbox.sh` is the only Firstmate code that invokes the provider, and its [header](../bin/fm-sandbox.sh) owns the verb, record framing, ownership-label validation, and exit contracts the provider must satisfy.
+`bin/fm-sandbox.sh config` prints the validated settings and the fixed template paths `/opt/firstmate` and `/home/agent/fm-home` without invoking the provider.
 Firstmate never holds the provider's API token and never calls the provider's API.
 
-Configuring a provider does not by itself place any task in a sandbox.
-Spawn integration ships separately, and [`docs/remote-sandboxes.md`](remote-sandboxes.md) states what is currently wired.
+Configuring a provider does not by itself place any task in a sandbox: only a spawn with an explicit `--placement sandbox` does, as [`docs/remote-sandboxes.md`](remote-sandboxes.md#placement) describes.
+
+## Sandbox credentials (`config/sandbox-credentials`)
+
+A sandbox task receives only the credentials this local, gitignored, captain-owned file selects for it; with no file, a sandbox receives none.
+[`docs/remote-sandboxes.md`](remote-sandboxes.md#credentials) owns which credentials a sandbox may hold, so the file accepts only the two destinations below and refuses any other, including a Claude credential.
+[`bin/fm-sandbox-credentials-lib.sh`](../bin/fm-sandbox-credentials-lib.sh) reads the file, and [host-side task control](remote-sandboxes.md#host-side-task-control) owns where each credential lands on the sandbox host.
+
+Each non-blank line that does not start with `#` names one credential as whitespace-separated fields:
+
+```text
+<name> <destination> <source> [<condition>...]
+gh-firstmate  github      /home/me/.config/firstmate/gh-firstmate.token  project=firstmate
+minimax       pi:minimax  /home/me/.config/firstmate/minimax.key
+```
+
+| Field | Meaning |
+| --- | --- |
+| `<name>` | A unique label, used in messages and the spawn's success line; letters, digits, `.`, `_`, and `-`. |
+| `<destination>` | `github` for the GitHub token the sandbox account stores for github.com, or `pi:<provider>` for one API-key entry of the sandbox account's Pi credential file. |
+| `<source>` | The absolute path of a readable regular file, not a symlink, owned by this account, with no group or other permission bits (for example mode 0600 or 0400), holding the value as one line of printable ASCII without spaces. |
+| `<condition>` | Optional `harness=`, `provider=`, `mode=`, or `project=`, each at most once, each holding one or more comma-separated values. |
+
+A credential is sent when every condition it carries matches the task: its harness, the provider its `--model <provider>/<id>` names, its delivery mode (`scout` for a scout), and its project.
+A `pi:<provider>` entry is additionally sent only to a `pi` or `pi-signed` worker whose model names that provider, so a sandboxed Pi worker needs an explicit `--model <provider>/<id>` and a matching entry, or the spawn refuses.
+At most one `github` entry and one Pi entry may match a task.
+Every entry's structure and source-file safety are validated on every sandbox spawn, including entries that do not match; credential values are validated only for selected entries.
+See [sandbox credentials](remote-sandboxes.md#credentials) for transport and secrecy guarantees.
 
 ## Away-mode supervisor backend (FM_SUPERVISOR_BACKEND / FM_SUPERVISOR_TARGET)
 
@@ -936,6 +964,7 @@ An unqualified model, an undeclared provider, or a raw Pi launch command, which 
 ### Launch scope and sign-in checks
 
 When a file is present, every launch of that runner from this home uses it: ships, scouts, local secondmate agents, raw Claude launch commands, and relaunches.
+A ship or scout placed in a sandbox never does, because a sandbox's credentials come only from [`config/sandbox-credentials`](#sandbox-credentials-configsandbox-credentials).
 A raw Claude launch command refuses if its leading assignments set `CLAUDE_CONFIG_DIR` or a credential that a pinned launch unsets, such as `ANTHROPIC_API_KEY`.
 The assignment would override the pin.
 The refusal names the variable; remove that assignment from the raw command, or change or remove `config/claude-account`.

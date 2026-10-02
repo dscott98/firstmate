@@ -11,6 +11,7 @@
 # the single owner of the provider command, output, and exit contracts.
 #
 # Usage: fm-sandbox.sh <verb> [args]
+#   config
 #   create <task-id> [--profile <name>] [--ttl <duration>]
 #   status <name>
 #   list
@@ -27,7 +28,15 @@
 # gitignored; FM_HOME selects the home, FM_CONFIG_OVERRIDE redirects
 # config/). With no config file every verb except --help refuses with exit 3
 # and changes nothing else. docs/configuration.md, "Sandbox provider",
-# owns the file format, required keys, and default-profile restrictions.
+# owns the file format, required keys, and default-profile
+# restrictions.
+#
+# config never invokes the provider: it validates the file and the provider
+# command, then prints the settings a caller needs as key=value lines -
+# provider (the provider command's file name, which must be a safe token),
+# default_profile, ttl, remote_root, and remote_home (the sandbox template's
+# Firstmate code root /opt/firstmate and one-task home /home/agent/fm-home). It is how
+# bin/fm-spawn.sh reads this file without parsing it a second time.
 #
 # HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
 # sharing one provider namespace have separate lifecycle scopes.
@@ -86,7 +95,8 @@
 #
 # EXIT STATUSES (these also apply to the ownership status check before
 # exec; once that check succeeds, exec relays the provider status unchanged):
-#   0  success (create/status/list/policy print validated key=value lines)
+#   0  success (config/create/status/list/policy print validated key=value
+#      lines)
 #   2  usage error: unknown verb, missing or malformed arguments, or a
 #      name, task id, label, or profile that is not a safe single token
 #      (non-empty, printable, no whitespace, no "=", no leading "-")
@@ -113,12 +123,19 @@ FM_SANDBOX_CAPACITY_RC=75
 FM_SANDBOX_PROVIDER=
 FM_SANDBOX_DEFAULT_PROFILE=
 FM_SANDBOX_TTL=
+FM_SANDBOX_REMOTE_ROOT=/opt/firstmate
+FM_SANDBOX_REMOTE_HOME=/home/agent/fm-home
+if [ "${FM_TEST_SEAM:-}" = 1 ]; then
+  FM_SANDBOX_REMOTE_ROOT=${FM_TEST_SANDBOX_ROOT:-$FM_SANDBOX_REMOTE_ROOT}
+  FM_SANDBOX_REMOTE_HOME=${FM_TEST_SANDBOX_HOME:-$FM_SANDBOX_REMOTE_HOME}
+fi
 FM_SANDBOX_OUT=
 FM_SANDBOX_RC=0
 
 usage() {
   cat <<'USAGE'
 usage: fm-sandbox.sh <verb> [args]
+  config
   create <task-id> [--profile <name>] [--ttl <duration>]
   status <name>
   list
@@ -199,10 +216,10 @@ fm_sandbox_read_config() {
       ssh_include)
         case "$value" in
           /*) ;;
-          *) refuse "ssh_include '$value' in $CONFIG must be an absolute path" ;;
+          *) refuse "$key '$value' in $CONFIG must be an absolute path" ;;
         esac
         case "$value" in
-          *[[:space:]]*) refuse "ssh_include '$value' in $CONFIG must not contain whitespace" ;;
+          *[[:space:]]*|*[[:cntrl:]]*) refuse "$key '$value' in $CONFIG must not contain whitespace or control characters" ;;
         esac
         ;;
       *)
@@ -409,6 +426,9 @@ EXPECT_TASK=
 EXEC_ARGV=()
 
 case "$VERB" in
+  config)
+    [ "$#" -eq 0 ] || fm_usage_error "config takes no arguments"
+    ;;
   create)
     TASK_ID=${1:-}
     [ -n "$TASK_ID" ] || fm_usage_error "create requires a task id"
@@ -525,6 +545,17 @@ case "$VERB" in
 esac
 
 case "$VERB" in
+  config)
+    fm_sandbox_require_provider
+    PROVIDER_NAME=${FM_SANDBOX_PROVIDER##*/}
+    fm_sandbox_token_ok "$PROVIDER_NAME" \
+      || refuse "the provider command's file name '$PROVIDER_NAME' from $CONFIG must be a printable token without whitespace, '=', or a leading '-', because task records name the provider by it"
+    printf 'provider=%s\n' "$PROVIDER_NAME"
+    printf 'default_profile=%s\n' "$FM_SANDBOX_DEFAULT_PROFILE"
+    printf 'ttl=%s\n' "$FM_SANDBOX_TTL"
+    printf 'remote_root=%s\n' "$FM_SANDBOX_REMOTE_ROOT"
+    printf 'remote_home=%s\n' "$FM_SANDBOX_REMOTE_HOME"
+    ;;
   create)
     PROFILE=${PROFILE_FLAG:-$FM_SANDBOX_DEFAULT_PROFILE}
     TTL=${TTL_FLAG:-$FM_SANDBOX_TTL}

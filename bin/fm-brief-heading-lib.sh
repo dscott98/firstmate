@@ -11,7 +11,20 @@
 # (fm_brief_status_append_paths) and the check that a ship or scout brief names
 # only the status file of the home about to run it
 # (fm_brief_foreign_status_file), which bin/fm-spawn.sh and the sandbox task
-# control plane (bin/fm-remote-task-control.sh) both apply.
+# control plane (bin/fm-remote-task-control.sh) both apply. For a sandbox
+# placement, bin/fm-spawn.sh checks the sandbox home's status file instead
+# (fm_brief_remote_status_mismatch), refuses a brief carrying the --herdr-lab
+# isolation contract (fm_brief_herdr_lab_contract_present), and reads the
+# network profile the brief authorizes (fm_brief_sandbox_profile); the heading
+# and line those readers match are the constants below, which bin/fm-brief.sh
+# writes.
+
+# The heading that opens the isolation contract bin/fm-brief.sh --herdr-lab
+# writes.
+FM_BRIEF_HERDR_LAB_HEADING='# Herdr isolation - HARD SAFETY CONTRACT'
+# The fixed line bin/fm-brief.sh --sandbox-profile <name> writes to record the
+# sandbox network profile this task is authorized to run on.
+FM_BRIEF_SANDBOX_PROFILE_PREFIX='Sandbox profile: '
 
 # Parse an exact ATX heading outside fenced blocks. Body mode prints through
 # the next unfenced heading at the same or a higher level; present mode reports
@@ -177,4 +190,57 @@ fm_brief_foreign_status_file() {  # <file> <state-dir> <task-id>
 $paths
 EOF
   return 1
+}
+
+# A sandbox task's worker runs in a one-task home on another host, so its
+# brief (bin/fm-brief.sh --for-home) must name exactly that home's status
+# file. The home does not exist on the supervising host, so the paths are
+# compared as strings. Print the first status file a status-append command
+# names that is not <remote-state-dir>/<task-id>.status, or a phrase naming the
+# defect when the brief has no readable status-append command, and return 0;
+# return 1 when the brief has such a command and every one names that file.
+fm_brief_remote_status_mismatch() {  # <file> <remote-state-dir> <task-id>
+  local file=$1 want="${2%/}/$3.status" paths path found=0
+  if ! paths=$(fm_brief_status_append_paths "$file"); then
+    printf '%s\n' 'an unreadable status-append command'
+    return 0
+  fi
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    if [ "$path" != "$want" ]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+    found=1
+  done <<EOF
+$paths
+EOF
+  if [ "$found" -eq 0 ]; then
+    printf '%s\n' 'no status-append command at all'
+    return 0
+  fi
+  return 1
+}
+
+fm_brief_herdr_lab_contract_present() {  # <file>
+  fm_brief_heading_present "$1" "$FM_BRIEF_HERDR_LAB_HEADING"
+}
+
+# Print the sandbox network profile <file> records on its one
+# FM_BRIEF_SANDBOX_PROFILE_PREFIX line, or nothing when it records none.
+# Return 1 when the brief has more than one such line or one whose value is not
+# a single printable token without '=' or a leading '-'.
+fm_brief_sandbox_profile() {  # <file>
+  local file=$1 line value='' count=0
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "$FM_BRIEF_SANDBOX_PROFILE_PREFIX"*) ;; *) continue ;; esac
+    count=$((count + 1))
+    value=${line#"$FM_BRIEF_SANDBOX_PROFILE_PREFIX"}
+    case "$value" in
+      ''|-*|*=*|*[[:space:]]*|*[![:print:]]*) return 1 ;;
+    esac
+  done < "$file"
+  [ "$count" -le 1 ] || return 1
+  [ -z "$value" ] || printf '%s\n' "$value"
 }

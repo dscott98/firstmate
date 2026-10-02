@@ -1019,6 +1019,9 @@ test_arm_plumbs_a_configured_budget_into_the_check_shim() {
     wrap_forge "$home"
     mutate_record "$home" delivery '.records[0].checked_at="2026-09-15T08:00:00Z"'
     cp "$home/data/delivery/contributions.json" "$home/prior.json"
+    # Freeze scheduling time so the one-second budget reaches the first read;
+    # the real subprocess timeout still bounds the hanging forge call.
+    /bin/date +%s > "$home/forge/clock"
     printf 'hang\n' > "$home/forge/fault"
     if [ "$mode" = configured ]; then
       with_home "$home" env FM_CONTRIBUTIONS_BUDGET=1 "$ROOT/bin/fm-contributions.sh" arm >/dev/null \
