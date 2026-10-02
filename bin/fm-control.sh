@@ -339,8 +339,9 @@ fi
 # operator about a correctly configured remote route. Name the placement
 # instead, from the same remote dispatch bin/fm-send.sh routes on
 # (bin/fm-remote-route-lib.sh). A sandbox task's agent likewise runs on its VM,
-# and this version has no host-side control for it, so it is refused by name
-# too; a record whose placement is malformed is refused with its defect.
+# and this version does not yet route lifecycle control to that host's task
+# control plane, so it is refused by name too; a record whose placement is
+# malformed is refused with its defect.
 fm_remote_route_resolve "$META" "$ID" \
   || die "task $ID was not touched: $FM_REMOTE_ROUTE_ERROR"
 case "$FM_REMOTE_ROUTE_KIND" in

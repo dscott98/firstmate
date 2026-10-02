@@ -20,8 +20,13 @@
 #   registry entry the parser refuses stops the spawn rather than launching on a
 #   guessed posture. A
 #   ship or scout spawn also refuses leftover `{TASK}` / `{FIRSTMATE_SPEC}`
-#   placeholders, an empty Task, an incomplete pair of Task subsections, or a
-#   `## Captain's intent` line opening with a Captain label or address.
+#   placeholders, an empty Task, an incomplete pair of Task subsections, a
+#   `## Captain's intent` line opening with a Captain label or address, or a
+#   status-append command naming any status file but this home's
+#   state/<task-id>.status (bin/fm-brief-heading-lib.sh's
+#   fm_brief_foreign_status_file), so a brief rendered for a sandbox task's
+#   home or copied from another home cannot launch a worker that reports where
+#   this task's supervisor never reads.
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
@@ -3059,6 +3064,10 @@ if [ "$KIND" = ship ] || [ "$KIND" = scout ]; then
   fi
   if ADDRESS_LINE=$(fm_brief_intent_address_line "$BRIEF"); then
     echo "error: $BRIEF ## Captain's intent has an operator-address line: $ADDRESS_LINE; write the captain's actual words without a Captain label or address before spawn, since the heading already records provenance" >&2
+    exit 1
+  fi
+  if FOREIGN_STATUS_FILE=$(fm_brief_foreign_status_file "$BRIEF" "$STATE" "$ID"); then
+    echo "error: $BRIEF tells its worker to append status to $FOREIGN_STATUS_FILE, not to this home's $STATE/$ID.status; a brief rendered for another home (such as a sandbox task's, by fm-brief.sh --for-home) or copied from one would report where no supervisor of this task reads, so re-scaffold it for this home before spawn" >&2
     exit 1
   fi
   if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then

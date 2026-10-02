@@ -179,8 +179,8 @@
 # bin/fm-remote-route-lib.sh decides remote placement before anything else
 # reads the record: a remote secondmate takes the remote retirement above, and
 # a sandbox task record, or a record whose placement is malformed, is refused
-# with nothing touched, even under --force, because this version has no
-# host-side teardown or landed-work gate for a sandbox task.
+# with nothing touched, even under --force, because this version does not yet
+# route a sandbox task's teardown to its host's retire and landed-work gate.
 # Usage: fm-teardown.sh <task-id> [--force] [--legacy-record]
 #   --force skips ordinary-task dirty and landed-work checks, skips scout report
 #   checks, and discards secondmate child work for kind=secondmate. Only use it
@@ -425,10 +425,10 @@ fm_lease_guard "$ID" "teardown (fm-teardown)"
 META="$STATE/$ID.meta"
 # Remote dispatch (bin/fm-remote-route-lib.sh) runs before anything reads the
 # record's worktree or endpoint as local. A sandbox task's worktree lives on
-# its VM, and this version has neither its host-side teardown nor its
-# landed-work gate, so the task is refused with nothing touched; a record whose
-# placement is malformed is refused the same way. The remote secondmate
-# dispatch below resolves the route again under the task's locks.
+# its VM, and this version does not yet route its teardown to that host's
+# retire and landed-work gate, so the task is refused with nothing touched; a
+# record whose placement is malformed is refused the same way. The remote
+# secondmate dispatch below resolves the route again under the task's locks.
 teardown_refuse_unroutable() {
   if ! fm_remote_route_resolve "$META" "$ID"; then
     echo "REFUSED: task $ID: $FM_REMOTE_ROUTE_ERROR; nothing was changed" >&2

@@ -36,10 +36,10 @@
 #   exactly one each of kind=ship or kind=scout, remote_kind=task,
 #   window=remote:<id>, endpoint_task_id=<id>, remote_host=, remote_root=, and
 #   remote_home=. Its route must pass fm_remote_route_check_shape, and its code
-#   root and home must not overlap. A registry route is held to that same
-#   disjointness when bin/fm-secondmate-registry-lib.sh validates
-#   data/secondmates.md; a task record has no write-time validator in this
-#   home, so the read-time check here carries it. The record's other sandbox
+#   root and home must pass fm_remote_route_check_disjoint. A registry route is
+#   held to that same disjointness when bin/fm-secondmate-registry-lib.sh
+#   validates data/secondmates.md; a task record has no write-time validator in
+#   this home, so the read-time check here carries it. The record's other sandbox
 #   fields (remote_backend, remote_target, worktree - a path on the VM that is
 #   never probed locally - sandbox_provider, sandbox_name, and sandbox_profile)
 #   are not routing inputs and stay with the consumers that need them.
@@ -51,8 +51,11 @@
 # fm_remote_route_check_shape <host> <root> <home> owns the transport shape
 # every remote route passes before bin/fm-on.sh encodes it: a safe SSH alias,
 # and an absolute root and home with no control characters, traversal
-# components, or empty path components. It returns 1 with
-# FM_REMOTE_ROUTE_ERROR set.
+# components, or empty path components. fm_remote_route_check_path_shape
+# <root> <home> is its path half and fm_remote_route_check_disjoint <root>
+# <home> the overlap rule a task route adds, so bin/fm-brief.sh --for-home and
+# --for-root render a brief only for a root and home a task record could
+# route to. Each returns 1 with FM_REMOTE_ROUTE_ERROR set.
 
 FM_REMOTE_ROUTE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=bin/fm-backend.sh
@@ -82,13 +85,19 @@ fm_remote_route_invalid() { # <reason>
 }
 
 fm_remote_route_check_shape() { # <host> <root> <home>
-  local host=$1 root=$2 home=$3 path
+  local host=$1
   FM_REMOTE_ROUTE_ERROR=
   case "$host" in ''|-*|*[!A-Za-z0-9._-]*)
     FM_REMOTE_ROUTE_ERROR="configured SSH alias is unsafe: $host"
     return 1
     ;;
   esac
+  fm_remote_route_check_path_shape "$2" "$3"
+}
+
+fm_remote_route_check_path_shape() { # <root> <home>
+  local root=$1 home=$2 path
+  FM_REMOTE_ROUTE_ERROR=
   case "$root" in /*) ;; *)
     FM_REMOTE_ROUTE_ERROR="configured remote root is not absolute: $root"
     return 1
@@ -119,9 +128,31 @@ fm_remote_route_check_shape() { # <host> <root> <home>
   return 0
 }
 
+fm_remote_route_check_disjoint() { # <root> <home>
+  local root=$1 home=$2 root_normalized home_normalized
+  FM_REMOTE_ROUTE_ERROR=
+  root_normalized=${root%/}
+  home_normalized=${home%/}
+  if [ -z "$root_normalized" ] || [ -z "$home_normalized" ] || [ "$root_normalized" = "$home_normalized" ]; then
+    FM_REMOTE_ROUTE_ERROR="an overlapping remote root and home: $root"
+    return 1
+  fi
+  case "$home_normalized/" in "$root_normalized/"*)
+    FM_REMOTE_ROUTE_ERROR="its remote home inside its code root: $home"
+    return 1
+    ;;
+  esac
+  case "$root_normalized/" in "$home_normalized/"*)
+    FM_REMOTE_ROUTE_ERROR="its remote code root inside its home: $root"
+    return 1
+    ;;
+  esac
+  return 0
+}
+
 fm_remote_route_resolve() { # <meta-file> [<task-id>]
   local meta=${1:-} id=${2:-} placement_lines remote_kind_lines placement
-  local kind remote_kind window binding host root home root_normalized home_normalized
+  local kind remote_kind window binding host root home
   fm_remote_route_reset
   [ -n "$meta" ] && [ -f "$meta" ] || return 0
   if [ -z "$id" ]; then
@@ -204,22 +235,10 @@ fm_remote_route_resolve() { # <meta-file> [<task-id>]
     fm_remote_route_invalid "sandbox task $id has an unsafe route: $FM_REMOTE_ROUTE_ERROR"
     return 1
   fi
-  root_normalized=${root%/}
-  home_normalized=${home%/}
-  if [ -z "$root_normalized" ] || [ -z "$home_normalized" ] || [ "$root_normalized" = "$home_normalized" ]; then
-    fm_remote_route_invalid "sandbox task $id has an overlapping remote root and home: $root"
+  if ! fm_remote_route_check_disjoint "$root" "$home"; then
+    fm_remote_route_invalid "sandbox task $id has $FM_REMOTE_ROUTE_ERROR"
     return 1
   fi
-  case "$home_normalized/" in "$root_normalized/"*)
-    fm_remote_route_invalid "sandbox task $id has its remote home inside its code root: $home"
-    return 1
-    ;;
-  esac
-  case "$root_normalized/" in "$home_normalized/"*)
-    fm_remote_route_invalid "sandbox task $id has its remote code root inside its home: $root"
-    return 1
-    ;;
-  esac
   FM_REMOTE_ROUTE_KIND=task
   FM_REMOTE_ROUTE_HOST=$host
   FM_REMOTE_ROUTE_ROOT=$root

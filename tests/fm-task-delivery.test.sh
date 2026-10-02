@@ -564,6 +564,74 @@ EOF
 # Spawn and promotion refuse leftover Task-subsection placeholders through the
 # public brief/spawn/promote path. Filling both subsections lets the spawn
 # delivery checks proceed (the fake tmux still fails later).
+# A worker appends status to exactly the path its brief names, so a ship or
+# scout brief that names another home's status file - one rendered for a
+# sandbox task's home, copied from a sibling home, or copied from another task -
+# would report where this task's supervisor never reads. The spawn refuses it
+# before anything exists, while this home's own status file under a symlinked
+# spelling of its state directory is still this home's.
+test_spawn_refuses_a_brief_naming_another_homes_status_file() {
+  local rec home proj fakebin out status id other
+  rec=$(make_home foreign-status "- proj [no-mistakes] - fixture (added 2026-01-01)")
+  IFS='|' read -r home proj fakebin <<EOF
+$rec
+EOF
+
+  id=foreign-status-sandbox
+  FM_HOME="$home" "$BRIEF" "$id" proj --mode no-mistakes --for-home /home/agent/fm-home --for-root /opt/firstmate >/dev/null \
+    || fail "a sandbox brief should scaffold"
+  fill_brief_subsections "$home/data/$id/brief.md" "Ship the sandbox change." "Build only that change."
+  out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a brief rendered for a sandbox home launched locally"
+  assert_contains "$out" "tells its worker to append status to /home/agent/fm-home/state/$id.status, not to this home's $home/state/$id.status" \
+    "the refusal did not name both status files"
+  assert_absent "$home/state/$id.meta" "the refused sandbox brief still recorded a task"
+
+  id=foreign-status-copied
+  other="$TMP_ROOT/foreign-status/sibling-home"
+  mkdir -p "$other/data" "$home/data/$id"
+  FM_HOME="$other" "$BRIEF" "$id" proj --scout >/dev/null || fail "a sibling scout brief should scaffold"
+  fill_brief_subsections "$other/data/$id/brief.md" "Investigate the copy." "Report findings."
+  cp "$other/data/$id/brief.md" "$home/data/$id/brief.md"
+  out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --scout)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a scout brief copied from a sibling home launched here"
+  assert_contains "$out" "tells its worker to append status to $other/state/$id.status" \
+    "the copied-brief refusal did not name the sibling's status file"
+  assert_absent "$home/state/$id.meta" "the refused copied brief still recorded a task"
+
+  id=foreign-status-other-task
+  mkdir -p "$home/data/$id"
+  sed "s/foreign-status-sandbox/foreign-status-unrelated/g" "$home/data/foreign-status-sandbox/brief.md" \
+    | sed "s#/home/agent/fm-home#$home#g; s#/opt/firstmate#$ROOT#g" > "$home/data/$id/brief.md"
+  out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
+  status=$?
+  [ "$status" -ne 0 ] || fail "a brief naming another task's status file launched"
+  assert_contains "$out" "tells its worker to append status to $home/state/foreign-status-unrelated.status" \
+    "the other-task refusal did not name the other task's status file"
+
+  id=foreign-status-own
+  FM_HOME="$home" "$BRIEF" "$id" proj --mode no-mistakes >/dev/null || fail "an ordinary brief should scaffold"
+  fill_brief_subsections "$home/data/$id/brief.md" "Ship the local change." "Build only that change."
+  out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
+  assert_not_contains "$out" "tells its worker to append status to" \
+    "a brief naming this home's own status file was refused"
+
+  id=foreign-status-symlinked
+  ln -s "$home" "$TMP_ROOT/foreign-status/home-link"
+  FM_HOME="$TMP_ROOT/foreign-status/home-link" "$BRIEF" "$id" proj --mode no-mistakes >/dev/null \
+    || fail "a brief scaffolded through a symlinked home should scaffold"
+  fill_brief_subsections "$home/data/$id/brief.md" "Ship the local change." "Build only that change."
+  assert_grep "$TMP_ROOT/foreign-status/home-link/state/$id.status" "$home/data/$id/brief.md" \
+    "the fixture brief did not name the symlinked spelling"
+  out=$(run_spawn "$home" "$fakebin" "$id" "$proj" claude --mode no-mistakes --yolo off)
+  assert_not_contains "$out" "tells its worker to append status to" \
+    "this home's status file under a symlinked spelling was refused"
+
+  pass "fm-spawn: a ship or scout brief naming another home's status file is refused before anything is created"
+}
+
 test_spawn_and_promote_require_filled_task_subsections() {
   local rec home proj fakebin out status id brief meta intent_body spec_body authorized
   rec=$(make_home subsections)
@@ -1621,6 +1689,7 @@ EOF
 test_ship_spawn_requires_a_valid_delivery_contract
 test_scout_and_secondmate_refuse_delivery_flags
 test_spawn_refuses_a_brief_mode_mismatch
+test_spawn_refuses_a_brief_naming_another_homes_status_file
 test_spawn_notices_a_rigor_downgrade_against_the_registry
 test_scout_records_no_delivery_posture
 test_promote_requires_and_records_the_delivery_contract

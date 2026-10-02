@@ -14,9 +14,24 @@
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
-# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab]
-#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab]
+# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--for-home <remote-home> --for-root <remote-root>]
+#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab] [--for-home <remote-home> --for-root <remote-root>]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
+#   --for-home and --for-root, given together, render a ship or scout brief for
+#   a sandbox task's one-task home on another host: every path the worker uses -
+#   the status file its status-append command names, the steering inbox, the
+#   ask-user findings file, a scout's report, and the Firstmate code-root paths
+#   the brief cites - names <remote-home> and <remote-root>, because a worker
+#   appends to exactly the path its brief names. The brief is still written to
+#   this home's data/<task-id>/brief.md, which stays the one brief Firstmate
+#   edits and whose exact bytes the sandbox provisioning manifest carries. The
+#   pair must name a root and home a sandbox task route could carry
+#   (bin/fm-remote-route-lib.sh's path shape and disjointness), and is refused
+#   with --secondmate and with --herdr-lab, whose lab helper assumes this
+#   host's Herdr. A remote scout is told to deliver a text report, because the
+#   supervising home cannot reach a board served from the sandbox.
+#   bin/fm-spawn.sh refuses to launch a brief naming another home's status file,
+#   so a brief rendered for a sandbox launches only in that sandbox's home.
 #   --scout writes the scout contract instead: the deliverable is a report at
 #   data/<task-id>/report.md (no branch, no push, no PR) and the worktree is scratch.
 #   It offers the Lavish review loop only when `fm-bootstrap.sh lavish-compatible`
@@ -191,6 +206,10 @@ FORGE=none
 FORGE_SET=0
 SHAPE=
 SHAPE_SET=0
+FOR_HOME=
+FOR_HOME_SET=0
+FOR_ROOT=
+FOR_ROOT_SET=0
 POS=()
 want_value=
 for a in "$@"; do
@@ -203,6 +222,8 @@ for a in "$@"; do
       branch-prefix) BRANCH_PREFIX=$a; BRANCH_PREFIX_SET=1 ;;
       forge) FORGE=$a; FORGE_SET=1 ;;
       shape) SHAPE=$a; SHAPE_SET=1 ;;
+      for-home) FOR_HOME=$a; FOR_HOME_SET=1 ;;
+      for-root) FOR_ROOT=$a; FOR_ROOT_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -221,6 +242,10 @@ for a in "$@"; do
     --forge=*) FORGE=${a#--forge=}; FORGE_SET=1 ;;
     --shape) want_value=shape ;;
     --shape=*) SHAPE=${a#--shape=}; SHAPE_SET=1 ;;
+    --for-home) want_value=for-home ;;
+    --for-home=*) FOR_HOME=${a#--for-home=}; FOR_HOME_SET=1 ;;
+    --for-root) want_value=for-root ;;
+    --for-root=*) FOR_ROOT=${a#--for-root=}; FOR_ROOT_SET=1 ;;
     # yolo never reaches the worker: it is firstmate's merge authority, not a
     # brief input. Refuse it loudly so it is never silently dropped here and then
     # believed to have been recorded.
@@ -298,6 +323,45 @@ if [ "$NO_PROJECTS" -eq 1 ] && [ "$KIND" != secondmate ]; then
   exit 1
 fi
 
+# The paths a worker uses, rendered for the home that will run it: this home by
+# default, or a sandbox task's home for --for-home/--for-root (header).
+RENDER_STATE=$STATE
+RENDER_DATA=$DATA
+RENDER_CONFIG=$CONFIG
+RENDER_ROOT=$FM_ROOT
+REMOTE_RENDER=0
+RENDER_NOTE=
+if [ "$FOR_HOME_SET" -eq 1 ] || [ "$FOR_ROOT_SET" -eq 1 ]; then
+  if [ "$FOR_HOME_SET" -ne 1 ] || [ "$FOR_ROOT_SET" -ne 1 ]; then
+    echo "error: --for-home and --for-root render a brief for a sandbox task's home and must be given together" >&2
+    exit 1
+  fi
+  if [ "$KIND" = secondmate ]; then
+    echo "error: --for-home and --for-root apply only to ship and scout briefs; a secondmate charter is never rendered for a sandbox task's home" >&2
+    exit 1
+  fi
+  if [ "$HERDR_LAB" -eq 1 ]; then
+    echo "error: --herdr-lab cannot be rendered for a sandbox task's home: its lab helper assumes this host's Herdr" >&2
+    exit 1
+  fi
+  # shellcheck source=bin/fm-remote-route-lib.sh
+  . "$SCRIPT_DIR/fm-remote-route-lib.sh"
+  if ! fm_remote_route_check_path_shape "$FOR_ROOT" "$FOR_HOME"; then
+    echo "error: --for-root/--for-home: $FM_REMOTE_ROUTE_ERROR" >&2
+    exit 1
+  fi
+  if ! fm_remote_route_check_disjoint "$FOR_ROOT" "$FOR_HOME"; then
+    echo "error: --for-root/--for-home: the route has $FM_REMOTE_ROUTE_ERROR" >&2
+    exit 1
+  fi
+  RENDER_STATE="${FOR_HOME%/}/state"
+  RENDER_DATA="${FOR_HOME%/}/data"
+  RENDER_CONFIG="${FOR_HOME%/}/config"
+  RENDER_ROOT=${FOR_ROOT%/}
+  REMOTE_RENDER=1
+  RENDER_NOTE=", for sandbox home ${FOR_HOME%/}"
+fi
+
 # The optional home-local include is read before anything is written, so an
 # unusable file never leaves a partial scaffold behind.
 BRIEF_INCLUDE_FILE="$CONFIG/brief-include.md"
@@ -329,7 +393,7 @@ mkdir -p "$DATA/$ID"
 
 ASK_USER_BLOCK=
 if [ "$KIND" = ship ] && [ "$MODE" = no-mistakes ]; then
-  ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$DATA" "$ID")
+  ASK_USER_BLOCK=$(fm_ask_user_escalation_block "$RENDER_DATA" "$ID")
 fi
 
 shell_quote() {
@@ -338,13 +402,13 @@ shell_quote() {
   printf "'"
 }
 
-STATUS_FILE=$(shell_quote "$STATE/$ID.status")
+STATUS_FILE=$(shell_quote "$RENDER_STATE/$ID.status")
 # The worker's status command: the plain append always carries the line, then
 # the opt-in fleet ledger (docs/fleet-ledger.md) records it at once, costing one
 # file test when the flag is absent. A host without that flag, such as a remote
 # second mate's, runs only the append; the watcher capture is the backstop.
-STATUS_APPEND="echo \"{state} [at=<epoch>]: {one short line}\" >> $STATUS_FILE && { [ ! -e $(shell_quote "$CONFIG/fleet-ledger") ] || $(shell_quote "$FM_ROOT/bin/fm-fleet-ledger.sh") appended $(shell_quote "$CONFIG") $STATUS_FILE >/dev/null 2>&1 || true; }"
-INBOX_DIR=$(shell_quote "$STATE/$ID.inbox")
+STATUS_APPEND="echo \"{state} [at=<epoch>]: {one short line}\" >> $STATUS_FILE && { [ ! -e $(shell_quote "$RENDER_CONFIG/fleet-ledger") ] || $(shell_quote "$RENDER_ROOT/bin/fm-fleet-ledger.sh") appended $(shell_quote "$RENDER_CONFIG") $STATUS_FILE >/dev/null 2>&1 || true; }"
+INBOX_DIR=$(shell_quote "$RENDER_STATE/$ID.inbox")
 
 # The receive-and-ack half of the steering-inbox contract, included in every
 # scaffold kind. The record format, doorbell line, and re-ring ladder are
@@ -567,7 +631,9 @@ EOF
 SHARED_INFRA_RULE=${SHARED_INFRA_RULE%$'\n'}
 
 if [ "$KIND" = scout ]; then
-if "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
+if [ "$REMOTE_RENDER" -eq 1 ]; then
+  LAVISH_LINE='This scout runs in a sandbox whose local servers the supervising firstmate cannot reach, so deliver your findings as a text report without Lavish, even for a visual deliverable.'
+elif "$SCRIPT_DIR/fm-bootstrap.sh" lavish-compatible >/dev/null 2>&1; then
   LAVISH_LINE='If your deliverable is a visual artifact the captain will review and iterate on, use the lavish-axi rule: arm your board with bin/fm-procevent-lavish.sh arm <artifact.html> --for <task-id>; never run lavish-axi poll yourself. Re-arm with the reply after each nonterminal round to acknowledge it, route the board feedback through your steering inbox, write needs-decision [key=board-review] with the live board URL when the captain owes a decision, and stop at session_ended or an empty End without re-arming - acknowledge that final round with bin/fm-procevent.sh handled <source-id> <sequence> to conclude and retire your board.'
 else
   LAVISH_LINE='Lavish is unavailable (lavish-axi is missing or below its supported version floor), so deliver your findings as a text report without Lavish, even for a visual deliverable.'
@@ -610,15 +676,15 @@ $SHARED_INFRA_RULE
 $WAIT_BLOCK$INBOX_SECTION
 
 # Definition of done
-Write your findings to \`$DATA/$ID/report.md\`.
+Write your findings to \`$RENDER_DATA/$ID/report.md\`.
 The report must stand alone: what you did, what you found, the evidence (commands run, output, file:line references), and what you recommend.
 $LAVISH_LINE
-Before reporting done, read and follow \`$FM_ROOT/.agents/skills/captain-hold-lifecycle/SKILL.md\` and pass its shared completion gate for the report and any visual review.
+Before reporting done, read and follow \`$RENDER_ROOT/.agents/skills/captain-hold-lifecycle/SKILL.md\` and pass its shared completion gate for the report and any visual review.
 When the report is complete, append \`done [at=<epoch>]: {one-line conclusion}\` to the status file and stop.
 If your findings reveal work that should ship (e.g. you reproduced a bug and the fix is clear), say so in the report; firstmate may promote this task in place, and you would then receive mode-specific ship instructions as a follow-up message.
 EOF
 append_brief_include
-echo "scaffolded: $BRIEF (scout; replace {TASK} and {FIRSTMATE_SPEC})"
+echo "scaffolded: $BRIEF (scout$RENDER_NOTE; replace {TASK} and {FIRSTMATE_SPEC})"
 exit 0
 fi
 
@@ -689,13 +755,13 @@ $WAIT_BLOCK$INBOX_SECTION
 
 # Project memory
 A project's \`AGENTS.md\` or \`CLAUDE.md\` is loaded into every agent session in that project, so edit it only to correct information that is factually wrong - including information your own change made wrong - and never to add knowledge because it is missing.
-A correction edits only the wrong text: do not run \`$FM_ROOT/bin/fm-ensure-agents-md.sh\`, create either file, or add sections, headings, or pointers alongside it.
+A correction edits only the wrong text: do not run \`$RENDER_ROOT/bin/fm-ensure-agents-md.sh\`, create either file, or add sections, headings, or pointers alongside it.
 
 $DOD
 EOF
 append_brief_include
 if [ "$FORGE" = none ]; then
-  echo "scaffolded: $BRIEF (ship, mode=$MODE; replace {TASK} and {FIRSTMATE_SPEC})"
+  echo "scaffolded: $BRIEF (ship, mode=$MODE$RENDER_NOTE; replace {TASK} and {FIRSTMATE_SPEC})"
 else
-  echo "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE; replace {TASK} and {FIRSTMATE_SPEC})"
+  echo "scaffolded: $BRIEF (ship, mode=$MODE forge=$FORGE shape=$SHAPE$RENDER_NOTE; replace {TASK} and {FIRSTMATE_SPEC})"
 fi
