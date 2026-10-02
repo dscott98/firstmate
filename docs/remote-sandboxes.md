@@ -34,7 +34,9 @@ What is wired today:
 - [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, a scout's report arrives before its terminal line, and peek, steering, and current-state reads route to the task's host.
 
 Sandbox placement is not for real use until the remaining stages land.
-Lifecycle control, stale-pane and liveness supervision, teardown, and orphan and TTL handling of a placed task arrive in later stages of the plan.
+Lifecycle control arrives in PR6: interrupt, exit, and relaunch with the record republished.
+Until PR6, `fm-control.sh` keeps its explicit named refusal of sandbox tasks.
+Stale-pane and liveness supervision, teardown, and orphan and TTL handling of a placed task arrive in later stages of the plan.
 Until then lifecycle control and teardown refuse a sandbox task, and cleaning one up is a manual operator step: preserve its unlanded work, destroy the sandbox, and close its record and backlog item.
 
 ## Principles

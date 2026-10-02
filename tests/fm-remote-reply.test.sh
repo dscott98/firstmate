@@ -62,12 +62,27 @@ if [ "${FM_REMOTE_REPLY_FAIL_FILE:-}" = 1 ]; then
   command=$(printf '%s' "$4" | base64 --decode | tr '\0' '\n' | head -n 1)
   [ "$command" != fm-remote-file.sh ] || exit 255
 fi
+if [ -s "$FM_REPLY_FETCH_MODE" ]; then
+  command=$(printf '%s' "$4" | base64 --decode | tr '\0' '\n' | head -n 1)
+  if [ "$command" = fm-remote-file.sh ]; then
+    case "$(cat "$FM_REPLY_FETCH_MODE")" in
+      oversized) head -c 1048577 /dev/zero; exit 0 ;;
+      endless) exec python3 -c 'import os
+while True: os.write(1, b"x" * 65536)' ;;
+      stderr) head -c 65537 /dev/zero >&2; exit 0 ;;
+      stalled) printf partial; exec sleep 60 ;;
+      partial) printf partial; exit 1 ;;
+    esac
+  fi
+fi
 exec "$FM_FAKE_REMOTE_ENTRYPOINT" "$@"
 SH
 chmod +x "$FAKEBIN/fake-ssh"
 
 remote_env() {
   FM_HOME="$PARENT" \
+  FM_REPLY_FETCH_MODE="$TMP_ROOT/fetch-mode" \
+  FM_REMOTE_REPLY_FETCH_SECONDS="${FM_REMOTE_REPLY_FETCH_SECONDS:-30}" \
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" \
   FM_SSH_BIN="$FAKEBIN/fake-ssh" \
@@ -1210,6 +1225,30 @@ scout_offset=$(LC_ALL=C wc -c < "$TASK_REMOTE/state/sbxscout.status" | tr -d ' '
 assert_grep "offset=$scout_offset" "$PARENT/state/remote-replies/sbxscout.cursor" \
   "a refused report held the scout's cursor back"
 pass "a refused scout report fails open: the line mirrors, one note says why, and no decision opens"
+
+stop_source_listener remote-reply-sbxscout || fail "the sandbox scout listener did not stop before hostile fetches"
+for fetch_mode in oversized endless stderr stalled partial; do
+  printf '%s\n' "$fetch_mode" > "$TMP_ROOT/fetch-mode"
+  printf '# stale report\n' > "$PARENT/data/sbxscout/report.md"
+  FM_REMOTE_REPLY_FETCH_SECONDS=3 mirror_scout_lines "done: hostile fetch $fetch_mode"
+  assert_absent "$PARENT/data/sbxscout/report.md" "$fetch_mode installed or retained a report"
+  assert_grep "done: hostile fetch $fetch_mode" "$PARENT/state/sbxscout.status" "$fetch_mode held the terminal line back"
+  case "$fetch_mode" in
+    oversized|endless) reason='remote document stdout exceeds max-bytes' ;;
+    stderr) reason='remote document stderr exceeds max-bytes' ;;
+    stalled) reason='remote document transfer timed out' ;;
+    partial) reason='the remote reader gave no reason' ;;
+  esac
+  scout_note "$reason" >/dev/null || fail "$fetch_mode omitted the refusal note"
+  if status_open_decisions "$PARENT/state/sbxscout.status" | grep -q 'remote-reply-'; then
+    fail "$fetch_mode opened a decision"
+  fi
+  if compgen -G "$PARENT/data/sbxscout/.remote-doc.*" >/dev/null; then
+    fail "$fetch_mode left a partial staging file"
+  fi
+done
+rm -f "$TMP_ROOT/fetch-mode"
+pass "primary bounds hostile stdout, stderr, endless and timed-out report transfers"
 
 # Transport loss while fetching leaves the whole delta uncommitted for retry,
 # so the terminal line never lands ahead of its report.

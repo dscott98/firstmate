@@ -1347,6 +1347,9 @@ EOF
   assert_contains "$out" "state: working" "a stale ready status must not mask a later CI relapse"
   assert_contains "$out" "source: run-step" "relapsed ci run remains run-step sourced"
   assert_not_contains "$out" "state: done" "relapsed ci run with stale done log must not read as done"
+  : > "$d/empty.status"
+  out=$(FM_CREW_STATE_STATUS_OVERRIDE="$d/empty.status" run_crew_state "$d" feat-cireadyrelapse)
+  assert_contains "$out" 'CI not ready' 'host components carry CI relapse without their status log'
   pass "stale checks-green status log does not mask CI relapse"
 }
 
@@ -3348,6 +3351,29 @@ test_sandbox_crew_state_host_run_step_reconciles_with_the_local_fold() {
   assert_contains "$out" "state: blocked · source: status-log · no-mistakes daemon socket refused connection · daemon socket down despite attributed run record · sandbox host sbx-host" \
     "a refused-socket blocker at the log's tip still reads blocked"
   pass "fm-crew-state sandbox: a host run-step is authoritative and reconciles with the local fold"
+}
+
+test_sandbox_ci_ready_log_reconciles_monitoring_run() {
+  reset_fakes
+  local d out detail
+  d=$(setup_sandbox_case sandbox-ci-ready)
+  sed 's/^mode=direct-PR$/mode=no-mistakes/' "$d/state/sbx.meta" > "$d/state/sbx.meta.tmp"
+  mv "$d/state/sbx.meta.tmp" "$d/state/sbx.meta"
+  printf 'done: PR https://github.com/o/r/pull/2 checks green\n' > "$d/state/sbx.status"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: run-step · ci running · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" 'state: blocked · source: status-log' 'CI-ready done still needs a recorded PR'
+  assert_contains "$out" 'sandbox host sbx-host' 'the refusal names the sandbox host'
+  printf 'pr=https://github.com/o/r/pull/2\npr_head=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' >> "$d/state/sbx.meta"
+  out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block 'state: working · source: run-step · ci running · run: r1' idle pi-ext) \
+    run_sandbox_crew_state "$d")
+  assert_contains "$out" 'state: done · source: status-log' 'mirrored CI-ready done beats monitoring'
+  for detail in 'validating (fixing)' 'ci running · CI not ready'; do
+    out=$(FM_FAKE_SANDBOX_BLOCK=$(sandbox_block "state: working · source: run-step · $detail · run: r1" busy pi-ext) \
+      run_sandbox_crew_state "$d")
+    assert_contains "$out" 'state: working · source: run-step' 'CI relapse supersedes a stale ready claim'
+  done
+  pass "sandbox CI-ready reconciliation preserves the done gate and relapse safeguards"
 }
 
 test_sandbox_crew_state_busy_component_and_done_gate() {
@@ -5755,6 +5781,7 @@ test_remote_unreachable_is_unknown_remote_not_dead
 test_remote_dead_reports_remote_verdict
 test_sandbox_crew_state_reads_the_host_and_never_the_local_worktree
 test_sandbox_crew_state_host_run_step_reconciles_with_the_local_fold
+test_sandbox_ci_ready_log_reconciles_monitoring_run
 test_sandbox_crew_state_busy_component_and_done_gate
 test_sandbox_crew_state_unreachable_or_untrusted_host_is_unknown
 test_missing_meta

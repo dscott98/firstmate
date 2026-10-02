@@ -962,6 +962,13 @@ nm_run_head_matches_worktree() {
 #   - The host's endpoint-gone verdict is the only death evidence it reports,
 #     read as unknown with that reason; an unreachable host or a block that
 #     fails validation is unknown-remote, never death.
+sandbox_emit_status_done() {
+  if fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META" >/dev/null; then
+    emit done status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
+  fi
+  emit blocked status-log "named head cannot be verified from this home: no PR recorded here carries it, and task $ID's worktree is on $SANDBOX_NOTE"
+}
+
 # The block is untrusted input about its own task: it must carry exactly
 # schema, crew_state, busy, and busy_source, once each, with recognized values
 # and no control bytes.
@@ -1038,6 +1045,12 @@ if [ -n "$SANDBOX_HOST" ]; then
   if [ "$SANDBOX_SOURCE" = run-step ]; then
     RUN_STATE=$SANDBOX_STATE
     RUN_DETAIL=$SANDBOX_DETAIL
+    if [ "$RUN_STATE" = working ] && log_reports_ci_ready; then
+      case "${SEP}$RUN_DETAIL${SEP}" in
+        *"${SEP}validating (fixing)${SEP}"*|*"${SEP}CI not ready${SEP}"*) ;;
+        *) sandbox_emit_status_done ;;
+      esac
+    fi
     case "$LOG_VERB" in
       needs-decision|blocked)
         LOG_LATEST=$(last_status_line "$LOG")
@@ -1067,10 +1080,7 @@ if [ -n "$SANDBOX_HOST" ]; then
   esac
   if [ -n "$LOG_VERB" ]; then
     if [ "$LOG_VERB" = "done" ]; then
-      if fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META" >/dev/null; then
-        emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
-      fi
-      emit blocked status-log "named head cannot be verified from this home: no PR recorded here carries it, and task $ID's worktree is on $SANDBOX_NOTE"
+      sandbox_emit_status_done
     fi
     LOG_STATE=$(map_log_state "$LOG_LINE")
     if [ "$LOG_STATE" != unknown ]; then
@@ -1389,6 +1399,10 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
+  if [ -n "${FM_CREW_STATE_STATUS_OVERRIDE:-}" ] && [ "$RUN_STATE" = working ] \
+    && { [ "$RUN_STATUS" = fixing ] || [ "$CI_LOG_STATE" = not-ready ]; }; then
+    RUN_DETAIL="$RUN_DETAIL${SEP}CI not ready"
+  fi
   [ -z "$SELECTED_RUN_ID" ] || RUN_DETAIL="$RUN_DETAIL${SEP}run: $SELECTED_RUN_ID"
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi

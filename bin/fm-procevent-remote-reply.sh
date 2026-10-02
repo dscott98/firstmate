@@ -461,7 +461,62 @@ fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
   [ ! -L "$destination" ] || return "$DOCUMENT_LOCAL_FAILURE"
   err=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-doc-reason.XXXXXX") || return "$DOCUMENT_LOCAL_FAILURE"
   tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" < /dev/null > "$tmp" 2> "$err" || rc=$?
+  python3 - "$max" "${FM_REMOTE_REPLY_FETCH_SECONDS:-30}" \
+    "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" > "$tmp" 2> "$err" <<'PYFETCH' || rc=$?
+import os
+import selectors
+import signal
+import subprocess
+import sys
+import time
+
+limit = int(sys.argv[1])
+seconds = int(sys.argv[2])
+if limit <= 0 or seconds <= 0:
+    sys.exit("invalid remote document transfer bound")
+deadline = time.monotonic() + seconds
+proc = subprocess.Popen(sys.argv[3:], stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        start_new_session=True)
+selector = selectors.DefaultSelector()
+selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+remaining = {"stdout": limit, "stderr": 65536}
+errors = bytearray()
+try:
+    while selector.get_map():
+        wait = deadline - time.monotonic()
+        if wait <= 0:
+            raise TimeoutError
+        for key, _ in selector.select(wait):
+            stream = key.data
+            chunk = os.read(key.fd, min(65536, remaining[stream] + 1))
+            if not chunk:
+                selector.unregister(key.fileobj)
+                continue
+            remaining[stream] -= len(chunk)
+            if remaining[stream] < 0:
+                raise ValueError(f"remote document {stream} exceeds max-bytes")
+            if stream == "stdout":
+                sys.stdout.buffer.write(chunk)
+            else:
+                errors.extend(chunk)
+    status = proc.wait(timeout=max(0, deadline - time.monotonic()))
+    sys.stdout.buffer.flush()
+    sys.stderr.buffer.write(errors)
+    sys.exit(status if status >= 0 else 128 - status)
+except (TimeoutError, subprocess.TimeoutExpired):
+    sys.exit("remote document transfer timed out")
+except ValueError as error:
+    sys.exit(str(error))
+finally:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait()
+    selector.close()
+PYFETCH
   if [ "$rc" -ne 0 ]; then
     FETCH_DOC_REASON=$(summarize_fetch_reason "$err" "$rel")
     rm -f -- "$tmp" "$err"
@@ -492,8 +547,12 @@ fetch_document() { # <id> <remote-relative> <result-var>
 # data/<id>/report.md, where scout completion reads it, with fetch_remote_file's
 # statuses.
 fetch_scout_report() { # <id>
-  local base="$DATA/$1"
-  fetch_remote_file "$1" "data/$1/report.md" "$base" "$base/report.md" "$MAX_SCOUT_REPORT_BYTES"
+  local base="$DATA/$1" rc=0
+  fetch_remote_file "$1" "data/$1/report.md" "$base" "$base/report.md" "$MAX_SCOUT_REPORT_BYTES" || rc=$?
+  if [ "$rc" -eq 1 ]; then
+    rm -f -- "$base/report.md" || return "$DOCUMENT_LOCAL_FAILURE"
+  fi
+  return "$rc"
 }
 
 # 0 when the normalized delta carries a line whose verb ends a task, done or
