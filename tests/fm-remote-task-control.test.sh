@@ -1,0 +1,751 @@
+#!/usr/bin/env bash
+# tests/fm-remote-task-control.test.sh - the sandbox task home's host-side
+# control plane (bin/fm-remote-task-control.sh).
+#
+# Every verb runs against a real fixture home on this machine, the way the
+# remote job worker runs it on a sandbox host: FM_HOME names the one-task home
+# and FM_ROOT_OVERRIDE this checkout. The project origin is a local bare
+# repository, tmux, treehouse, and no-mistakes are fakes that record what they
+# were asked, and HOME is a throwaway account home, so neither the Pi
+# credential file nor Claude's trust store is ever the runner's own. The
+# credential cases plant recognizable secret values and grep every output
+# channel, the provision journal, the marker, the brief, the task record, the
+# staged launch command, and the status file for them.
+set -u
+
+# shellcheck source=tests/lib.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+command -v jq >/dev/null 2>&1 || { echo "skip: jq not found"; exit 0; }
+
+CONTROL="$ROOT/bin/fm-remote-task-control.sh"
+TMP_ROOT=$(fm_test_tmproot fm-remote-task-control)
+TMP_ROOT=$(cd "$TMP_ROOT" && pwd -P)
+RUN_ID=$$
+GH_SECRET="github_pat_SANDBOXGHSECRET${RUN_ID}x"
+PI_SECRET="sk-pi-SANDBOXPISECRET${RUN_ID}x"
+
+# A spawn stages its per-task temp root at /tmp/fm-<id>, outside every fixture,
+# so task ids carry this run's id and the roots are removed here.
+cleanup() {
+  rm -rf /tmp/fm-rtc-*-"$RUN_ID" /tmp/fm-rtc-*-"$RUN_ID"+* 2>/dev/null || true
+  fm_test_cleanup
+}
+trap cleanup EXIT
+
+b64() { base64 | tr -d '\n'; }
+
+hash_text() {
+  if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum < "$1" | awk '{print $1}'; else shasum -a 256 < "$1" | awk '{print $1}'; fi
+}
+
+mode_of() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+
+# --- fixtures ----------------------------------------------------------------
+
+FAKEBIN=$(fm_fakebin "$TMP_ROOT/fake")
+fm_fake_exit0 "$FAKEBIN" treehouse
+cat > "$FAKEBIN/no-mistakes" <<'SH'
+#!/usr/bin/env bash
+[ "${FM_FAKE_NM_FAIL:-0}" != 1 ] || { echo "fake no-mistakes failure" >&2; exit 1; }
+case "${1:-}" in
+  init) touch .no-mistakes-init ;;
+  doctor) touch .no-mistakes-doctor ;;
+esac
+exit 0
+SH
+chmod +x "$FAKEBIN/no-mistakes"
+
+# A tmux whose server, environment, window, and pane live in FM_FAKE_TMUX_DIR.
+# A server records the GH_TOKEN of the client that started it, as real tmux
+# copies its starting client's environment into the global environment. The
+# pane reports the command named in pane-command (default claude); typing
+# /exit turns it into a shell, and sourcing a staged launch command brings
+# claude back, which is the whole exit-and-relaunch cycle fm-control drives.
+cat > "$FAKEBIN/tmux" <<'SH'
+#!/usr/bin/env bash
+set -u
+d=${FM_FAKE_TMUX_DIR:?}
+printf '%s\n' "$*" >> "$d/log"
+case "$*" in
+  *"#{pane_current_path}"*) cat "$d/pane-path" 2>/dev/null; exit 0 ;;
+  *"#{pane_tty}"*) printf '\n'; exit 0 ;;
+  *"#{pane_current_command}"*) cat "$d/pane-command" 2>/dev/null || printf 'claude\n'; exit 0 ;;
+  *"#{pane_id}"*) printf '%%1\n'; exit 0 ;;
+  *"#{cursor_y}"*) printf '0\n'; exit 0 ;;
+esac
+case "${1:-}" in
+  list-sessions)
+    [ -f "$d/server" ] || { echo "no server running on $d/socket" >&2; exit 1; }
+    printf 'firstmate: 1 windows\n'
+    ;;
+  has-session) [ -f "$d/server" ] ;;
+  new-session)
+    : > "$d/server"
+    if [ -n "${GH_TOKEN+x}" ]; then printf '%s' "$GH_TOKEN" > "$d/env.GH_TOKEN"; fi
+    ;;
+  show-environment)
+    [ -f "$d/env.${3:-}" ] || { echo "unknown variable: ${3:-}" >&2; exit 1; }
+    printf '%s=%s\n' "$3" "$(cat "$d/env.$3")"
+    ;;
+  list-windows)
+    [ -f "$d/server" ] || { echo "no server running on $d/socket" >&2; exit 1; }
+    [ -f "$d/window" ] || exit 0
+    case "$*" in
+      *'#{session_name}:#{window_name}'*) printf 'firstmate:%s\n' "$(cat "$d/window")" ;;
+      *) cat "$d/window" ;;
+    esac
+    ;;
+  new-window)
+    : > "$d/server"
+    while [ "$#" -gt 0 ]; do
+      case "$1" in -n) shift; printf '%s\n' "$1" > "$d/window" ;; esac
+      shift
+    done
+    printf '@1\n'
+    ;;
+  kill-window) rm -f "$d/window" ;;
+  capture-pane) cat "$d/pane" 2>/dev/null || printf 'fake pane line\n' ;;
+  display-message) printf 'firstmate\n' ;;
+  send-keys)
+    case "$*" in
+      *'/exit'*) printf 'bash\n' > "$d/pane-command" ;;
+      *"/launch."*) printf 'claude\n' > "$d/pane-command" ;;
+    esac
+    ;;
+esac
+exit 0
+SH
+chmod +x "$FAKEBIN/tmux"
+
+ORIGIN="$TMP_ROOT/alpha.git"
+git init -q --bare "$ORIGIN"
+fm_git_init_commit "$TMP_ROOT/alpha-seed"
+git -C "$TMP_ROOT/alpha-seed" push -q "$ORIGIN" HEAD:refs/heads/main
+git --git-dir="$ORIGIN" symbolic-ref HEAD refs/heads/main
+ORIGIN_URL="file://$ORIGIN"
+REGISTRY_LINE='- alpha [direct-PR] - alpha fixture (added 2026-10-01)'
+
+# new_case <name>: a fresh account home, sandbox host directory, tmux state,
+# and task id. Sets CASE, ID, TASK_HOME, ACCOUNT_HOME, TMUX_DIR, and PRIMARY.
+new_case() {
+  CASE="$TMP_ROOT/$1"
+  ID="rtc-$1-$RUN_ID"
+  TASK_HOME="$CASE/host/fm-home"
+  ACCOUNT_HOME="$CASE/account"
+  TMUX_DIR="$CASE/tmux"
+  PRIMARY="$CASE/primary"
+  mkdir -p "$CASE/host" "$ACCOUNT_HOME" "$TMUX_DIR" "$PRIMARY/data" "$CASE/tmp"
+}
+
+# render_brief <file> <for-home> [fm-brief args...]: a filled brief rendered by
+# the real scaffold for the sandbox home <for-home>.
+render_brief() {
+  local file=$1 for_home=$2 scratch
+  shift 2
+  scratch=$(mktemp -d "$CASE/brief.XXXXXX")
+  mkdir -p "$scratch/data"
+  FM_HOME="$scratch" "$ROOT/bin/fm-brief.sh" "$ID" alpha "$@" --for-home "$for_home" --for-root "$ROOT" >/dev/null \
+    || fail "fm-brief.sh could not render a sandbox brief"
+  sed -e 's/{TASK}/Make the sandbox change./' -e 's/{FIRSTMATE_SPEC}/Build only what the intent asks./' \
+    "$scratch/data/$ID/brief.md" > "$file"
+}
+
+# write_manifest <file> <kind> <harness> [mode]: a complete manifest for $ID
+# whose brief is rendered for $TASK_HOME. A ship carries mode, yolo, and the
+# default prefix; every manifest carries the GitHub token.
+write_manifest() {
+  local file=$1 kind=$2 harness=$3 mode=${4:-direct-PR}
+  if [ "$kind" = ship ]; then
+    render_brief "$CASE/brief.md" "$TASK_HOME" --mode "$mode"
+  else
+    render_brief "$CASE/brief.md" "$TASK_HOME" --scout
+  fi
+  {
+    printf 'schema=fm-remote-task-provision.v1\n'
+    printf 'task_id=%s\n' "$ID"
+    printf 'kind=%s\n' "$kind"
+    printf 'project=alpha\n'
+    printf 'origin_b64=%s\n' "$(printf '%s' "$ORIGIN_URL" | b64)"
+    printf 'registry_b64=%s\n' "$(printf '%s' "$REGISTRY_LINE" | b64)"
+    printf 'harness=%s\n' "$harness"
+    printf 'model=default\n'
+    printf 'effort=default\n'
+    printf 'brief_b64=%s\n' "$(b64 < "$CASE/brief.md")"
+    if [ "$kind" = ship ]; then
+      printf 'mode=%s\n' "$mode"
+      printf 'yolo=off\n'
+      printf 'branch_prefix_b64=%s\n' "$(printf 'fm/' | b64)"
+    fi
+    printf 'gh_token_b64=%s\n' "$(printf '%s' "$GH_SECRET" | b64)"
+  } > "$file"
+}
+
+# manifest_set <file> <key> [<line>]: drop every <key>= line, then append <line>.
+manifest_set() {
+  local file=$1 key=$2 line=${3:-}
+  grep -v "^$key=" "$file" > "$file.edit" || true
+  mv "$file.edit" "$file"
+  [ -z "$line" ] || printf '%s\n' "$line" >> "$file"
+}
+
+pi_auth_field() { printf 'pi_auth_b64=%s\n' "$(printf '{"minimax":{"type":"api_key","key":"%s"}}' "$PI_SECRET" | b64)"; }
+
+run_control() { # <verb> [args...]; stdin passes through
+  env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE \
+    FM_HOME="$TASK_HOME" FM_ROOT_OVERRIDE="$ROOT" HOME="$ACCOUNT_HOME" CLAUDE_CONFIG_DIR= \
+    TMUX= TMPDIR="$CASE/tmp" PATH="$FAKEBIN:$PATH" FM_FAKE_TMUX_DIR="$TMUX_DIR" \
+    "$CONTROL" "$@"
+}
+
+# assert_no_secret <label> <path-or-text...>: neither credential value appears.
+assert_no_secret_text() { # <label> <text>
+  case "$2" in
+    *"$GH_SECRET"*|*"$PI_SECRET"*) fail "$1 echoed a credential value" ;;
+  esac
+}
+# assert_secret_only_in <label> <root> [<file>...]: under <root>, exactly the
+# listed files hold a credential value.
+assert_secret_only_in() {
+  local label=$1 root=$2 hits want
+  shift 2
+  hits=$(grep -rlF -e "$GH_SECRET" -e "$PI_SECRET" "$root" 2>/dev/null | LC_ALL=C sort || true)
+  want=$(for f in "$@"; do printf '%s\n' "$f"; done | LC_ALL=C sort)
+  assert_equals "$want" "$hits" "$label: credential values are held exactly where they belong"
+}
+assert_no_secret_files() { # <label> <path...>
+  local label=$1 hit
+  shift
+  hit=$(grep -rlF -e "$GH_SECRET" -e "$PI_SECRET" "$@" 2>/dev/null || true)
+  [ -z "$hit" ] || fail "$label holds a credential value: $hit"
+}
+
+# provision_ship <harness> [mode]: provision $ID as a ship and fail on refusal.
+provision_ship() {
+  local out
+  write_manifest "$CASE/manifest" ship "$@"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1) || fail "provisioning $ID failed: $out"
+  assert_no_secret_text "provision" "$out"
+}
+
+# launch_ready: give the provisioned home a task worktree the fake pane reports.
+launch_ready() {
+  WT="$CASE/host/wt"
+  git -C "$TASK_HOME/projects/alpha" worktree add -q --detach "$WT" >/dev/null 2>&1 \
+    || fail "could not create the fixture task worktree"
+  printf '%s\n' "$WT" > "$TMUX_DIR/pane-path"
+}
+
+route_value() { # <block> <key>
+  printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -n 1
+}
+
+assert_line() { # <file> <exact-line> <msg>
+  grep -qxF -- "$2" "$1" 2>/dev/null || fail "$3"
+}
+
+assert_no_line_prefix() { # <file> <prefix> <msg>
+  ! grep -q -- "^$2" "$1" 2>/dev/null || fail "$3"
+}
+
+# --- provision ---------------------------------------------------------------
+
+test_provision_builds_a_private_marked_home() {
+  local out rc auth
+  new_case provision
+  mkdir -p "$ACCOUNT_HOME/.pi/agent"
+  printf '{"other":{"type":"api_key","key":"keep-me"}}\n' > "$ACCOUNT_HOME/.pi/agent/auth.json"
+  chmod 600 "$ACCOUNT_HOME/.pi/agent/auth.json"
+  write_manifest "$CASE/manifest" ship pi no-mistakes
+  {
+    pi_auth_field
+    printf 'config=claude-permission-mode|%s\n' "$(printf 'auto\n' | b64)"
+    printf 'config=keep-ai-trailers|\n'
+    printf 'config=launch-env-allowlist|%s\n' "$(printf 'OPENAI_API_KEY' | b64)"
+  } >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  expect_code 0 "$rc" "a complete ship manifest should provision"$'\n'"$out"
+  assert_contains "$out" "schema=fm-remote-task-control.v1" "provision prints a schema-tagged block"
+  assert_contains "$out" "provision=created" "a first provision reports created"
+  assert_contains "$out" "task_id=$ID" "provision names its task"
+  assert_contains "$out" "manifest_sha256=$(sha256_of "$CASE/manifest")" "provision reports the manifest digest"
+  assert_no_secret_text "provision output" "$out"
+
+  assert_equals 700 "$(mode_of "$TASK_HOME")" "the task home is private"
+  assert_line "$TASK_HOME/.fm-task-home" "task_id=$ID" "the marker names the task"
+  assert_line "$TASK_HOME/.fm-task-home" kind=ship "the marker records the kind"
+  assert_line "$TASK_HOME/.fm-task-home" mode=no-mistakes "the marker records the delivery mode"
+  assert_line "$TASK_HOME/.fm-task-home" branch_prefix=fm/ "the marker records the branch prefix"
+  assert_line "$TASK_HOME/.fm-task-home" harness=pi "the marker records the harness"
+  cmp -s "$CASE/brief.md" "$TASK_HOME/data/$ID/brief.md" || fail "the brief was not written byte for byte"
+  assert_equals "$REGISTRY_LINE" "$(cat "$TASK_HOME/data/projects.md")" "the registry holds the project's line"
+  assert_equals manual "$(cat "$TASK_HOME/config/backlog-backend")" "the backlog transition belongs to the primary"
+  assert_equals auto "$(cat "$TASK_HOME/config/claude-permission-mode")" "launch config is written"
+  assert_present "$TASK_HOME/config/keep-ai-trailers" "an empty flag config is still written"
+  assert_equals $'OPENAI_API_KEY\nGH_TOKEN' "$(cat "$TASK_HOME/config/launch-env-allowlist")" \
+    "an inherited allowlist keeps its names and gains GH_TOKEN"
+  assert_equals "$ORIGIN_URL" "$(git -C "$TASK_HOME/projects/alpha" remote get-url origin)" "the project is cloned from its origin"
+  assert_present "$TASK_HOME/projects/alpha/.no-mistakes-init" "a no-mistakes ship initializes no-mistakes in its clone"
+
+  assert_equals 600 "$(mode_of "$TASK_HOME/config/credentials.env")" "the GitHub token file is mode 0600"
+  assert_equals "GH_TOKEN=$GH_SECRET" "$(cat "$TASK_HOME/config/credentials.env")" "the GitHub token is written as GH_TOKEN"
+  auth="$ACCOUNT_HOME/.pi/agent/auth.json"
+  assert_equals 600 "$(mode_of "$auth")" "the Pi credential file is mode 0600"
+  assert_equals keep-me "$(jq -r '.other.key' "$auth")" "existing Pi entries survive the merge"
+  assert_equals "$PI_SECRET" "$(jq -r '.minimax.key' "$auth")" "the needed Pi entry is merged in"
+
+  assert_grep "begin task=$ID" "$TASK_HOME/state/task-provision.journal" "the journal records the start"
+  assert_grep 'credential gh_token=config/credentials.env' "$TASK_HOME/state/task-provision.journal" "the journal names the token's file"
+  assert_grep 'credential pi_auth providers=minimax' "$TASK_HOME/state/task-provision.journal" "the journal names the Pi providers"
+  assert_grep 'no-mistakes-init project=alpha' "$TASK_HOME/state/task-provision.journal" "the journal records no-mistakes init"
+  assert_grep 'complete' "$TASK_HOME/state/task-provision.journal" "the journal records completion"
+  assert_secret_only_in "the provisioned home" "$TASK_HOME" "$TASK_HOME/config/credentials.env"
+  assert_secret_only_in "the account home" "$ACCOUNT_HOME" "$ACCOUNT_HOME/.pi/agent/auth.json"
+  [ -z "$(find "$CASE/tmp" -mindepth 1 -maxdepth 1 -name 'fm-task-provision.*' -print)" ] \
+    || fail "provision left its private staging directory behind"
+
+  # A Pi configuration directory provision creates is private.
+  new_case provision-fresh-pi
+  write_manifest "$CASE/manifest" scout pi
+  pi_auth_field >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1) || fail "a scout manifest should provision: $out"
+  assert_equals 700 "$(mode_of "$ACCOUNT_HOME/.pi")" "a created .pi directory is private"
+  assert_equals 700 "$(mode_of "$ACCOUNT_HOME/.pi/agent")" "a created .pi/agent directory is private"
+  assert_equals 600 "$(mode_of "$ACCOUNT_HOME/.pi/agent/auth.json")" "a created Pi credential file is mode 0600"
+  assert_line "$TASK_HOME/.fm-task-home" kind=scout "a scout home records its kind"
+  assert_no_line_prefix "$TASK_HOME/.fm-task-home" mode= "a scout records no delivery mode"
+  assert_absent "$TASK_HOME/projects/alpha/.no-mistakes-init" "a scout never initializes no-mistakes"
+  pass "provision builds a private home, writes the 0600 credentials, and marks the home last"
+}
+
+test_provision_is_idempotent_and_refuses_another_task_or_manifest() {
+  local out rc before after
+  new_case idempotent
+  provision_ship claude
+  before=$(cd "$TASK_HOME" && find . -type f -exec cksum {} + | sort)
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  expect_code 0 "$rc" "the same manifest again should succeed"$'\n'"$out"
+  assert_contains "$out" "provision=current" "a repeated manifest reports current"
+  after=$(cd "$TASK_HOME" && find . -type f -exec cksum {} + | sort)
+  assert_equals "$before" "$after" "a repeated manifest changes nothing"
+
+  cp "$CASE/manifest" "$CASE/changed"
+  manifest_set "$CASE/changed" effort 'effort=high'
+  out=$(run_control provision "$ID" < "$CASE/changed" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a different manifest for a provisioned task was accepted"
+  assert_contains "$out" "provisioned from a different manifest" "the refusal names the changed manifest"
+  after=$(cd "$TASK_HOME" && find . -type f -exec cksum {} + | sort)
+  assert_equals "$before" "$after" "a refused manifest changes nothing"
+
+  local first=$ID
+  ID="rtc-other-$RUN_ID"
+  write_manifest "$CASE/other" ship claude
+  out=$(run_control provision "$ID" < "$CASE/other" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "provisioning a second task into a marked home was accepted"
+  assert_contains "$out" "already belongs to task $first" "the refusal names the home's task"
+  assert_absent "$TASK_HOME/data/$ID" "the refused task left nothing in the foreign home"
+  out=$(run_control launch "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a verb for another task was accepted in a marked home"
+  assert_contains "$out" "belongs to task $first, not $ID" "a verb in a foreign home names the owner"
+
+  new_case unmarked
+  mkdir -p "$TASK_HOME"
+  printf 'keep\n' > "$TASK_HOME/stray"
+  write_manifest "$CASE/manifest" ship claude
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "provision over an unmarked home with content was accepted"
+  assert_contains "$out" "has content but no provisioning marker" "the refusal names the unknown content"
+  assert_equals keep "$(cat "$TASK_HOME/stray")" "the unknown content is untouched"
+  assert_absent "$TASK_HOME/data" "nothing was provisioned beside the unknown content"
+  out=$(run_control state "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a verb in an unprovisioned home was accepted"
+  assert_contains "$out" "not a provisioned sandbox task home" "an unprovisioned home is refused by name"
+  pass "provision is idempotent per manifest and refuses another task, another manifest, or unknown content"
+}
+
+test_provision_rolls_back_a_failed_attempt() {
+  local out rc
+  new_case rollback
+  mkdir -p "$ACCOUNT_HOME/.pi/agent"
+  printf '{"other":{"type":"api_key","key":"before"}}\n' > "$ACCOUNT_HOME/.pi/agent/auth.json"
+  chmod 600 "$ACCOUNT_HOME/.pi/agent/auth.json"
+  cp -p "$ACCOUNT_HOME/.pi/agent/auth.json" "$CASE/auth.before"
+  write_manifest "$CASE/manifest" ship pi
+  pi_auth_field >> "$CASE/manifest"
+  manifest_set "$CASE/manifest" origin_b64 "origin_b64=$(printf '%s' "file://$CASE/missing.git" | b64)"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a provision whose clone fails was accepted"
+  assert_contains "$out" "could not clone project alpha" "the refusal names the failed clone"
+  assert_no_secret_text "a failed provision" "$out"
+  assert_absent "$TASK_HOME" "a failed provision removes the home it created"
+  cmp -s "$CASE/auth.before" "$ACCOUNT_HOME/.pi/agent/auth.json" || fail "a failed provision did not restore the Pi credential file"
+  [ -z "$(find "$CASE/tmp" -mindepth 1 -maxdepth 1 -name 'fm-task-provision.*' -print)" ] \
+    || fail "a failed provision left its private staging directory behind"
+
+  new_case rollback-nm
+  write_manifest "$CASE/manifest" ship pi no-mistakes
+  pi_auth_field >> "$CASE/manifest"
+  mkdir -p "$TASK_HOME"
+  out=$(FM_FAKE_NM_FAIL=1 run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a provision whose no-mistakes init fails was accepted"
+  assert_contains "$out" "no-mistakes initialization failed" "the refusal names the failed init"
+  assert_present "$TASK_HOME" "a pre-existing empty home is kept"
+  assert_equals '' "$(find "$TASK_HOME" -mindepth 1 -print)" "a pre-existing empty home is emptied again"
+  assert_absent "$ACCOUNT_HOME/.pi/agent/auth.json" "a Pi credential file the failed provision created is removed"
+
+  write_manifest "$CASE/manifest" ship pi no-mistakes
+  pi_auth_field >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  expect_code 0 "$rc" "provision should succeed once the failure clears"$'\n'"$out"
+  assert_contains "$out" "provision=created" "the retry provisions the home"
+  pass "a failed provision removes what it created and restores the Pi credential file"
+}
+
+test_provision_refuses_unsafe_manifests() {
+  local label key line expect out rc
+  new_case refusals
+  write_manifest "$CASE/base" ship claude
+  while IFS='~' read -r label key line expect; do
+    [ -n "$label" ] || continue
+    cp "$CASE/base" "$CASE/manifest"
+    case "$key" in
+      +) printf '%s\n' "$line" >> "$CASE/manifest" ;;
+      *) manifest_set "$CASE/manifest" "$key" "$line" ;;
+    esac
+    out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+    [ "$rc" -ne 0 ] || fail "$label: the manifest was accepted"
+    assert_contains "$out" "$expect" "$label: the refusal did not explain itself"
+    assert_no_secret_text "$label" "$out"
+    assert_absent "$TASK_HOME" "$label: a refused manifest created the home"
+  done <<ROWS
+unknown field~+~extra=1~unknown field: extra
+a Claude credential field~+~claude_oauth_b64=$(printf 'sk-ant-%s' "$GH_SECRET" | b64)~unknown field: claude_oauth_b64
+repeated field~+~kind=ship~repeats field kind
+missing field~harness~~has no harness field
+wrong schema~schema~schema=fm-remote-task-provision.v2~incompatible provisioning manifest
+another task~task_id~task_id=someone-else~for another task
+local-only ship~mode~mode=local-only~never placed in a sandbox
+scout with a delivery contract~kind~kind=scout~must not carry mode
+traversal project~project~project=..~unsafe project
+remote-helper origin~origin_b64~origin_b64=$(printf 'ext::sh -c touch' | b64)~not an accepted clone URL
+foreign registry line~registry_b64~registry_b64=$(printf '%s' '- beta [direct-PR] - beta' | b64)~does not register project alpha
+Pi credentials for claude~+~$(pi_auth_field)~only for a pi or pi-signed harness
+unverified harness~harness~harness=bogus~not a verified crewmate adapter
+token with a space~gh_token_b64~gh_token_b64=$(printf 'bad %s' "$GH_SECRET" | b64)~printable ASCII without spaces
+unaccepted config~+~config=crew-harness|$(printf 'claude' | b64)~carries config a sandbox does not take
+ROWS
+  # Pi entries must be provider objects, and jq's diagnostics never surface.
+  cp "$CASE/base" "$CASE/manifest"
+  manifest_set "$CASE/manifest" harness 'harness=pi'
+  printf 'pi_auth_b64=%s\n' "$(printf '["%s"]' "$PI_SECRET" | b64)" >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "malformed Pi credential entries were accepted"
+  assert_contains "$out" "JSON object of provider objects" "the malformed Pi entries are named"
+  assert_no_secret_text "malformed Pi entries" "$out"
+
+  # A brief rendered for another home is refused after the home is created,
+  # and that home is removed again.
+  cp "$CASE/base" "$CASE/manifest"
+  render_brief "$CASE/foreign-brief.md" "$CASE/elsewhere/fm-home" --mode direct-PR
+  manifest_set "$CASE/manifest" brief_b64 "brief_b64=$(b64 < "$CASE/foreign-brief.md")"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a brief naming another home's status file was accepted"
+  assert_contains "$out" "append status to $CASE/elsewhere/fm-home/state/$ID.status" "the refusal names the foreign status file"
+  assert_absent "$TASK_HOME" "the refused brief left no home behind"
+
+  head -c 1100000 /dev/zero | tr '\0' 'x' > "$CASE/huge"
+  out=$(run_control provision "$ID" < "$CASE/huge" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an oversized manifest was accepted"
+  assert_contains "$out" "exceeds its 1 MiB bound" "the oversized manifest is named"
+  pass "provision refuses every unsafe or unaccepted manifest before writing anything it keeps"
+}
+
+# --- launch and the read verbs -----------------------------------------------
+
+test_launch_reports_the_route_and_hands_the_worker_its_credentials() {
+  local out rc meta spawn_gen
+  new_case launch
+  provision_ship claude
+  launch_ready
+  out=$(run_control launch "$ID" 2>"$CASE/launch.err"); rc=$?
+  expect_code 0 "$rc" "launch should succeed"$'\n'"$out"$'\n'"$(cat "$CASE/launch.err")"
+  meta="$TASK_HOME/state/$ID.meta"
+  assert_present "$meta" "launch publishes the host-local task record"
+  assert_equals fm-remote-task-control.v1 "$(route_value "$out" schema)" "the route block is schema-tagged"
+  assert_equals tmux "$(route_value "$out" backend)" "a sandbox task runs on tmux"
+  assert_equals "firstmate:fm-$ID" "$(route_value "$out" target)" "the route names the worker's window"
+  assert_equals "$WT" "$(route_value "$out" worktree)" "the route names the worktree"
+  assert_equals "fm/$ID" "$(route_value "$out" branch)" "the route names the ship branch"
+  spawn_gen=$(route_value "$out" spawn_gen)
+  [ -n "$spawn_gen" ] || fail "the route carries no spawn_gen"
+  assert_line "$meta" "spawn_gen=$spawn_gen" "the route's spawn_gen is the record's"
+  assert_equals "$(sed -n 's/^busy_gen=//p' "$meta")" "$(route_value "$out" busy_gen)" "the route's busy_gen is the record's"
+  assert_equals claude "$(route_value "$out" harness)" "the route names the harness"
+  assert_equals default "$(route_value "$out" model)" "the route names the model"
+  assert_equals default "$(route_value "$out" effort)" "the route names the effort"
+  assert_line "$meta" "project=$TASK_HOME/projects/alpha" "the worker belongs to the home's own clone"
+
+  assert_equals "$GH_SECRET" "$(cat "$TMUX_DIR/env.GH_TOKEN")" "the tmux server hosting the worker holds GH_TOKEN"
+  [ "$(grep -n '^new-session' "$TMUX_DIR/log" | head -1 | cut -d: -f1)" -lt \
+    "$(grep -n '^new-window' "$TMUX_DIR/log" | head -1 | cut -d: -f1)" ] \
+    || fail "the credentialed server was not started before the worker's window"
+  assert_no_secret_text "launch output" "$out$(cat "$CASE/launch.err")"
+  assert_secret_only_in "the launched home" "$TASK_HOME" "$TASK_HOME/config/credentials.env"
+  assert_no_secret_files "the task's temp root" /tmp/fm-"$ID"
+  assert_no_secret_files "the staged launch command" /tmp/fm-"$ID"+*
+  assert_no_secret_files "the tmux command log" "$TMUX_DIR/log"
+
+  out=$(run_control launch "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "launching a running worker again should report its route"
+  assert_equals "$spawn_gen" "$(route_value "$out" spawn_gen)" "a repeated launch reports the same worker"
+  assert_equals 1 "$(grep -c '^new-window' "$TMUX_DIR/log")" "a repeated launch starts no second worker"
+
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  cp "$meta" "$CASE/meta.before"
+  out=$(run_control launch "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "launch over an exited worker was accepted"
+  assert_contains "$out" "recover it with control relaunch" "the refusal points at relaunch"
+  cmp -s "$CASE/meta.before" "$meta" || fail "a refused launch changed the task record"
+  pass "launch runs the host's spawn on tmux, reports the route, and hands the worker its credentials"
+}
+
+test_launch_refuses_a_tmux_server_without_the_credentials() {
+  local out rc
+  new_case foreign-server
+  provision_ship claude
+  launch_ready
+  : > "$TMUX_DIR/server"
+  out=$(run_control launch "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "launch onto a server without the credentials was accepted"
+  assert_contains "$out" "runs without the task's GH_TOKEN credential" "the refusal names the missing credential"
+  assert_no_secret_text "the refused launch" "$out"
+  assert_absent "$TASK_HOME/state/$ID.meta" "the refused launch recorded no worker"
+  assert_no_line_prefix "$TMUX_DIR/log" new-window "the refused launch created no window"
+  pass "launch refuses a running tmux server that does not carry the task's credentials"
+}
+
+test_read_verbs_report_the_endpoint() {
+  local out rc head
+  new_case read
+  provision_ship claude
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+
+  assert_equals alive "$(run_control state "$ID" 2>/dev/null)" "state reads a running worker"
+  printf 'fake pane line one\nfake pane line two\n' > "$TMUX_DIR/pane"
+  out=$(run_control observe "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "observe should succeed"$'\n'"$out"
+  assert_equals fm-remote-task-control.v1 "$(route_value "$out" schema)" "observe is schema-tagged"
+  case "$(route_value "$out" now)" in ''|*[!0-9]*) fail "observe now is not an epoch" ;; esac
+  case "$(route_value "$out" boot)" in unknown|[0-9]*) ;; *) fail "observe boot is neither an epoch nor unknown" ;; esac
+  assert_equals alive "$(route_value "$out" agent)" "observe reads the agent"
+  assert_equals busy "$(route_value "$out" busy)" "a freshly launched worker is busy"
+  assert_equals fm-spawn "$(route_value "$out" busy_source)" "observe names the busy source"
+  # The watcher hashes the captured text as a command substitution holds it,
+  # without its trailing newline.
+  assert_equals "$(printf 'fake pane line one\nfake pane line two' | hash_text)" "$(route_value "$out" pane_hash)" \
+    "observe hashes the pane as the watcher does"
+  case "$(route_value "$out" worktree_write)" in ''|*[!0-9]*) fail "observe worktree_write is not an epoch" ;; esac
+  assert_equals none "$(route_value "$out" inbox_oldest)" "no steer is waiting"
+
+  run_control send "$ID" "rebase onto main" >/dev/null 2>&1 || fail "send failed"
+  out=$(run_control observe "$ID" 2>&1)
+  assert_equals 001.msg "$(route_value "$out" inbox_oldest)" "observe names the oldest unacknowledged steer"
+  case "$(route_value "$out" inbox_oldest_at)" in ''|*[!0-9]*) fail "observe inbox_oldest_at is not an epoch" ;; esac
+
+  out=$(run_control capture "$ID" 5 2>&1) || fail "capture failed"
+  assert_contains "$out" "fake pane line two" "capture returns the pane"
+  out=$(run_control capture "$ID" 101 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an oversized capture was accepted"
+  out=$(run_control capture "$ID" 0 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty capture was accepted"
+
+  out=$(run_control head "$ID" 2>&1) || fail "head failed: $out"
+  head=$(git -C "$WT" rev-parse HEAD)
+  assert_equals "$head" "$(route_value "$out" head)" "head names the worktree HEAD"
+  assert_equals '' "$(route_value "$out" branch)" "a detached worktree has no branch"
+  assert_equals no "$(route_value "$out" dirty)" "a clean worktree is not dirty"
+  git -C "$WT" checkout -q -b "fm/$ID"
+  printf 'untracked\n' > "$WT/new-file"
+  out=$(run_control head "$ID" 2>&1)
+  assert_equals "fm/$ID" "$(route_value "$out" branch)" "head names the checked-out branch"
+  assert_equals yes "$(route_value "$out" dirty)" "an untracked file makes the worktree dirty"
+
+  printf 'needs-decision [at=1]: which way\n' >> "$TASK_HOME/state/$ID.status"
+  out=$(run_control crew-state "$ID" 2>&1) || fail "crew-state failed: $out"
+  assert_contains "$(route_value "$out" crew_state)" "source: pane" "crew-state reads the pane without a run"
+  assert_not_contains "$out" "status-log" "crew-state leaves the host's status log out"
+  assert_not_contains "$out" "parked" "the host's open decision does not decide the crew's state"
+  assert_equals busy "$(route_value "$out" busy)" "crew-state reports the busy verdict"
+
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  assert_equals dead "$(run_control state "$ID" 2>/dev/null)" "state reads an exited agent as dead"
+  rm -f "$TMUX_DIR/window"
+  assert_equals missing "$(run_control state "$ID" 2>/dev/null)" "state reads a vanished window as missing"
+  pass "state, observe, capture, head, and crew-state read the host-local endpoint"
+}
+
+test_send_writes_one_durable_record_per_steer() {
+  local out rc inbox
+  new_case send
+  provision_ship claude
+  out=$(run_control send "$ID" "too early" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a steer for a task with no worker was accepted"
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  inbox="$TASK_HOME/state/$ID.inbox"
+  run_control send "$ID" $'rebase onto main\nthen rerun the suite' >/dev/null 2>&1 || fail "send failed"
+  assert_present "$inbox/001.msg" "the steer is a durable record in the task's inbox"
+  assert_contains "$(cat "$inbox/001.msg")" $'rebase onto main\nthen rerun the suite' "the record keeps the whole message"
+  run_control send "$ID" $'rebase onto main\nthen rerun the suite' >/dev/null 2>&1 || fail "a repeated send failed"
+  assert_absent "$inbox/002.msg" "a repeated steer lands on its existing record"
+  run_control send "$ID" "a second steer" >/dev/null 2>&1 || fail "a second send failed"
+  assert_present "$inbox/002.msg" "a new steer gets a new record"
+  mv "$inbox/001.msg" "$inbox/handled/"
+  out=$(run_control send "$ID" $'rebase onto main\nthen rerun the suite' 2>&1) || fail "resending an acknowledged steer failed"
+  assert_contains "$out" "already delivered and acknowledged" "an acknowledged steer is not delivered twice"
+  out=$(run_control send "$ID" "x" bogus 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unknown delivery mode was accepted"
+  pass "send writes one idempotent record per steer into the task's own inbox"
+}
+
+test_brief_update_replaces_the_brief_only_for_this_home() {
+  local out rc
+  new_case brief-update
+  provision_ship claude
+  render_brief "$CASE/updated.md" "$TASK_HOME" --mode direct-PR
+  printf '\nAn added line for the relaunch.\n' >> "$CASE/updated.md"
+  out=$(run_control brief-update "$ID" < "$CASE/updated.md" 2>&1); rc=$?
+  expect_code 0 "$rc" "a brief for this home should replace the old one"$'\n'"$out"
+  assert_contains "$out" "brief=updated" "brief-update reports the update"
+  assert_equals "$(sha256_of "$CASE/updated.md")" "$(route_value "$out" brief_sha256)" "brief-update reports the new brief's digest"
+  cmp -s "$CASE/updated.md" "$TASK_HOME/data/$ID/brief.md" || fail "the brief was not replaced byte for byte"
+
+  render_brief "$CASE/foreign.md" "$CASE/elsewhere/fm-home" --mode direct-PR
+  out=$(run_control brief-update "$ID" < "$CASE/foreign.md" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a brief for another home was accepted"
+  assert_contains "$out" "append status to $CASE/elsewhere/fm-home/state/$ID.status" "the refusal names the foreign status file"
+  cmp -s "$CASE/updated.md" "$TASK_HOME/data/$ID/brief.md" || fail "a refused brief changed the brief on disk"
+  out=$(run_control brief-update "$ID" < /dev/null 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an empty brief was accepted"
+  [ -z "$(find "$TASK_HOME/data/$ID" -name '.brief.md.update.*' -print)" ] || fail "a refused brief left its staging file"
+  pass "brief-update replaces the brief only with one naming this home's status file"
+}
+
+test_control_drives_the_host_control_plane() {
+  local out rc spawn_gen
+  new_case control
+  provision_ship claude
+  launch_ready
+  out=$(run_control launch "$ID" 2>&1) || fail "launch failed: $out"
+  spawn_gen=$(route_value "$out" spawn_gen)
+
+  out=$(run_control key "$ID" Escape 2>/dev/null); rc=$?
+  expect_code 0 "$rc" "a named key should be delivered"
+  assert_line "$TMUX_DIR/log" "send-keys -t firstmate:fm-$ID Escape"
+  out=$(run_control key "$ID" 2>&1); rc=$?
+  expect_code 2 "$rc" "key without a key name is a usage error"
+
+  out=$(run_control control "$ID" interrupt 2>&1); rc=$?
+  expect_code 0 "$rc" "interrupt should be delivered"$'\n'"$out"
+  assert_contains "$out" "interrupt-delivered $ID" "interrupt relays fm-control's result"
+
+  out=$(run_control control "$ID" relaunch bogus - - "note" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unverified relaunch harness was accepted"
+  out=$(run_control control "$ID" relaunch - - - "   " 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a relaunch without a progress note was accepted"
+  assert_contains "$out" "nonempty progress note" "the empty note is named"
+  out=$(run_control control "$ID" relaunch - - 2>&1); rc=$?
+  expect_code 2 "$rc" "an incomplete relaunch is a usage error"
+  out=$(run_control control "$ID" teleport 2>&1); rc=$?
+  expect_code 2 "$rc" "an unknown control action is a usage error"
+
+  # fm-control types the exit command only into a composer it can prove empty:
+  # Claude's bare prompt glyph on the cursor row.
+  printf '\342\235\257\n' > "$TMUX_DIR/pane"
+  out=$(FM_CONTROL_POLL=0.1 run_control control "$ID" relaunch - default - "Resume from the committed state." 2>&1); rc=$?
+  expect_code 0 "$rc" "relaunch should replace the worker"$'\n'"$out"
+  assert_equals fm-remote-task-control.v1 "$(route_value "$out" schema)" "relaunch ends with the route block"
+  [ "$(route_value "$out" spawn_gen)" != "$spawn_gen" ] || fail "relaunch reported the old worker"
+  assert_line "$TASK_HOME/state/$ID.meta" "spawn_gen=$(route_value "$out" spawn_gen)" "the route is read back from the republished record"
+  assert_equals claude "$(route_value "$out" harness)" "relaunch keeps the recorded harness"
+
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  out=$(FM_CONTROL_POLL=0.1 run_control control "$ID" exit 2>&1); rc=$?
+  expect_code 0 "$rc" "exit of a stopped worker is idempotent"$'\n'"$out"
+  pass "control relays interrupt and exit and relaunches through the host's control plane"
+}
+
+test_retire_runs_the_host_teardown_for_ships_only() {
+  local out rc
+  new_case retire
+  provision_ship claude
+  launch_ready
+  run_control launch "$ID" >/dev/null 2>&1 || fail "launch failed"
+  printf 'bash\n' > "$TMUX_DIR/pane-command"
+  printf 'unlanded\n' > "$WT/work-in-progress"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "retire over unlanded work was accepted"
+  assert_contains "$out" "REFUSED" "the host teardown's refusal is relayed"
+  assert_present "$TASK_HOME/state/$ID.meta" "a refused retire keeps the task record"
+  assert_present "$WT/work-in-progress" "a refused retire keeps the unlanded work"
+  assert_absent "$TASK_HOME/state/$ID.retired" "a refused retire records no retirement"
+
+  rm -f "$WT/work-in-progress"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "retire of landed work should pass"$'\n'"$out"
+  assert_contains "$out" "teardown $ID complete" "the host teardown's result is relayed"
+  assert_absent "$TASK_HOME/state/$ID.meta" "retire removes the task record"
+  assert_present "$TASK_HOME/state/$ID.retired" "retire records the retirement"
+  out=$(run_control observe "$ID" 2>&1)
+  assert_equals missing "$(route_value "$out" agent)" "a retired task has no endpoint to observe"
+  assert_equals missing "$(run_control state "$ID" 2>/dev/null)" "a retired task's state is missing"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  expect_code 0 "$rc" "a repeated retire should succeed"
+  assert_equals "already-retired: $ID" "$out" "a repeated retire reports already-retired"
+  out=$(run_control retire "$ID" --now 2>&1); rc=$?
+  expect_code 2 "$rc" "an unknown retire flag is a usage error"
+
+  new_case retire-scout
+  write_manifest "$CASE/manifest" scout claude
+  run_control provision "$ID" < "$CASE/manifest" >/dev/null 2>&1 || fail "scout provision failed"
+  out=$(run_control retire "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "retiring a scout on its host was accepted"
+  assert_contains "$out" "is a scout" "the scout refusal names the kind"
+  pass "retire relays the host teardown's landed-work verdict, records a pass, and refuses scouts"
+}
+
+test_dispatch_refuses_malformed_calls() {
+  local out rc
+  new_case dispatch
+  out=$(run_control 2>&1); rc=$?
+  expect_code 2 "$rc" "no verb is a usage error"
+  out=$(run_control teleport "$ID" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unknown verb was accepted"
+  assert_contains "$out" "unknown command: teleport" "the unknown verb is named"
+  out=$(run_control state '../escape' 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "an unsafe task id was accepted"
+  assert_contains "$out" "invalid task id" "the unsafe id is refused"
+  out=$(run_control provision .. < /dev/null 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a traversal task id was accepted"
+  assert_absent "$TASK_HOME" "a refused call created no home"
+  pass "the dispatcher refuses unknown verbs, unsafe ids, and unprovisioned homes"
+}
+
+test_provision_builds_a_private_marked_home
+test_provision_is_idempotent_and_refuses_another_task_or_manifest
+test_provision_rolls_back_a_failed_attempt
+test_provision_refuses_unsafe_manifests
+test_launch_reports_the_route_and_hands_the_worker_its_credentials
+test_launch_refuses_a_tmux_server_without_the_credentials
+test_read_verbs_report_the_endpoint
+test_send_writes_one_durable_record_per_steer
+test_brief_update_replaces_the_brief_only_for_this_home
+test_control_drives_the_host_control_plane
+test_retire_runs_the_host_teardown_for_ships_only
+test_dispatch_refuses_malformed_calls
+echo "ALL TESTS PASSED"

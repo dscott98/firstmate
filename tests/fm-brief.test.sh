@@ -1395,6 +1395,70 @@ test_crewmate_scaffolds_forbid_pool_administration() {
   pass "fm-brief.sh: every crewmate scaffold forbids administering the shared worktree pool"
 }
 
+# --for-home and --for-root render a brief for a sandbox task's one-task home:
+# every path the worker reads or writes names that home and its code root,
+# because a worker appends to exactly the path its brief names, while the brief
+# itself is still written to this home's data/<task-id>/.
+test_for_home_renders_every_worker_path_for_the_sandbox() {
+  local home id brief out
+  home="$TMP_ROOT/for-home"
+  mkdir -p "$home/data"
+  id="brief-sandbox-ship"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --mode no-mistakes \
+    --for-home /home/agent/fm-home --for-root /opt/firstmate) || fail "a sandbox ship brief should scaffold"
+  brief="$home/data/$id/brief.md"
+  assert_present "$brief" "the sandbox brief was not written to this home's data directory"
+  assert_contains "$out" "for sandbox home /home/agent/fm-home" "the scaffold line did not name the sandbox home"
+  assert_grep ">> '/home/agent/fm-home/state/$id.status'" "$brief" "the status-append command does not name the sandbox status file"
+  assert_grep "[ ! -e '/home/agent/fm-home/config/fleet-ledger' ] || '/opt/firstmate/bin/fm-fleet-ledger.sh' appended '/home/agent/fm-home/config'" \
+    "$brief" "the ledger hook does not name the sandbox home and code root"
+  assert_grep "'/home/agent/fm-home/state/$id.inbox'" "$brief" "the steering inbox is not the sandbox inbox"
+  assert_grep "file=/home/agent/fm-home/data/$id/nm-<run>-findings.txt" "$brief" "the ask-user findings file is not in the sandbox home"
+  assert_grep "/opt/firstmate/bin/fm-ensure-agents-md.sh" "$brief" "the cited code-root script is not the sandbox code root's"
+  assert_no_grep "$home" "$brief" "the sandbox brief still names this home"
+  assert_no_grep "$ROOT/" "$brief" "the sandbox brief still names this code root"
+
+  id="brief-sandbox-scout"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --scout \
+    --for-home /home/agent/fm-home/ --for-root /opt/firstmate/ >/dev/null || fail "a sandbox scout brief should scaffold"
+  brief="$home/data/$id/brief.md"
+  assert_grep ">> '/home/agent/fm-home/state/$id.status'" "$brief" "a trailing-slash home must render clean paths"
+  assert_grep "Write your findings to \`/home/agent/fm-home/data/$id/report.md\`." "$brief" "the scout report is not in the sandbox home"
+  assert_grep "/opt/firstmate/.agents/skills/captain-hold-lifecycle/SKILL.md" "$brief" "the completion-gate skill is not the sandbox code root's"
+  assert_grep "deliver your findings as a text report without Lavish" "$brief" "a sandbox scout was offered a board the supervisor cannot reach"
+  assert_no_grep "bin/fm-procevent-lavish.sh arm" "$brief" "a sandbox scout was told to arm a Lavish board"
+  assert_no_grep "$home" "$brief" "the sandbox scout brief still names this home"
+  pass "fm-brief.sh: --for-home/--for-root render every worker path for the sandbox home and write the brief here"
+}
+
+test_for_home_flags_are_validated() {
+  local home label args expect out status n=0
+  home="$TMP_ROOT/for-home-refusals"
+  mkdir -p "$home/data"
+  while IFS='~' read -r label args expect; do
+    [ -n "$label" ] || continue
+    n=$((n + 1))
+    # shellcheck disable=SC2086  # args is an intentional word-split argument list
+    out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "brief-for-home-$n" $args 2>&1)
+    status=$?
+    [ "$status" -ne 0 ] || fail "$label: expected a refusal"
+    assert_contains "$out" "$expect" "$label: the refusal did not explain itself"
+    assert_absent "$home/data/brief-for-home-$n/brief.md" "$label: a refused scaffold still wrote a brief"
+  done <<'ROWS'
+home without root~alpha --mode direct-PR --for-home /h~must be given together
+root without home~alpha --scout --for-root /r~must be given together
+a secondmate charter~--secondmate alpha --for-home /h --for-root /r~apply only to ship and scout briefs
+the Herdr lab contract~alpha --mode direct-PR --herdr-lab --for-home /h --for-root /r~cannot be rendered for a sandbox task's home
+a relative home~alpha --mode direct-PR --for-home fm-home --for-root /r~remote home is not absolute
+traversal~alpha --mode direct-PR --for-home /home/../etc --for-root /r~traversal components
+a home inside the root~alpha --mode direct-PR --for-home /opt/fm/home --for-root /opt/fm~remote home inside its code root
+the same directory~alpha --mode direct-PR --for-home /opt/fm --for-root /opt/fm/~overlapping remote root and home
+a root inside the home~alpha --scout --for-home /h --for-root /h/root~remote code root inside its home
+a missing value~alpha --mode direct-PR --for-root /r --for-home~requires a value
+ROWS
+  pass "fm-brief.sh: --for-home and --for-root are refused unless they name a sandbox route a task could carry"
+}
+
 test_script_parses
 test_no_heredoc_in_command_substitution
 test_help_includes_entire_header
@@ -1431,3 +1495,5 @@ test_branch_prefix_is_refused_where_it_does_not_apply
 test_branch_prefix_value_is_validated
 test_branch_prefix_command_is_shell_safe
 test_crewmate_scaffolds_forbid_pool_administration
+test_for_home_renders_every_worker_path_for_the_sandbox
+test_for_home_flags_are_validated

@@ -229,7 +229,8 @@ HARNESS=$(meta_value harness)
 [ -n "$KIND" ] || KIND=ship
 
 # bin/fm-remote-route-lib.sh owns remote dispatch. A sandbox task's worktree
-# and endpoint live on its VM and no current-state read for one exists yet, and
+# and endpoint live on its VM and this version does not yet route a
+# current-state read to that host, and
 # a record whose placement is malformed has no trustworthy location at all, so
 # both report unknown here, before any local probe could misread them as torn
 # down or dead.
