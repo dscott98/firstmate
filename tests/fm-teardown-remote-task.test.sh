@@ -115,6 +115,8 @@ case "${1:-}" in
       "$id" "$id" "$profile"
     ;;
   status)
+    [ ! -f "$d/fail-status" ] || { echo "the cluster API is unreachable" >&2; exit 1; }
+    [ ! -f "$d/invalid-status" ] || { printf 'state=unknown\n'; exit 0; }
     if [ -f "$d/vm.$2" ]; then
       record "$2"
     else
@@ -542,6 +544,28 @@ test_identity_refusals_hold_under_force() {
   assert_preserved "an unreadable inventory"
   rm -f "$CASE/provider/fail-list"
 
+  cp "$CASE/provider/vm.$NAME" "$CASE/vm.owned"
+  printf '%s other-home\n' "$ID" > "$CASE/provider/vm.$NAME"
+  run_teardown --force
+  [ "$RC" -ne 0 ] || fail "--force cleared a sandbox labelled for another home"
+  assert_contains "$OUT" "provider status does not confirm absence" "the foreign-home sandbox refuses"
+  assert_preserved "a sandbox labelled for another home"
+  assert_present "$PRIMARY/state/procevent/$SID.source" "the foreign-home refusal removed the mirror"
+
+  : > "$CASE/provider/fail-status"
+  run_teardown --force
+  [ "$RC" -ne 0 ] || fail "--force proceeded after a failed provider status"
+  assert_contains "$OUT" "status could not be confirmed" "the failed provider lookup is named"
+  assert_preserved "a failed provider status"
+  rm -f "$CASE/provider/fail-status"
+
+  : > "$CASE/provider/invalid-status"
+  run_teardown --force
+  [ "$RC" -ne 0 ] || fail "--force proceeded after an invalid provider status"
+  assert_preserved "an invalid provider status"
+  rm -f "$CASE/provider/invalid-status"
+
+  cp "$CASE/vm.owned" "$CASE/provider/vm.$NAME"
   mv "$CASE/provider/vm.$NAME" "$CASE/vm.gone"
   run_teardown
   [ "$RC" -ne 0 ] || fail "a sandbox missing from the inventory was torn down without --force"
@@ -549,11 +573,14 @@ test_identity_refusals_hold_under_force() {
   assert_present "$PRIMARY/state/$ID.meta" "a refused teardown removed the task record"
   run_teardown --force
   expect_code 0 "$RC" "a forced teardown of a record whose sandbox is gone"$'\n'"$OUT"
-  assert_contains "$OUT" "was not in this home's inventory, so nothing was destroyed" "the absent sandbox is reported"
+  assert_contains "$OUT" "was confirmed absent, so nothing was destroyed" "the absent sandbox is reported"
   assert_equals 0 "$(destroy_calls)" "a sandbox missing from the inventory was destroyed anyway"
   assert_absent "$PRIMARY/state/$ID.meta" "the forced teardown left the task record"
   assert_absent "$PRIMARY/state/$ID.sandbox-destroy-pending" "a missing sandbox was recorded as owed a destroy"
-  pass "a foreign label or an unreadable inventory refuses even under --force, and a missing sandbox needs it"
+  assert_equals done "$(row_state)" "confirmed absence did not close the backlog item"
+  assert_equals 0 "$(host_retires)" "identity checks or forced cleanup reached the host"
+  assert_absent "$PRIMARY/state/procevent/$SID.source" "confirmed absence left the mirror source"
+  pass "--force preserves unknown or foreign sandboxes and clears records only after confirmed absence"
 }
 
 test_failed_destroy_is_retried_by_session_start() {

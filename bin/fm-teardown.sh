@@ -3458,9 +3458,7 @@ teardown_public_followup_checks() {
 #   1. The record must name one sandbox, and this home's provider inventory
 #      (bin/fm-sandbox-reconcile-lib.sh) must list it as running or stopped
 #      under this task's fm_task label. An unreadable inventory, or a sandbox
-#      labelled for another task, refuses even under --force; a sandbox the
-#      inventory does not list refuses unless --force records the captain's
-#      discard, and is then left to the provider.
+#      labelled for another task, refuses even under --force.
 #   2. A scout's report must be local - fetched through its status mirror's
 #      path-confined reader when it is missing - and the scout completion gate
 #      must pass. No host-side teardown runs, because a scout's worktree is
@@ -3540,6 +3538,14 @@ sandbox_task_teardown() {
       if [ "$FORCE" != "--force" ]; then
         echo "REFUSED: sandbox $name is not in this home's sandbox inventory (absent, or labelled for another home), so task $ID's work on it cannot be checked; nothing was changed." >&2
         echo "Reconcile the record against bin/fm-sandbox.sh status $name, or use --force after explicit discard approval." >&2
+        exit 1
+      fi
+      if ! fm_sandbox_capture status "$name"; then
+        echo "REFUSED: sandbox $name's status could not be confirmed ($(fm_sandbox_reason "$FM_SANDBOX_ERR")); nothing was changed, and --force does not override this" >&2
+        exit 1
+      fi
+      if [ "$(fm_sandbox_record_field "$FM_SANDBOX_OUT" state)" != absent ]; then
+        echo "REFUSED: sandbox $name is not in this home's inventory and its provider status does not confirm absence; nothing was changed, and --force does not override this" >&2
         exit 1
       fi
       present=0
@@ -3651,7 +3657,7 @@ sandbox_task_teardown() {
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
   case "$destroyed" in
     1) echo "teardown $ID complete (sandbox $name destroyed)" ;;
-    0) echo "teardown $ID complete (sandbox $name was not in this home's inventory, so nothing was destroyed)" ;;
+    0) echo "teardown $ID complete (sandbox $name was confirmed absent, so nothing was destroyed)" ;;
   esac
   backlog_refresh_reminder || reminder_rc=$?
   [ "$destroyed" != failed ] || exit 1
