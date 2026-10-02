@@ -111,6 +111,6 @@ bin/fm-test-run.sh tests/fm-remote-route-lib.test.sh
 ```
 
 The adapter suite drives every verb against a fake provider, including the refusal paths, the home-tag filtering, the capacity distinction, and argv-only invocation.
-The route suite pins the task record contract and runs each command that branches on remote placement against a sandbox task record, proving each refuses without reaching the transport or a local backend.
+The route suite pins the task record contract and the consumer behavior described under [task routes](#task-routes), checking that unsupported operations never reach the transport or a local backend and leave the task record unchanged.
 Task route resolution and the task readiness profile are covered by `tests/fm-on.test.sh` and `tests/fm-remote-doctor.test.sh`, part of the [remote second-mate suite](remote-secondmates.md#portable-tests).
 A real-cluster smoke run lands with the final stage of the plan.
