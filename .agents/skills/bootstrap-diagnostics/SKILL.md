@@ -74,6 +74,7 @@ When any diagnostic needs captain attention, report the plain consequence and re
 - `SANDBOX_DESTROY_PENDING: <id>: sandbox <name> ...` - a sandbox task's teardown passed its landed-work gate, or was a captain-authorized `--force` discard, but the label-confirmed destroy of its sandbox has not happened yet; `state/<id>.sandbox-destroy-pending` keeps that destroy, and every session start retries it.
   Read the printed reason: a provider outage clears on its own, while a label mismatch means the sandbox no longer belongs to that task and must not be destroyed.
   The `still has its task record` variant means that teardown stopped before its records were closed, so rerun `bin/fm-teardown.sh <id>`, which finishes it safely.
+  The `backlog transition still pending` variant means the task's backlog close or captain-call retention has not landed yet, so the sandbox is kept: resolve the `BACKLOG_RECONCILE` line that names the same task, and the next session start replays the transition and then the destroy.
   Remove the record by hand only after `bin/fm-sandbox.sh status <name>` shows the sandbox absent or labelled for another task, and never destroy a sandbox the record does not name.
   An `unusable` record is inert until inspected: read it as data, and never act on a name in it that failed validation.
 - `SANDBOX_TTL: <id>: sandbox <name> ...` - session start could not renew the TTL of a sandbox a live task record names.

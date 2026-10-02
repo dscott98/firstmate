@@ -1042,6 +1042,10 @@ SH
   write_sandbox_task_record "$home/state" task-h sbx-h
   printf 'task_id=task-c\nsandbox_name=sbx-c\n' > "$home/state/task-c.sandbox-destroy-pending"
   printf 'task_id=task-d\nsandbox_name=sbx-d\n' > "$home/state/task-d.sandbox-destroy-pending"
+  # sbx-i is owed a destroy, but its task's backlog close has not landed.
+  printf 'task-i\n' > "$sbx/vm.sbx-i"
+  printf 'task_id=task-i\nsandbox_name=sbx-i\n' > "$home/state/task-i.sandbox-destroy-pending"
+  printf 'pending close\n' > "$home/state/task-i.backlog-close"
   mkdir -p "$home/state/.spawn-task-f.lock"
   printf '%s\n' "$$" > "$home/state/.spawn-task-f.lock/pid"
 
@@ -1054,6 +1058,11 @@ SH
   assert_contains "$out" "SANDBOX_DESTROY_PENDING: task-d: sandbox sbx-d still has its task record, so its destroy waits for a rerun of bin/fm-teardown.sh task-d" \
     "a pending destroy whose record survives was not held for teardown"
   assert_present "$sbx/vm.sbx-d" "a sandbox whose record survives was destroyed"
+  assert_contains "$out" "SANDBOX_DESTROY_PENDING: task-i: sandbox sbx-i waits for the task's backlog transition still pending in state/task-i.backlog-close, so it was kept" \
+    "a pending destroy whose backlog close has not landed was not held"
+  assert_present "$sbx/vm.sbx-i" "a sandbox was destroyed before its task's backlog transition landed"
+  assert_present "$home/state/task-i.sandbox-destroy-pending" "a held destroy dropped its pending record"
+  assert_not_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-i" "a sandbox owed a held destroy was reported as an orphan"
   assert_contains "$out" "SANDBOX_ORPHAN: sandbox sbx-b (task task-b, running) has no task record in this home; it is never destroyed automatically" \
     "the unrecorded sandbox was not reported"
   assert_present "$sbx/vm.sbx-b" "an orphan was destroyed"

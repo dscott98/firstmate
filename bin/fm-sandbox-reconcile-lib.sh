@@ -37,8 +37,11 @@
 # it only after the task's landed-work gate has passed or --force recorded the
 # captain's discard, and before it records the backlog close or removes the
 # task record, so a crash or a failed destroy never leaves a released sandbox
-# that nothing names. A successful destroy removes it; while the task's record
-# still names that same sandbox, nothing acts on it but a rerun of teardown.
+# that nothing names. A successful destroy removes it. Nothing destroys the
+# sandbox while the task's record still names it, which only a rerun of
+# teardown may finish, or while the task's backlog transition is still pending
+# in state/<id>.backlog-close, because the destroy comes only after that
+# transition lands.
 # fm_sandbox_destroy_pending_path <id>
 # fm_sandbox_destroy_pending_write <id> <name>
 # fm_sandbox_destroy_pending_read <path>

@@ -70,7 +70,19 @@ cat > "$LOCAL_BIN/tmux" <<'SH'
 printf '%s\n' "$*" >> "${FM_FAKE_LOCAL_TMUX_LOG:?}"
 exit 1
 SH
-chmod +x "$LOCAL_BIN/tmux"
+# The supervising home's tasks-axi, whose `done` fails while the case's switch
+# file exists, so a backlog close and its replay can fail on demand.
+REAL_TASKS_AXI=$(command -v tasks-axi)
+export REAL_TASKS_AXI
+cat > "$LOCAL_BIN/tasks-axi" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = done ] && [ -f "${FM_FAKE_TASKS_AXI_FAIL:-/nonexistent}" ]; then
+  echo "error: the backlog file could not be written" >&2
+  exit 1
+fi
+exec "$REAL_TASKS_AXI" "$@"
+SH
+chmod +x "$LOCAL_BIN/tmux" "$LOCAL_BIN/tasks-axi"
 
 PROVIDER_DIR="$TMP_ROOT/provider"
 mkdir -p "$PROVIDER_DIR"
@@ -308,6 +320,7 @@ primary_env() {
     FM_FAKE_SSH_MODE="${SSH_MODE:-normal}" FM_FAKE_HOST_DIR="$HOST_DIR" FM_FAKE_HOST_BIN="$HOST_BIN" \
     FM_FAKE_PROVIDER_STATE="$CASE/provider" FM_FAKE_PRIMARY_META="$PRIMARY/state/$ID.meta" \
     FM_FAKE_LOCAL_TMUX_LOG="$CASE/local-tmux.log" FM_REMOTE_REPLY_WAIT_SECONDS=5 \
+    FM_FAKE_TASKS_AXI_FAIL="$CASE/fail-tasks-axi-done" \
     "$@"
 }
 
@@ -348,6 +361,18 @@ start_mirror() {
     sleep 0.05
   done
   fail "the worker's line never mirrored: $(cat "$CASE/runner.out")"
+}
+
+# session_start: bootstrap's local phase, which replays a recorded backlog
+# close, then its deferred network phase, which retries an owed destroy, as a
+# session start runs them. Sets OUT to both phases' output.
+session_start() {
+  local fakebin="$CASE/bootstrap-bin"
+  mkdir -p "$fakebin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/gh"
+  chmod +x "$fakebin/gh"
+  OUT=$(PATH="$fakebin:$PATH" primary_env env FM_BOOTSTRAP_NETWORK=skip "$CODE_ROOT/bin/fm-bootstrap.sh" 2>&1)
+  OUT=$OUT$'\n'$(PATH="$fakebin:$PATH" primary_env env FM_BOOTSTRAP_NETWORK=only "$CODE_ROOT/bin/fm-bootstrap.sh" 2>&1)
 }
 
 run_teardown() { # [teardown args...]; sets OUT and RC
@@ -532,7 +557,7 @@ test_identity_refusals_hold_under_force() {
 }
 
 test_failed_destroy_is_retried_by_session_start() {
-  local marker out fakebin
+  local marker
   place_ship destroy-fails
   land_work
   : > "$CASE/provider/fail-destroy"
@@ -547,20 +572,57 @@ test_failed_destroy_is_retried_by_session_start() {
   assert_equals "done" "$(row_state)" "the passed teardown did not close the backlog item"
   assert_present "$CASE/provider/vm.$NAME" "the failed destroy removed the sandbox"
 
-  # Session start's deferred network checks finish the owed destroy.
+  # Session start finishes the owed destroy.
   rm -f "$CASE/provider/fail-destroy"
-  fakebin="$CASE/bootstrap-bin"
-  mkdir -p "$fakebin"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$fakebin/gh"
-  chmod +x "$fakebin/gh"
-  out=$(PATH="$fakebin:$LOCAL_BIN:$PATH" primary_env env FM_BOOTSTRAP_NETWORK=only "$CODE_ROOT/bin/fm-bootstrap.sh" 2>&1)
-  assert_contains "$out" "BOOTSTRAP_INFO: destroyed sandbox $NAME for $ID, which an earlier teardown left pending" \
+  session_start
+  assert_contains "$OUT" "BOOTSTRAP_INFO: destroyed sandbox $NAME for $ID, which an earlier teardown left pending" \
     "session start did not finish the owed destroy"
-  assert_not_contains "$out" "SANDBOX_" "session start reported a sandbox problem after finishing the destroy"
+  assert_not_contains "$OUT" "SANDBOX_" "session start reported a sandbox problem after finishing the destroy"
   assert_absent "$marker" "the finished destroy left its pending record"
   assert_absent "$CASE/provider/vm.$NAME" "session start did not destroy the sandbox"
   assert_equals 2 "$(destroy_calls)" "the owed destroy was not retried exactly once"
   pass "a failed destroy keeps a pending record that session start retries until the sandbox is gone"
+}
+
+# The sandbox is destroyed only after the task's backlog transition lands. Here
+# the close fails during teardown, after the record is gone, and again on its
+# session-start replay: the sandbox and its owed destroy survive both. Once the
+# close can land, the next session start closes the item and then destroys.
+test_destroy_waits_for_the_backlog_transition() {
+  place_ship backlog-fails
+  land_work
+  : > "$CASE/fail-tasks-axi-done"
+  run_teardown
+  expect_code 1 "$RC" "a teardown whose backlog close failed"$'\n'"$OUT"
+  assert_contains "$OUT" "backlog item could not be moved atomically (error: the backlog file could not be written)" \
+    "the failed backlog close is named"
+  assert_absent "$PRIMARY/state/$ID.meta" "the failed close did not remove the record first"
+  assert_present "$PRIMARY/state/$ID.backlog-close" "the failed close dropped its pending record"
+  assert_present "$PRIMARY/state/$ID.sandbox-destroy-pending" "the passed gate recorded no owed destroy"
+  assert_present "$CASE/provider/vm.$NAME" "the sandbox was destroyed before its backlog close landed"
+  assert_equals 0 "$(destroy_calls)" "teardown destroyed the sandbox although its backlog close failed"
+
+  session_start
+  assert_contains "$OUT" "BACKLOG_RECONCILE: $ID: recorded backlog close could not be replayed" \
+    "session start did not report the failed replay"
+  assert_contains "$OUT" "SANDBOX_DESTROY_PENDING: $ID: sandbox $NAME waits for the task's backlog transition still pending in state/$ID.backlog-close, so it was kept" \
+    "session start did not hold the destroy for the pending backlog close"
+  assert_present "$CASE/provider/vm.$NAME" "session start destroyed the sandbox while its backlog close was still pending"
+  assert_equals 0 "$(destroy_calls)" "session start asked the provider to destroy before the backlog close landed"
+  assert_present "$PRIMARY/state/$ID.sandbox-destroy-pending" "the held destroy lost its pending record"
+  assert_equals in_flight "$(row_state)" "the backlog item moved although its close failed"
+
+  rm -f "$CASE/fail-tasks-axi-done"
+  session_start
+  assert_contains "$OUT" "BOOTSTRAP_INFO: closed the backlog item for $ID" "the replayed close did not land"
+  assert_contains "$OUT" "BOOTSTRAP_INFO: destroyed sandbox $NAME for $ID, which an earlier teardown left pending" \
+    "the destroy did not follow the landed close"
+  assert_equals "done" "$(row_state)" "the replay did not close the backlog item"
+  assert_absent "$PRIMARY/state/$ID.backlog-close" "the landed close left its pending record"
+  assert_absent "$PRIMARY/state/$ID.sandbox-destroy-pending" "the finished destroy left its pending record"
+  assert_absent "$CASE/provider/vm.$NAME" "the sandbox survived its finished destroy"
+  assert_equals 1 "$(destroy_calls)" "the sandbox was not destroyed exactly once"
+  pass "a sandbox survives a backlog close that fails in teardown and in its replay, and goes once the close lands"
 }
 
 # --- a scout ------------------------------------------------------------------------
@@ -601,4 +663,5 @@ test_ssh_255_preserves_everything_until_a_rerun
 test_force_destroys_without_the_landed_proof
 test_identity_refusals_hold_under_force
 test_failed_destroy_is_retried_by_session_start
+test_destroy_waits_for_the_backlog_transition
 test_scout_report_and_completion_gates

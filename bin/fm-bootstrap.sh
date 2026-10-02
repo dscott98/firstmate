@@ -1324,10 +1324,13 @@ backlog_record_reconcile() {
 # detect-only session skips it. A home with no config/sandbox-provider, no
 # sandbox task record, and no pending destroy makes no provider call and prints
 # nothing. In order:
-#   - A destroy a landed teardown left pending is retried, unless the task's
-#     record still names that sandbox, which only a rerun of teardown may
-#     finish, or a lifecycle action holds the task right now. A success prints
-#     a BOOTSTRAP_INFO fact and a failure SANDBOX_DESTROY_PENDING.
+#   - A destroy a landed teardown left pending is retried under the task's
+#     lifecycle lock, skipped while a lifecycle action holds it. The sandbox is
+#     kept, and SANDBOX_DESTROY_PENDING printed, while the task's record still
+#     names it, which only a rerun of teardown may finish, or while the task's
+#     backlog transition is still pending in state/<id>.backlog-close, which
+#     backlog_record_reconcile replays first. Otherwise the destroy runs, and a
+#     success prints a BOOTSTRAP_INFO fact and a failure SANDBOX_DESTROY_PENDING.
 #   - Each sandbox a task record names has its TTL renewed with the provider's
 #     default once the inventory lists it under that task's label; anything
 #     else prints SANDBOX_TTL.
@@ -1336,7 +1339,7 @@ backlog_record_reconcile() {
 #     publishing, prints SANDBOX_ORPHAN. An orphan is never destroyed here,
 #     because a crash between launch and publication can leave real work in it.
 sandbox_reconcile() {
-  local meta marker id name task state line shown control_lock spawn_pid inventory_error='' i lookup_rc
+  local meta marker id name task state line shown control_lock close_marker spawn_pid inventory_error='' i lookup_rc
   local -a record_ids=() record_names=() markers=()
   [ -d "$STATE" ] && [ ! -L "$STATE" ] || return 0
   for meta in "$STATE"/*.meta; do
@@ -1368,13 +1371,14 @@ sandbox_reconcile() {
     fi
     id=$FM_SANDBOX_PENDING_TASK
     name=$FM_SANDBOX_PENDING_NAME
-    if [ "$(fm_meta_get "$STATE/$id.meta" sandbox_name)" = "$name" ]; then
-      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name still has its task record, so its destroy waits for a rerun of bin/fm-teardown.sh $id"
-      continue
-    fi
     control_lock="$STATE/.control-$id.lock"
     fm_lock_try_acquire "$control_lock" || continue
-    if fm_sandbox_destroy "$id" "$name"; then
+    close_marker=$(fm_backlog_close_marker_path "$STATE" "$id")
+    if [ "$(fm_meta_get "$STATE/$id.meta" sandbox_name)" = "$name" ]; then
+      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name still has its task record, so its destroy waits for a rerun of bin/fm-teardown.sh $id"
+    elif [ -e "$close_marker" ] || [ -L "$close_marker" ]; then
+      echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name waits for the task's backlog transition still pending in state/$id.backlog-close, so it was kept; session start retries both"
+    elif fm_sandbox_destroy "$id" "$name"; then
       echo "BOOTSTRAP_INFO: destroyed sandbox $name for $id, which an earlier teardown left pending"
     else
       echo "SANDBOX_DESTROY_PENDING: $id: sandbox $name is still not destroyed ($FM_SANDBOX_ERROR); session start retries it"
