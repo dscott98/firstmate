@@ -64,25 +64,20 @@
 # 0700. Re-running the same manifest changes nothing and reports
 # provision=current; a home marked for another task, another manifest for this
 # task, and an unmarked home with any content are refused. A failed provision
-# removes everything it created and restores the Pi credential file it changed.
+# removes everything it created and restores the credential files it changed.
 # Prints provision=created|current, task_id, and manifest_sha256.
 #
 # Credentials are Pi API-key providers and the GitHub token, and nothing else
 # is accepted, so no Claude credential can reach a sandbox. They arrive only on
 # stdin and are written only here: the Pi entries are merged into the account's
-# ~/.pi/agent/auth.json and the token is written as GH_TOKEN to
-# config/credentials.env, each replaced atomically with mode 0600 (a .pi
-# directory this creates is 0700). No secret byte is printed, logged, or
-# written anywhere else: state/task-provision.journal records steps and
-# credential names only, and an inherited launch-env-allowlist gains the name
-# GH_TOKEN so the worker's cleared environment keeps it. Provision, launch,
-# control, crew-state, and retire export config/credentials.env into the
-# commands they run, which need it for the clone and for spawn's and teardown's
-# own forge reads. A worker's pane inherits the environment of the tmux server
-# that hosts it, so before launch and control relaunch create or replace a
-# worker, this script starts the dedicated tmux server itself when none runs,
-# and refuses a running server whose global environment does not hold the
-# task's credentials rather than start a worker that cannot push.
+# ~/.pi/agent/auth.json and the token is stored in the account's gh configuration
+# for github.com via gh auth login --insecure-storage --with-token on stdin.
+# Credential files are mode 0600. Failed provision restores the previous Pi
+# and gh configuration. gh is required when a GitHub token is supplied.
+# The clone and its worktrees use the absolute gh auth git-credential helper,
+# scoped to https://github.com, with the same helper passed to the clone.
+# No token enters argv, URLs, Git config, the launch environment, or output.
+# state/task-provision.journal records steps and credential names only.
 #
 # launch runs this host's fm-spawn.sh for the provisioned ship or scout on tmux
 # and prints the route block - backend, target, worktree, branch (empty for a
@@ -139,11 +134,8 @@ TARGET_HOME=${FM_HOME:?FM_HOME is required}
 SCHEMA=fm-remote-task-control.v1
 MANIFEST_SCHEMA=fm-remote-task-provision.v1
 MAX_INPUT_BYTES=1048576
-TMUX_SESSION=firstmate
-CREDENTIAL_ENV_NAMES="GH_TOKEN"
 LAUNCH_CONFIG_NAMES="claude-permission-mode keep-ai-trailers launch-env-allowlist"
 TASK_HARNESSES="claude codex opencode pi pi-signed grok kimi cursor gemini muse rovo omp agy devin"
-TASK_ENV_NAMES=()
 
 # shellcheck source=bin/fm-project-origin-lib.sh
 . "$SCRIPT_DIR/fm-project-origin-lib.sh"
@@ -183,10 +175,6 @@ sha256_file() { # <path>
   else
     return 1
   fi
-}
-
-file_mode() { # <path>; octal permission bits
-  stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
 }
 
 file_mtime() { # <path>; epoch seconds
@@ -239,49 +227,6 @@ validate_home() { # <id>; pure, so it runs before any library can create state/
   done
 }
 
-# --- credentials -----------------------------------------------------------------
-
-# Read config/credentials.env without evaluating it and export each variable.
-task_credentials_export() {
-  local file="$TARGET_HOME/config/credentials.env" mode line name value
-  TASK_ENV_NAMES=()
-  [ -e "$file" ] || [ -L "$file" ] || return 0
-  [ -f "$file" ] && [ ! -L "$file" ] || die "the task credential file is not a regular file"
-  mode=$(file_mode "$file") || die "the task credential file's mode is unreadable"
-  [ "$mode" = 600 ] || die "the task credential file must be mode 0600, not $mode"
-  while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$line" ] || continue
-    name=${line%%=*}
-    value=${line#*=}
-    [ "$name" != "$line" ] || die "the task credential file has a line that is not NAME=value"
-    case " $CREDENTIAL_ENV_NAMES " in
-      *" $name "*) ;;
-      *) die "the task credential file names a variable this sandbox does not deliver" ;;
-    esac
-    export "$name=$value"
-    TASK_ENV_NAMES+=("$name")
-  done < "$file"
-}
-
-# The worker's pane inherits the global environment of the tmux server hosting
-# it, so this script starts that server itself when none runs - from its own
-# environment, which carries the exported credentials but not the job worker's
-# FM_REMOTE_JOB_ACTIVE marker - before a worker is created or replaced, and
-# refuses a running server without the task's credentials. The comparison reads
-# each value back and never prints it.
-task_tmux_ensure() {
-  local name have
-  if ! tmux list-sessions >/dev/null 2>&1; then
-    env -u FM_REMOTE_JOB_ACTIVE tmux new-session -d -s "$TMUX_SESSION" >/dev/null 2>&1 \
-      || die "could not start the task's tmux server"
-  fi
-  for name in ${TASK_ENV_NAMES[@]+"${TASK_ENV_NAMES[@]}"}; do
-    have=$(tmux show-environment -g "$name" 2>/dev/null) || have=
-    [ "$have" = "$name=${!name}" ] \
-      || die "the tmux server on this host runs without the task's $name credential, so a worker started there could not authenticate; refusing rather than starting it without that credential"
-  done
-}
-
 # --- provision -------------------------------------------------------------------
 
 PROVISION_TMP=
@@ -293,6 +238,9 @@ PROVISION_EMPTY_HOME=0
 PI_AUTH_FILE=
 PI_AUTH_WRITTEN=0
 PI_AUTH_BACKUP=0
+GH_AUTH_DIR=
+GH_AUTH_WRITTEN=0
+GH_BIN=
 P_SEEN=' '
 P_CONFIG_NAMES=
 P_DIGEST=
@@ -317,8 +265,18 @@ P_FIELD_gh_token_b64=
 provision_has() { case "$P_SEEN" in *" $1 "*) return 0 ;; esac; return 1; }
 
 provision_cleanup() {
-  local status=$?
+  local status=$? name
   if [ "$PROVISION_PUBLISHED" -eq 0 ] && [ "$status" -ne 0 ]; then
+    if [ "$GH_AUTH_WRITTEN" -eq 1 ]; then
+      for name in hosts.yml config.yml; do
+        if [ -f "$PROVISION_TMP/gh-$name.before" ]; then
+          cp -p -- "$PROVISION_TMP/gh-$name.before" "$GH_AUTH_DIR/$name" 2>/dev/null \
+            || printf 'error: could not restore gh %s after the failed provision\n' "$name" >&2
+        else
+          rm -f -- "$GH_AUTH_DIR/$name" 2>/dev/null || true
+        fi
+      done
+    fi
     if [ "$PI_AUTH_WRITTEN" -eq 1 ]; then
       if [ "$PI_AUTH_BACKUP" -eq 1 ]; then
         cp -p -- "$PROVISION_TMP/pi-auth.before" "$PI_AUTH_FILE.rollback.$$" 2>/dev/null \
@@ -484,6 +442,8 @@ provision_read() { # <id>
       || die "the Pi credential provider names are unreadable"
   fi
   if provision_has gh_token_b64; then
+    GH_BIN=$(command -v gh) || die "gh is unavailable: a GitHub token requires gh credential storage"
+    GH_BIN="$(cd -- "$(dirname -- "$GH_BIN")" && pwd)/$(basename -- "$GH_BIN")"
     base64_decode_to "$P_FIELD_gh_token_b64" "$PROVISION_TMP/gh-token" \
       || die "the provisioning manifest's GitHub token is not valid base64"
     [ -s "$PROVISION_TMP/gh-token" ] || die "the provisioning manifest's GitHub token is empty"
@@ -557,8 +517,29 @@ pi_auth_merge() {
   write_private_file "$PROVISION_TMP/pi-auth.merged" "$PI_AUTH_FILE" || die "could not write the Pi credential file"
 }
 
+gh_auth_store() {
+  local name
+  GH_AUTH_DIR=${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}
+  [ ! -L "$GH_AUTH_DIR" ] || die "the gh configuration directory is a symlink"
+  mkdir -p -m 700 "$GH_AUTH_DIR" || die "cannot create the gh configuration directory"
+  for name in hosts.yml config.yml; do
+    if [ -e "$GH_AUTH_DIR/$name" ] || [ -L "$GH_AUTH_DIR/$name" ]; then
+      [ -f "$GH_AUTH_DIR/$name" ] && [ ! -L "$GH_AUTH_DIR/$name" ] \
+        || die "the gh $name configuration is not a regular file"
+      cp -p -- "$GH_AUTH_DIR/$name" "$PROVISION_TMP/gh-$name.before" \
+        || die "cannot snapshot the gh $name configuration"
+    fi
+  done
+  GH_AUTH_WRITTEN=1
+  "$GH_BIN" auth login --hostname github.com --git-protocol https --insecure-storage --with-token \
+    < "$PROVISION_TMP/gh-token" >/dev/null 2>&1 \
+    || die "gh credential storage failed for github.com"
+  [ -f "$GH_AUTH_DIR/hosts.yml" ] && chmod 600 "$GH_AUTH_DIR/hosts.yml" \
+    || die "gh did not store its github.com credential file"
+}
+
 provision_apply() { # <id>
-  local id=$1 marker owner digest name dest foreign allowlist separator helper
+  local id=$1 marker owner digest name dest foreign helper
   local -a git_auth=()
   PROVISION_LOCK="$PROVISION_LOCK_ROOT/.remote-task-provision-$(printf '%s' "$TARGET_HOME" | cksum | awk '{print $1}').lock"
   fm_lock_acquire_wait "$PROVISION_LOCK"
@@ -601,31 +582,19 @@ provision_apply() { # <id>
   for name in $P_CONFIG_NAMES; do
     cp -- "$PROVISION_TMP/config.$name" "$TARGET_HOME/config/$name" || die "cannot write config/$name"
   done
-  allowlist="$TARGET_HOME/config/launch-env-allowlist"
-  if provision_has gh_token_b64 && [ -f "$allowlist" ] && ! grep -qx GH_TOKEN "$allowlist"; then
-    separator=
-    if [ -s "$allowlist" ] && [ -n "$(tail -c 1 "$allowlist")" ]; then separator=$'\n'; fi
-    printf '%sGH_TOKEN\n' "$separator" >> "$allowlist" \
-      || die "cannot add GH_TOKEN to the launch environment allowlist"
-  fi
   journal "home brief=data/$id/brief.md registry=data/projects.md backlog-backend=manual config=${P_CONFIG_NAMES# }"
-
   if provision_has gh_token_b64; then
-    { printf 'GH_TOKEN='; cat -- "$PROVISION_TMP/gh-token"; printf '\n'; } > "$PROVISION_TMP/credentials.env" \
-      || die "cannot stage the task credential file"
-    write_private_file "$PROVISION_TMP/credentials.env" "$TARGET_HOME/config/credentials.env" \
-      || die "cannot write the task credential file"
-    journal "credential gh_token=config/credentials.env"
+    gh_auth_store
+    journal "credential gh_token=gh/github.com"
   fi
   if provision_has pi_auth_b64; then
     pi_auth_merge
     journal "credential pi_auth providers=$P_PI_PROVIDERS"
   fi
-  task_credentials_export
 
   dest="$TARGET_HOME/projects/$P_FIELD_project"
   if provision_has gh_token_b64; then
-    helper='!f() { [ "$1" = get ] || return 0; protocol= host=; while IFS= read -r line && [ -n "$line" ]; do case "$line" in protocol=*) protocol=${line#protocol=} ;; host=*) host=${line#host=} ;; esac; done; [ "$protocol" = https ] && [ "$host" = github.com ] && [ -n "${GH_TOKEN:-}" ] || return 0; printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f'
+    printf -v helper '!%q auth git-credential' "$GH_BIN"
     git_auth=(-c credential.https://github.com.helper= -c "credential.https://github.com.helper=$helper")
   fi
   git ${git_auth[@]+"${git_auth[@]}"} clone --no-local --quiet -- "$(cat "$PROVISION_TMP/origin")" "$dest" \
@@ -777,8 +746,7 @@ cmd_launch() {
   [ "$model" = default ] || args+=(--model "$model")
   [ "$effort" = default ] || args+=(--effort "$effort")
   args+=(--backend tmux)
-  task_credentials_export
-  task_tmux_ensure
+
   # The task home has no supervisor of its own, so the watcher guard has
   # nothing to report here; supervision lives in the primary.
   if ! out=$(FM_SPAWN_NO_GUARD=1 run_host fm-spawn.sh "${args[@]}" 2>&1); then
@@ -892,7 +860,7 @@ cmd_key() {
 cmd_crew_state() {
   local id=$1 empty line verdict='unknown no-record' tail40=''
   empty=$(mktemp "${TMPDIR:-/tmp}/fm-task-crew-state.XXXXXX") || die "cannot stage the empty status log"
-  task_credentials_export
+
   line=$(FM_CREW_STATE_STATUS_OVERRIDE="$empty" run_host fm-crew-state.sh "$id" 2>/dev/null) || line=
   rm -f -- "$empty"
   line=$(printf '%s\n' "$line" | tail -1)
@@ -930,7 +898,6 @@ cmd_control() {
     interrupt|exit)
       [ "$#" -eq 2 ] || usage
       endpoint_require "$id"
-      task_credentials_export
       run_host fm-control.sh "$id" "$action"
       ;;
     relaunch)
@@ -958,8 +925,6 @@ cmd_control() {
       [ "$model" = - ] || args+=(--model "$model")
       [ "$effort" = - ] || args+=(--effort "$effort")
       args+=(--note "$note")
-      task_credentials_export
-      task_tmux_ensure
       run_host fm-control.sh "${args[@]}"
       print_route "$id"
       ;;
@@ -1005,7 +970,7 @@ cmd_retire() {
     printf 'already-retired: %s\n' "$id"
     return 0
   fi
-  task_credentials_export
+
   # The task home has no supervisor, so the teardown's watcher guard is moot.
   if [ -n "$force" ]; then
     FM_TEARDOWN_GUARD_DONE=1 run_host fm-teardown.sh "$id" --force

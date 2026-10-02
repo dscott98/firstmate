@@ -106,8 +106,9 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `state`, `observe`, `capture`, `send`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox, and replace its brief.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
-Credentials are written only on the host: the Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token as `GH_TOKEN` in the home's `config/credentials.env`, each mode 0600.
-Launch and relaunch start the worker's tmux server with `GH_TOKEN` in its environment, and refuse a running server without it rather than start a worker that cannot push.
+Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
+Provision requires gh when a GitHub token is supplied, passes the token to `gh auth login --insecure-storage --with-token` on stdin, and restores the previous gh configuration if provisioning fails.
+Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees; the token never enters command arguments or the launch environment.
 
 A sandbox brief is rendered with `bin/fm-brief.sh --for-home <remote-home> --for-root <remote-root>`, which names the sandbox's status file, inbox, and report while writing the brief in the supervising home.
 Spawn refuses any ship or scout brief that names another home's status file, so such a brief launches only in the home it was rendered for.

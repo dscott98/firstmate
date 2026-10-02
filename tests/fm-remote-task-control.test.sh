@@ -60,12 +60,47 @@ exit 0
 SH
 chmod +x "$FAKEBIN/no-mistakes"
 
-# A tmux whose server, environment, window, and pane live in FM_FAKE_TMUX_DIR.
-# A server records the GH_TOKEN of the client that started it, as real tmux
-# copies its starting client's environment into the global environment. The
-# pane reports the command named in pane-command (default claude); typing
-# /exit turns it into a shell, and sourcing a staged launch command brings
-# claude back, which is the whole exit-and-relaunch cycle fm-control drives.
+REAL_GIT=$(command -v git)
+export REAL_GIT
+cat > "$FAKEBIN/git" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "$HOME/../git.argv"
+exec "$REAL_GIT" "$@"
+SH
+cat > "$FAKEBIN/gh" <<'SH'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$@" >> "$HOME/../gh.argv"
+env > "$HOME/../gh.environment"
+store="$HOME/.config/gh"
+case "$*" in
+  "auth login --hostname github.com --git-protocol https --insecure-storage --with-token")
+    cat > "$HOME/../gh.stdin"
+    mkdir -p "$store"
+    cp "$HOME/../gh.stdin" "$store/hosts.yml"
+    printf 'git_protocol: https\n' > "$store/config.yml"
+    if [ "${FM_FAKE_GH_FAIL:-0}" = 1 ]; then
+      cat "$store/hosts.yml" >&2
+      exit 1
+    fi
+    ;;
+  "auth git-credential get")
+    protocol= host=
+    while IFS= read -r line && [ -n "$line" ]; do
+      case "$line" in
+        protocol=*) protocol=${line#protocol=} ;;
+        host=*) host=${line#host=} ;;
+      esac
+    done
+    [ "$protocol" = https ] && [ "$host" = github.com ] || exit 0
+    printf 'username=x-access-token\npassword=%s\n' "$(cat "$store/hosts.yml")"
+    ;;
+  "auth git-credential store"|"auth git-credential erase") cat >/dev/null ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$FAKEBIN/git" "$FAKEBIN/gh"
+
 cat > "$FAKEBIN/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -86,7 +121,7 @@ case "${1:-}" in
   has-session) [ -f "$d/server" ] ;;
   new-session)
     : > "$d/server"
-    if [ -n "${GH_TOKEN+x}" ]; then printf '%s' "$GH_TOKEN" > "$d/env.GH_TOKEN"; fi
+    env > "$d/environment"
     ;;
   show-environment)
     [ -f "$d/env.${3:-}" ] || { echo "unknown variable: ${3:-}" >&2; exit 1; }
@@ -101,6 +136,7 @@ case "${1:-}" in
     esac
     ;;
   new-window)
+    env > "$d/environment"
     : > "$d/server"
     while [ "$#" -gt 0 ]; do
       case "$1" in -n) shift; printf '%s\n' "$1" > "$d/window" ;; esac
@@ -197,6 +233,7 @@ pi_auth_field() { printf 'pi_auth_b64=%s\n' "$(printf '{"minimax":{"type":"api_k
 
 run_control() { # <verb> [args...]; stdin passes through
   env -u FM_STATE_OVERRIDE -u FM_DATA_OVERRIDE -u FM_CONFIG_OVERRIDE -u FM_PROJECTS_OVERRIDE \
+    -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_TOKEN -u GITHUB_TOKEN \
     FM_HOME="$TASK_HOME" FM_ROOT_OVERRIDE="$ROOT" HOME="$ACCOUNT_HOME" CLAUDE_CONFIG_DIR= \
     TMUX= TMPDIR="$CASE/tmp" PATH="$FAKEBIN:$PATH" FM_FAKE_TMUX_DIR="$TMUX_DIR" \
     "$CONTROL" "$@"
@@ -286,25 +323,28 @@ test_provision_builds_a_private_marked_home() {
   assert_equals manual "$(cat "$TASK_HOME/config/backlog-backend")" "the backlog transition belongs to the primary"
   assert_equals auto "$(cat "$TASK_HOME/config/claude-permission-mode")" "launch config is written"
   assert_present "$TASK_HOME/config/keep-ai-trailers" "an empty flag config is still written"
-  assert_equals $'OPENAI_API_KEY\nGH_TOKEN' "$(cat "$TASK_HOME/config/launch-env-allowlist")" \
-    "an inherited allowlist keeps its names and gains GH_TOKEN"
+  assert_equals OPENAI_API_KEY "$(cat "$TASK_HOME/config/launch-env-allowlist")" \
+    "an inherited allowlist is unchanged"
   assert_equals "$ORIGIN_URL" "$(git -C "$TASK_HOME/projects/alpha" remote get-url origin)" "the project is cloned from its origin"
   assert_present "$TASK_HOME/projects/alpha/.no-mistakes-init" "a no-mistakes ship initializes no-mistakes in its clone"
 
-  assert_equals 600 "$(mode_of "$TASK_HOME/config/credentials.env")" "the GitHub token file is mode 0600"
-  assert_equals "GH_TOKEN=$GH_SECRET" "$(cat "$TASK_HOME/config/credentials.env")" "the GitHub token is written as GH_TOKEN"
+  assert_absent "$TASK_HOME/config/credentials.env" "no environment credential file is created"
+  assert_equals 600 "$(mode_of "$ACCOUNT_HOME/.config/gh/hosts.yml")" "the gh credential store is mode 0600"
+  assert_equals "$GH_SECRET" "$(cat "$CASE/gh.stdin")" "gh receives the token on stdin"
+  assert_equals "$GH_SECRET" "$(cat "$ACCOUNT_HOME/.config/gh/hosts.yml")" "gh stores the token"
+  assert_no_secret_files "credential process argv and environment" "$CASE/gh.argv" "$CASE/git.argv" "$CASE/gh.environment"
   auth="$ACCOUNT_HOME/.pi/agent/auth.json"
   assert_equals 600 "$(mode_of "$auth")" "the Pi credential file is mode 0600"
   assert_equals keep-me "$(jq -r '.other.key' "$auth")" "existing Pi entries survive the merge"
   assert_equals "$PI_SECRET" "$(jq -r '.minimax.key' "$auth")" "the needed Pi entry is merged in"
 
   assert_grep "begin task=$ID" "$TASK_HOME/state/task-provision.journal" "the journal records the start"
-  assert_grep 'credential gh_token=config/credentials.env' "$TASK_HOME/state/task-provision.journal" "the journal names the token's file"
+  assert_grep 'credential gh_token=gh/github.com' "$TASK_HOME/state/task-provision.journal" "the journal names the token's file"
   assert_grep 'credential pi_auth providers=minimax' "$TASK_HOME/state/task-provision.journal" "the journal names the Pi providers"
   assert_grep 'no-mistakes-init project=alpha' "$TASK_HOME/state/task-provision.journal" "the journal records no-mistakes init"
   assert_grep 'complete' "$TASK_HOME/state/task-provision.journal" "the journal records completion"
-  assert_secret_only_in "the provisioned home" "$TASK_HOME" "$TASK_HOME/config/credentials.env"
-  assert_secret_only_in "the account home" "$ACCOUNT_HOME" "$ACCOUNT_HOME/.pi/agent/auth.json"
+  assert_no_secret_files "the provisioned home" "$TASK_HOME"
+  assert_secret_only_in "the account home" "$ACCOUNT_HOME" "$ACCOUNT_HOME/.pi/agent/auth.json" "$ACCOUNT_HOME/.config/gh/hosts.yml"
   [ -z "$(find "$CASE/tmp" -mindepth 1 -maxdepth 1 -name 'fm-task-provision.*' -print)" ] \
     || fail "provision left its private staging directory behind"
 
@@ -374,6 +414,12 @@ test_provision_rolls_back_a_failed_attempt() {
   printf '{"other":{"type":"api_key","key":"before"}}\n' > "$ACCOUNT_HOME/.pi/agent/auth.json"
   chmod 600 "$ACCOUNT_HOME/.pi/agent/auth.json"
   cp -p "$ACCOUNT_HOME/.pi/agent/auth.json" "$CASE/auth.before"
+  mkdir -p "$ACCOUNT_HOME/.config/gh"
+  printf 'old-gh-credential\n' > "$ACCOUNT_HOME/.config/gh/hosts.yml"
+  printf 'old-gh-config\n' > "$ACCOUNT_HOME/.config/gh/config.yml"
+  chmod 600 "$ACCOUNT_HOME/.config/gh/hosts.yml"
+  cp -p "$ACCOUNT_HOME/.config/gh/hosts.yml" "$CASE/gh.before"
+  cp -p "$ACCOUNT_HOME/.config/gh/config.yml" "$CASE/gh-config.before"
   write_manifest "$CASE/manifest" ship pi
   pi_auth_field >> "$CASE/manifest"
   manifest_set "$CASE/manifest" origin_b64 "origin_b64=$(printf '%s' "file://$CASE/missing.git" | b64)"
@@ -383,6 +429,9 @@ test_provision_rolls_back_a_failed_attempt() {
   assert_no_secret_text "a failed provision" "$out"
   assert_absent "$TASK_HOME" "a failed provision removes the home it created"
   cmp -s "$CASE/auth.before" "$ACCOUNT_HOME/.pi/agent/auth.json" || fail "a failed provision did not restore the Pi credential file"
+  cmp -s "$CASE/gh.before" "$ACCOUNT_HOME/.config/gh/hosts.yml" || fail "failed provision did not restore gh credentials"
+  cmp -s "$CASE/gh-config.before" "$ACCOUNT_HOME/.config/gh/config.yml" || fail "failed provision did not restore gh configuration"
+  assert_equals 600 "$(mode_of "$ACCOUNT_HOME/.config/gh/hosts.yml")" "rollback preserves credential permissions"
   [ -z "$(find "$CASE/tmp" -mindepth 1 -maxdepth 1 -name 'fm-task-provision.*' -print)" ] \
     || fail "a failed provision left its private staging directory behind"
 
@@ -396,6 +445,14 @@ test_provision_rolls_back_a_failed_attempt() {
   assert_present "$TASK_HOME" "a pre-existing empty home is kept"
   assert_equals '' "$(find "$TASK_HOME" -mindepth 1 -print)" "a pre-existing empty home is emptied again"
   assert_absent "$ACCOUNT_HOME/.pi/agent/auth.json" "a Pi credential file the failed provision created is removed"
+  assert_absent "$ACCOUNT_HOME/.config/gh/hosts.yml" "a new gh credential is removed on rollback"
+  assert_absent "$ACCOUNT_HOME/.config/gh/config.yml" "a new gh configuration is removed on rollback"
+
+  out=$(FM_FAKE_GH_FAIL=1 run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "failed gh login was accepted"
+  assert_contains "$out" "gh credential storage failed for github.com" "gh login failure has a named reason"
+  assert_no_secret_text "failed gh login" "$out"
+  assert_absent "$ACCOUNT_HOME/.config/gh/hosts.yml" "partial gh login is rolled back"
 
   write_manifest "$CASE/manifest" ship pi no-mistakes
   pi_auth_field >> "$CASE/manifest"
@@ -500,6 +557,26 @@ ROWS
   pass "provision refuses credentials outside the API-key and GitHub boundary before writing"
 }
 
+test_provision_requires_gh_for_a_token() {
+  local out rc tool executable
+  new_case missing-gh
+  write_manifest "$CASE/manifest" ship claude
+  local FAKEBIN="$CASE/no-gh"
+  mkdir "$FAKEBIN"
+  for tool in env bash dirname head wc tr base64 git jq rm cat sed mktemp mkdir chmod cksum awk grep cut sha256sum shasum; do
+    executable=$(command -v "$tool") || continue
+    ln -s "$executable" "$FAKEBIN/$tool"
+  done
+  out=$(PATH="$FAKEBIN" run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "a token was provisioned without gh"
+  assert_contains "$out" "gh is unavailable" "a missing gh has a named refusal"
+  assert_no_secret_text "missing gh refusal" "$out"
+  assert_absent "$TASK_HOME" "missing gh creates no task home"
+  assert_absent "$ACCOUNT_HOME/.config/gh/hosts.yml" "missing gh creates no credential store"
+  [ -z "$(find "$CASE/tmp" -mindepth 1 -print)" ] || fail "missing gh leaves staging files"
+  pass "a GitHub token requires gh before provisioning writes the home"
+}
+
 test_git_credentials_are_repository_and_host_scoped() {
   local repo out rc
   new_case git-credentials
@@ -507,30 +584,29 @@ test_git_credentials_are_repository_and_host_scoped() {
   launch_ready
   for repo in "$TASK_HOME/projects/alpha" "$WT"; do
     out=$(printf 'protocol=https\nhost=github.com\n\n' |
-      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GH_TOKEN="$GH_SECRET" \
+      env -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_TOKEN -u GITHUB_TOKEN HOME="$ACCOUNT_HOME" PATH="$FAKEBIN:$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 \
       git -C "$repo" credential fill 2>"$CASE/credential.err"); rc=$?
     expect_code 0 "$rc" "GitHub credential fill should succeed"
     assert_contains "$out" "username=x-access-token" "Git receives the token username"
-    assert_contains "$out" "password=$GH_SECRET" "Git reads the task token from the environment"
-    out=$(printf 'protocol=https\nhost=github.com\n\n' |
-      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GH_TOKEN=changed-token \
-      git -C "$repo" credential fill 2>"$CASE/credential.err") || fail "replacement token lookup failed"
-    assert_contains "$out" "password=changed-token" "Git resolves the token at call time"
+    assert_contains "$out" "password=$GH_SECRET" "Git reads the task token from gh storage"
     out=$(printf 'protocol=https\nhost=example.com\n\n' |
-      HOME="$ACCOUNT_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false GH_TOKEN="$GH_SECRET" \
+      env -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_TOKEN -u GITHUB_TOKEN HOME="$ACCOUNT_HOME" PATH="$FAKEBIN:$PATH" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
       git -C "$repo" credential fill 2>"$CASE/credential.err"); rc=$?
     [ "$rc" -ne 0 ] || fail "another host received credentials"
     assert_equals "" "$out" "another host receives no credential output"
     assert_no_secret_text "other host error" "$(cat "$CASE/credential.err")"
     assert_no_secret_text "repository Git configuration" "$(git -C "$repo" config --local --list)"
   done
-  pass "Git authenticates the clone and worktree using only the current GitHub environment token"
+  assert_no_secret_files "Git and gh arguments" "$CASE/git.argv" "$CASE/gh.argv"
+  pass "Git authenticates the clone and worktree using gh credential storage"
 }
 
-test_launch_reports_the_route_and_hands_the_worker_its_credentials() {
+test_launch_reports_the_route_without_credential_environment() {
   local out rc meta spawn_gen
   new_case launch
-  provision_ship claude
+  write_manifest "$CASE/manifest" ship claude
+  printf 'config=launch-env-allowlist|%s\n' "$(printf 'OPENAI_API_KEY' | b64)" >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1) || fail "provision failed: $out"
   launch_ready
   out=$(run_control launch "$ID" 2>"$CASE/launch.err"); rc=$?
   expect_code 0 "$rc" "launch should succeed"$'\n'"$out"$'\n'"$(cat "$CASE/launch.err")"
@@ -550,12 +626,12 @@ test_launch_reports_the_route_and_hands_the_worker_its_credentials() {
   assert_equals default "$(route_value "$out" effort)" "the route names the effort"
   assert_line "$meta" "project=$TASK_HOME/projects/alpha" "the worker belongs to the home's own clone"
 
-  assert_equals "$GH_SECRET" "$(cat "$TMUX_DIR/env.GH_TOKEN")" "the tmux server hosting the worker holds GH_TOKEN"
-  [ "$(grep -n '^new-session' "$TMUX_DIR/log" | head -1 | cut -d: -f1)" -lt \
-    "$(grep -n '^new-window' "$TMUX_DIR/log" | head -1 | cut -d: -f1)" ] \
-    || fail "the credentialed server was not started before the worker's window"
+  assert_no_secret_files "tmux environment" "$TMUX_DIR/environment"
+  assert_not_contains "$(cat "$TMUX_DIR/environment")" "GH_TOKEN=" "tmux receives no GH_TOKEN"
+  assert_equals OPENAI_API_KEY "$(cat "$TASK_HOME/config/launch-env-allowlist")" "launch allowlist contains no token entry"
+  assert_no_secret_files "Git and gh arguments" "$CASE/git.argv" "$CASE/gh.argv"
   assert_no_secret_text "launch output" "$out$(cat "$CASE/launch.err")"
-  assert_secret_only_in "the launched home" "$TASK_HOME" "$TASK_HOME/config/credentials.env"
+  assert_no_secret_files "the launched home" "$TASK_HOME"
   assert_no_secret_files "the task's temp root" /tmp/fm-"$ID"
   assert_no_secret_files "the staged launch command" /tmp/fm-"$ID"+*
   assert_no_secret_files "the tmux command log" "$TMUX_DIR/log"
@@ -571,22 +647,21 @@ test_launch_reports_the_route_and_hands_the_worker_its_credentials() {
   [ "$rc" -ne 0 ] || fail "launch over an exited worker was accepted"
   assert_contains "$out" "recover it with control relaunch" "the refusal points at relaunch"
   cmp -s "$CASE/meta.before" "$meta" || fail "a refused launch changed the task record"
-  pass "launch runs the host's spawn on tmux, reports the route, and hands the worker its credentials"
+  pass "launch runs the host's spawn on tmux, reports the route, without a credential environment"
 }
 
-test_launch_refuses_a_tmux_server_without_the_credentials() {
+test_launch_uses_an_existing_tmux_server_without_credentials() {
   local out rc
-  new_case foreign-server
+  new_case existing-server
   provision_ship claude
   launch_ready
   : > "$TMUX_DIR/server"
   out=$(run_control launch "$ID" 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "launch onto a server without the credentials was accepted"
-  assert_contains "$out" "runs without the task's GH_TOKEN credential" "the refusal names the missing credential"
-  assert_no_secret_text "the refused launch" "$out"
-  assert_absent "$TASK_HOME/state/$ID.meta" "the refused launch recorded no worker"
-  assert_no_line_prefix "$TMUX_DIR/log" new-window "the refused launch created no window"
-  pass "launch refuses a running tmux server that does not carry the task's credentials"
+  expect_code 0 "$rc" "launch should use an existing server without a token"
+  assert_present "$TASK_HOME/state/$ID.meta" "launch publishes the worker"
+  assert_no_secret_text "launch on existing server" "$out"
+  assert_no_secret_files "tmux log and environment" "$TMUX_DIR/log" "$TMUX_DIR/environment"
+  pass "launch uses an existing tmux server without credential checks"
 }
 
 test_read_verbs_report_the_endpoint() {
@@ -710,7 +785,9 @@ test_brief_update_replaces_the_brief_only_for_this_home() {
 test_control_drives_the_host_control_plane() {
   local out rc spawn_gen
   new_case control
-  provision_ship claude
+  write_manifest "$CASE/manifest" ship claude
+  printf 'config=launch-env-allowlist|%s\n' "$(printf 'OPENAI_API_KEY' | b64)" >> "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1) || fail "provision failed: $out"
   launch_ready
   out=$(run_control launch "$ID" 2>&1) || fail "launch failed: $out"
   spawn_gen=$(route_value "$out" spawn_gen)
@@ -744,10 +821,15 @@ test_control_drives_the_host_control_plane() {
   [ "$(route_value "$out" spawn_gen)" != "$spawn_gen" ] || fail "relaunch reported the old worker"
   assert_line "$TASK_HOME/state/$ID.meta" "spawn_gen=$(route_value "$out" spawn_gen)" "the route is read back from the republished record"
   assert_equals claude "$(route_value "$out" harness)" "relaunch keeps the recorded harness"
+  assert_no_secret_text "relaunch output" "$out"
 
   printf 'bash\n' > "$TMUX_DIR/pane-command"
   out=$(FM_CONTROL_POLL=0.1 run_control control "$ID" exit 2>&1); rc=$?
   expect_code 0 "$rc" "exit of a stopped worker is idempotent"$'\n'"$out"
+  assert_no_secret_text "control output" "$out"
+  assert_no_secret_files "relaunch commands and environment" "$TMUX_DIR/log" "$TMUX_DIR/environment" "$CASE/git.argv" "$CASE/gh.argv" /tmp/fm-"$ID" /tmp/fm-"$ID"+*
+  assert_no_secret_files "relaunch home records" "$TASK_HOME"
+  assert_equals OPENAI_API_KEY "$(cat "$TASK_HOME/config/launch-env-allowlist")" "relaunch does not add a token to the allowlist"
   pass "control relays interrupt and exit and relaunches through the host's control plane"
 }
 
@@ -812,9 +894,10 @@ test_provision_is_idempotent_and_refuses_another_task_or_manifest
 test_provision_rolls_back_a_failed_attempt
 test_provision_refuses_unsafe_manifests
 test_provision_refuses_non_api_key_credentials
+test_provision_requires_gh_for_a_token
 test_git_credentials_are_repository_and_host_scoped
-test_launch_reports_the_route_and_hands_the_worker_its_credentials
-test_launch_refuses_a_tmux_server_without_the_credentials
+test_launch_reports_the_route_without_credential_environment
+test_launch_uses_an_existing_tmux_server_without_credentials
 test_read_verbs_report_the_endpoint
 test_send_writes_one_durable_record_per_steer
 test_brief_update_replaces_the_brief_only_for_this_home
