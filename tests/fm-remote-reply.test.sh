@@ -103,12 +103,15 @@ stop_reply_listener() {
 # Block until this generation's capture has been applied. A live listener keeps
 # its claim across polls, so start is only launched when nothing owns the source.
 await_reply_result() { # <result-path>
-  local result=$1 handled=${1%.result}.handled _
-  if [ "$(reply_owner)" != live ]; then
-    remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null 2>&1 &
-  fi
-  for _ in $(seq 1 800); do
+  local result=$1 handled=${1%.result}.handled attempt
+  for attempt in $(seq 1 800); do
     [ -s "$result" ] && [ -f "$handled" ] && return 0
+    # A replayed handle replaces the registration. Its old listener can still
+    # be live at entry, then exit when it notices that replacement. Supply the
+    # next supervision check here too; this fixture has no watcher to do it.
+    if [ $((attempt % 20)) -eq 1 ] && [ "$(reply_owner)" != live ]; then
+      remote_env "$ROOT/bin/fm-procevent.sh" start "$SID" >/dev/null 2>&1 &
+    fi
     sleep 0.05
   done
   return 1
