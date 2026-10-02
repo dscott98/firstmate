@@ -207,6 +207,7 @@ chmod +x ~/.local/bin/tasks-axi
 ## Readiness, repair, and the human steps
 
 `bin/fm-remote-doctor.sh` is the single owner of what "ready for a remote second mate" means.
+This page describes its default second-mate profile; its `--profile task` mode readies a sandbox task host instead ([remote-sandboxes.md](remote-sandboxes.md#task-readiness)).
 
 ### Check a host
 
@@ -519,6 +520,7 @@ A fire-and-forget record, such as a reconcile ask, gets its single retry ring on
 ### Remote reads
 
 `fm-peek.sh` and `fm-crew-state.sh` route remote-secondmate reads to the endpoint's host instead of consulting local worktree or backend state.
+[`bin/fm-remote-route-lib.sh`](../bin/fm-remote-route-lib.sh) decides which records are remote second mates for these reads and for every other command that branches on remote placement.
 An unreachable or unreadable remote read is unknown, not evidence that the endpoint is dead.
 
 ### Replies and the parent channel

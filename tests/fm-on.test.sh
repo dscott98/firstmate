@@ -545,4 +545,105 @@ set -e
 [ "$(grep -c mutation "$REMOTE_HOME/mutations")" -eq 1 ] || fail "ambiguous mutation did not execute exactly once"
 pass "unreachable and ambiguous transport failures are surfaced without retry"
 
+# --- sandbox task routes come from this home's own task record ---------------
+# A record that carries placement=sandbox and remote_kind=task routes by its
+# exact task id through the same entrypoint and worker as a registry route;
+# bin/fm-remote-route-lib.sh owns the record contract these cases exercise.
+TASK_HOME="$TMP_ROOT/task-home"
+mkdir -p "$TASK_HOME" "$LOCAL_HOME/state"
+write_task_route() { # <id> [extra-or-override lines...]: a sandbox task record for <id>
+  local id=$1 meta="$LOCAL_HOME/state/$1.meta"
+  shift
+  {
+    printf '%s\n' "window=remote:$id" "endpoint_task_id=$id" "worktree=$TASK_HOME/projects/alpha-wt" \
+      "project=$LOCAL_HOME/projects/alpha" "harness=pi" "kind=ship" "mode=no-mistakes" \
+      "placement=sandbox" "remote_kind=task" "remote_host=remote-mac" \
+      "remote_root=$REMOTE_ROOT" "remote_home=$TASK_HOME" "remote_backend=tmux" \
+      "sandbox_provider=pve-sandbox" "sandbox_name=sbx-$id" "sandbox_profile=default"
+  } > "$meta"
+  local line key
+  for line in "$@"; do
+    key=${line%%=*}
+    case "$line" in
+      -*) sed -i.bak "/^${line#-}=/d" "$meta" ;;
+      *) sed -i.bak "/^$key=/d" "$meta"; printf '%s\n' "$line" >> "$meta" ;;
+    esac
+  done
+  rm -f "$meta.bak"
+}
+
+write_task_route sbx1
+out=$(fm_on sbx1 fm-probe-two.sh)
+assert_contains "$out" "home=$TASK_HOME" "a sandbox task route did not reach the task home"
+assert_contains "$out" "root=$REMOTE_ROOT" "a sandbox task route did not reach its code root"
+assert_contains "$out" 'worker=1' "a sandbox task route ran outside the remote job worker"
+mv "$LOCAL_HOME/data/secondmates.md" "$TMP_ROOT/secondmates.md.saved"
+out=$(fm_on sbx1 fm-probe-two.sh)
+assert_contains "$out" "home=$TASK_HOME" "a sandbox task route required a secondmate registry"
+mv "$TMP_ROOT/secondmates.md.saved" "$LOCAL_HOME/data/secondmates.md"
+out=$(fm_on ios fm-probe-two.sh)
+assert_contains "$out" "home=$REMOTE_HOME" "a registry route changed once task routes existed"
+pass "a sandbox task route resolves from its record by task id, with or without a registry"
+
+set +e
+out=$(fm_on sbx1 fm-remote-doctor.sh --profile task 2>&1)
+set -e
+assert_contains "$out" 'entrypoint=yes' "the task-profile doctor did not run through the entrypoint over a task route"
+assert_contains "$out" 'check herdr=skip: the task profile' "the task readiness profile did not cross the task route"
+pass "the task readiness profile runs over a sandbox task route"
+
+ssh_before_task_refusals=$(cat "$SSH_COUNT")
+expect_task_route_refused() { # <id> <needle> <label>
+  local refused_out refused_rc
+  set +e
+  refused_out=$(fm_on "$1" fm-probe-two.sh 2>&1)
+  refused_rc=$?
+  set -e
+  [ "$refused_rc" -ne 0 ] || fail "$3 was routed"
+  assert_contains "$refused_out" "$2" "$3 was not refused with its reason"
+}
+write_task_route no-kind -remote_kind
+expect_task_route_refused no-kind 'must record remote_kind=task' "a sandbox record without remote_kind"
+write_task_route mate-route kind=secondmate
+expect_task_route_refused mate-route 'valid only for one kind=ship or kind=scout' "a sandbox-placed secondmate"
+write_task_route bad-alias remote_host=-oProxyCommand=evil
+expect_task_route_refused bad-alias 'configured SSH alias is unsafe' "a sandbox record with an option-shaped alias"
+write_task_route rel-root remote_root=remote-root
+expect_task_route_refused rel-root 'configured remote root is not absolute' "a sandbox record with a relative code root"
+write_task_route nested "remote_home=$REMOTE_ROOT/task-home"
+expect_task_route_refused nested 'remote home inside its code root' "a sandbox record whose home is inside its code root"
+write_task_route dots "remote_home=$TASK_HOME/../remote-home"
+expect_task_route_refused dots 'traversal components' "a sandbox record with a traversing home"
+write_task_route wrong-window window=fm-wrong-window
+expect_task_route_refused wrong-window 'must record window=remote:wrong-window' "a sandbox record naming a local window"
+# Placement is never inferred: without placement= the record is not consulted,
+# so only the registry could route the id, and it does not.
+write_task_route inferred -placement
+expect_task_route_refused inferred "no remote secondmate or SSH alias matches 'inferred'" "a remote_kind=task record without placement"
+write_task_route local-task placement=local -remote_kind -remote_host -remote_root -remote_home
+expect_task_route_refused local-task "no remote secondmate or SSH alias matches 'local-task'" "an explicitly local record"
+# A task id that also names a registry secondmate or alias is ambiguous.
+write_task_route ios
+expect_task_route_refused ios 'names a sandbox task and also selects 1 configured secondmate route' "a task id shared with a secondmate id"
+write_task_route remote-mac
+expect_task_route_refused remote-mac 'names a sandbox task and also selects 1 configured secondmate route' "a task id shared with a registry alias"
+[ "$(cat "$SSH_COUNT")" -eq "$ssh_before_task_refusals" ] || fail "a refused sandbox task route reached SSH"
+rm -f "$LOCAL_HOME/state"/*.meta
+pass "sandbox task routes refuse unsafe, contradictory, inferred, and ambiguous records before SSH"
+
+# A legacy remote-secondmate record in this home carries no placement, so the
+# registry keeps routing its id exactly as before.
+cat > "$LOCAL_HOME/state/ios.meta" <<EOF
+window=remote:ios
+endpoint_task_id=ios
+kind=secondmate
+home=$REMOTE_HOME
+remote_host=remote-mac
+remote_root=$REMOTE_ROOT
+EOF
+out=$(fm_on ios fm-probe-two.sh)
+assert_contains "$out" "home=$REMOTE_HOME" "a remote secondmate's own record changed its registry route"
+rm -f "$LOCAL_HOME/state/ios.meta"
+pass "registry routing is unchanged beside a remote secondmate's record"
+
 echo "ALL TESTS PASSED"

@@ -105,7 +105,9 @@
 # worse than a loud refusal.
 #
 # A remotely placed secondmate is refused by name: its agent runs on another
-# host, so no postcondition this plane verifies could be read for it here.
+# host, so no postcondition this plane verifies could be read for it here. A
+# sandbox task is refused by name for the same reason, and a record whose
+# placement bin/fm-remote-route-lib.sh rejects is refused with its defect.
 #
 # Fail-closed boundaries:
 #   - An unverified harness, or a harness whose control mechanics are unknown,
@@ -166,6 +168,8 @@ DATA="${FM_DATA_OVERRIDE:-$FM_HOME/data}"
 
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
 # shellcheck source=bin/fm-control-lib.sh
@@ -333,10 +337,18 @@ fi
 # nothing can be delivered to a wrong endpoint either way. What that refusal
 # cannot say is WHY, and "malformed metadata" is the wrong thing to tell an
 # operator about a correctly configured remote route. Name the placement
-# instead, using the same `remote_host` signal bin/fm-send.sh routes on.
-if [ -n "$(fm_meta_get "$META" remote_host)" ]; then
-  die "task $ID is a remotely placed secondmate on $(fm_meta_get "$META" remote_host); its agent runs outside this home, so no lifecycle action here could verify that it interrupted, stopped, or came back. Drive its lifecycle on that host, and reconcile it through the secondmate recovery path rather than this plane"
-fi
+# instead, from the same remote dispatch bin/fm-send.sh routes on
+# (bin/fm-remote-route-lib.sh). A sandbox task's agent likewise runs on its VM,
+# and this version has no host-side control for it, so it is refused by name
+# too; a record whose placement is malformed is refused with its defect.
+fm_remote_route_resolve "$META" "$ID" \
+  || die "task $ID was not touched: $FM_REMOTE_ROUTE_ERROR"
+case "$FM_REMOTE_ROUTE_KIND" in
+  secondmate)
+    die "task $ID is a remotely placed secondmate on $FM_REMOTE_ROUTE_HOST; its agent runs outside this home, so no lifecycle action here could verify that it interrupted, stopped, or came back. Drive its lifecycle on that host, and reconcile it through the secondmate recovery path rather than this plane"
+    ;;
+  task) die "$(fm_remote_route_unsupported "$ID" "lifecycle control")" ;;
+esac
 
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
 BACKEND=$FM_BACKEND_VALIDATED_BACKEND

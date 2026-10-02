@@ -27,14 +27,16 @@
 #   state: <working|parked|done|blocked|paused|failed|unknown> · source: <run-step|pane|status-log|remote-endpoint|none> · <detail>
 #
 # Logic, in order:
-#   1. Resolve worktree + backend target + kind from state/<id>.meta. A meta
-#      recording remote_host= is a remote secondmate: its worktree and endpoint
-#      live on that host, so the local worktree and pane reads are skipped and
-#      the remote host is asked for the endpoint's recovery-grade state
-#      (fm-on.sh + fm-remote-secondmate-control.sh state). alive falls through
-#      to the routed status log; dead/missing report the remote verdict; an
-#      unreachable or unreadable remote reports unknown-remote, never a false
-#      gone/dead.
+#   1. Resolve worktree + backend target + kind from state/<id>.meta, and its
+#      remote placement through bin/fm-remote-route-lib.sh. A remote secondmate's
+#      worktree and endpoint live on its host, so the local worktree and pane
+#      reads are skipped and the remote host is asked for the endpoint's
+#      recovery-grade state (fm-on.sh + fm-remote-secondmate-control.sh state).
+#      alive falls through to the routed status log; dead/missing report the
+#      remote verdict; an unreachable or unreadable remote reports
+#      unknown-remote, never a false gone/dead. A sandbox task record, or a
+#      record whose placement is malformed, reports unknown · none with the
+#      route library's reason and is never probed locally.
 #   2. Matching no-mistakes run for this crew's branch AND current code identity,
 #      active or terminal (from `axi status`, or the coarse `no-mistakes runs`
 #      fallback)? Branch name alone is not enough: a historical run on a reused
@@ -171,6 +173,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-tmux-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 # shellcheck source=bin/fm-classify-lib.sh
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
@@ -222,8 +226,24 @@ meta_value() {  # <key>
 WT=$(meta_value worktree)
 KIND=$(meta_value kind)
 HARNESS=$(meta_value harness)
-REMOTE_HOST=$(meta_value remote_host)
 [ -n "$KIND" ] || KIND=ship
+
+# bin/fm-remote-route-lib.sh owns remote dispatch. A sandbox task's worktree
+# and endpoint live on its VM and no current-state read for one exists yet, and
+# a record whose placement is malformed has no trustworthy location at all, so
+# both report unknown here, before any local probe could misread them as torn
+# down or dead.
+if ! fm_remote_route_resolve "$META" "$ID"; then
+  emit unknown none "$FM_REMOTE_ROUTE_ERROR"
+fi
+case "$FM_REMOTE_ROUTE_KIND" in
+  task) emit unknown none "$(fm_remote_route_unsupported "$ID" "reading its current state") (not proof of death)" ;;
+  secondmate)
+    REMOTE_HOST=$FM_REMOTE_ROUTE_HOST
+    REMOTE_CONTROL=$FM_REMOTE_ROUTE_CONTROL
+    ;;
+  *) REMOTE_HOST= ;;
+esac
 
 # A torn-down (or never-created) worktree has no current state to read. A
 # remote secondmate's recorded worktree is a path on ITS host, so the local
@@ -281,7 +301,7 @@ LOG_VERB=$(status_line_verb "$LOG_LINE")
 # the endpoint is actually gone.
 if [ -n "$REMOTE_HOST" ]; then
   if ! REMOTE_STATE=$(FM_HOME="$FM_HOME" "$SCRIPT_DIR/fm-on.sh" "$ID" \
-    fm-remote-secondmate-control.sh state "$ID" < /dev/null 2>/dev/null); then
+    "$REMOTE_CONTROL" state "$ID" < /dev/null 2>/dev/null); then
     REMOTE_STATE=
   fi
   REMOTE_STATE=$(printf '%s\n' "$REMOTE_STATE" | tail -1)
