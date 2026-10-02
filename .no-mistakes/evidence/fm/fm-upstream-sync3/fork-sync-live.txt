@@ -1,0 +1,182 @@
+$ git remote get-url --push origin
+https://github.com/dscott98/firstmate.git
+exit=0
+$ git ls-remote https://github.com/kunchenguid/firstmate.git refs/heads/main
+f50e9cdba5e1cd1bb108e38f101525b862e029e8	refs/heads/main
+exit=0
+$ git ls-remote https://github.com/dscott98/firstmate.git refs/heads/main
+3d20113a5480840d3183221c5661d706906f79d7	refs/heads/main
+exit=0
+$ git bundle create /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YPPRP6SXRCZGXTZV0BYXQK/.live-sync-l3i_xv5f/sync.bundle HEAD
+exit=0
+$ git init -q /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YPPRP6SXRCZGXTZV0BYXQK/.live-sync-l3i_xv5f/upstream-host
+exit=0
+$ git fetch -q /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YPPRP6SXRCZGXTZV0BYXQK/.live-sync-l3i_xv5f/sync.bundle HEAD
+exit=0
+$ git checkout -q --detach f50e9cdba5e1cd1bb108e38f101525b862e029e8
+exit=0
+$ git merge --ff-only 7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+Updating f50e9cd..7a77bac
+Fast-forward
+ .../references/common/control-and-recovery.md      |    2 +-
+ .../harness-adapters/references/harness/pi.md      |   11 +-
+ .agents/skills/process-event-sources/SKILL.md      |    2 +-
+ .agents/skills/project-management/SKILL.md         |    5 +-
+ .agents/skills/quiet/SKILL.md                      |    5 +-
+ .agents/skills/secondmate-provisioning/SKILL.md    |    2 +-
+ .agents/skills/ship-landing/SKILL.md               |    1 +
+ .pi/extensions/fm-primary-turnend-guard.ts         |   63 +-
+ AGENTS.md                                          |    5 +-
+ CONTRIBUTING.md                                    |   43 +-
+ README.md                                          |    6 +-
+ bin/backends/herdr.sh                              |   29 +-
+ bin/fm-afk-launch.sh                               |    2 +-
+ bin/fm-backend-hometag-lib.sh                      |    9 +
+ bin/fm-brief-heading-lib.sh                        |  151 +++
+ bin/fm-brief.sh                                    |  127 +-
+ bin/fm-composer-lib.sh                             |   12 +-
+ bin/fm-control.sh                                  |   23 +-
+ bin/fm-crew-state.sh                               |   41 +-
+ bin/fm-dod-lib.sh                                  |    3 +
+ bin/fm-herdr-machine-lib.sh                        |  133 ++
+ bin/fm-inbox.sh                                    |   53 +-
+ bin/fm-on.sh                                       |   89 +-
+ bin/fm-peek.sh                                     |   47 +-
+ bin/fm-pi-start-lib.sh                             |   79 ++
+ bin/fm-project-origin-lib.sh                       |   13 +-
+ bin/fm-remote-doctor.sh                            |  179 ++-
+ bin/fm-remote-entrypoint.sh                        |    2 +-
+ bin/fm-remote-home-provision.sh                    |    2 +-
+ bin/fm-remote-home-seed.sh                         |    4 +-
+ bin/fm-remote-readiness-lib.sh                     |   30 +-
+ bin/fm-remote-route-lib.sh                         |  254 ++++
+ bin/fm-remote-task-control.sh                      | 1050 +++++++++++++++
+ bin/fm-sandbox-credentials-lib.sh                  |  225 ++++
+ bin/fm-sandbox.sh                                  |  604 +++++++++
+ bin/fm-secondmate-liveness-lib.sh                  |   57 +-
+ bin/fm-send.sh                                     |   53 +-
+ bin/fm-spawn.sh                                    | 1386 ++++++++++++++++----
+ bin/fm-teardown.sh                                 |   52 +-
+ bin/fm-test-run.sh                                 |   14 +-
+ bin/fm-watch.sh                                    |   11 +-
+ docs/agent-control.md                              |    2 +
+ docs/captain-hold-lifecycle.md                     |    3 +-
+ docs/cmux-backend.md                               |    2 +
+ docs/configuration.md                              |  105 +-
+ docs/documentation-audiences.json                  |    4 +
+ docs/herdr-backend.md                              |    9 +-
+ docs/orca-backend.md                               |    2 +
+ docs/remote-sandboxes.md                           |  171 +++
+ docs/remote-secondmates.md                         |   32 +-
+ docs/scripts.md                                    |   16 +-
+ docs/supervision-protocols/pi.md                   |    1 +
+ docs/tmux-backend.md                               |    4 +-
+ docs/verification/runtime-backends.md              |  135 +-
+ tests/fixtures.sh                                  |   33 +-
+ tests/fixtures/pi-start.mjs                        |   15 +
+ ...-backend-herdr-server-ensure-detach-e2e.test.sh |  102 ++
+ tests/fm-backend-herdr.test.sh                     |   41 +-
+ tests/fm-brief.test.sh                             |   95 ++
+ tests/fm-calm-pi-extension.test.sh                 |   25 +-
+ tests/fm-contributions.test.sh                     |    3 +
+ tests/fm-control-relaunch.test.sh                  |   49 +-
+ tests/fm-gotmp.test.sh                             |    2 +
+ tests/fm-herdr-machine.test.sh                     |  223 ++++
+ tests/fm-inbox.test.sh                             |  145 ++
+ tests/fm-nm-test-contract.test.sh                  |   21 +-
+ tests/fm-on.test.sh                                |  105 +-
+ tests/fm-pi-provider-switch.test.sh                |  327 +++++
+ tests/fm-pi-start-live-e2e.test.sh                 |  225 ++++
+ tests/fm-pi-start.test.sh                          |  117 ++
+ tests/fm-pi-trust-live-e2e.test.sh                 |  314 +++++
+ tests/fm-project-origin.test.sh                    |    5 +-
+ tests/fm-remote-doctor.test.sh                     |  238 +++-
+ tests/fm-remote-route-lib.test.sh                  |  432 ++++++
+ tests/fm-remote-secondmate-lifecycle-e2e.test.sh   |  190 ++-
+ tests/fm-remote-secondmate-parent-binding.test.sh  |   10 +
+ tests/fm-remote-secondmate-trace-context.test.sh   |   12 +
+ tests/fm-remote-task-control.test.sh               |  907 +++++++++++++
+ tests/fm-remote-task-spawn.test.sh                 |  783 +++++++++++
+ tests/fm-sandbox.test.sh                           |  592 +++++++++
+ tests/fm-secondmate-harness.test.sh                |   39 +-
+ tests/fm-secondmate-liveness.test.sh               |   57 +-
+ tests/fm-secondmate-restart.test.sh                |   12 +-
+ tests/fm-session-start.test.sh                     |   35 +-
+ ...fm-spawn-compact-adviser-disable-remote.test.sh |   10 +
+ tests/fm-spawn-dispatch-profile.test.sh            |   65 +-
+ tests/fm-task-delivery.test.sh                     |   75 ++
+ tests/fm-worker-account.test.sh                    |    4 +-
+ tests/lib.sh                                       |   47 +
+ 89 files changed, 10075 insertions(+), 645 deletions(-)
+ create mode 100755 bin/fm-herdr-machine-lib.sh
+ create mode 100755 bin/fm-pi-start-lib.sh
+ create mode 100644 bin/fm-remote-route-lib.sh
+ create mode 100755 bin/fm-remote-task-control.sh
+ create mode 100644 bin/fm-sandbox-credentials-lib.sh
+ create mode 100755 bin/fm-sandbox.sh
+ create mode 100644 docs/remote-sandboxes.md
+ create mode 100644 tests/fixtures/pi-start.mjs
+ create mode 100755 tests/fm-backend-herdr-server-ensure-detach-e2e.test.sh
+ create mode 100644 tests/fm-herdr-machine.test.sh
+ create mode 100755 tests/fm-pi-provider-switch.test.sh
+ create mode 100755 tests/fm-pi-start-live-e2e.test.sh
+ create mode 100755 tests/fm-pi-start.test.sh
+ create mode 100755 tests/fm-pi-trust-live-e2e.test.sh
+ create mode 100755 tests/fm-remote-route-lib.test.sh
+ create mode 100755 tests/fm-remote-task-control.test.sh
+ create mode 100755 tests/fm-remote-task-spawn.test.sh
+ create mode 100755 tests/fm-sandbox.test.sh
+exit=0
+$ git rev-parse HEAD
+7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+exit=0
+$ git status --porcelain
+exit=0
+$ git merge-base --is-ancestor f50e9cdba5e1cd1bb108e38f101525b862e029e8 7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+exit=0
+$ git merge --ff-only f50e9cdba5e1cd1bb108e38f101525b862e029e8
+Already up to date.
+exit=0
+$ git init -q /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YPPRP6SXRCZGXTZV0BYXQK/.live-sync-l3i_xv5f/fork-main
+exit=0
+$ git fetch -q /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3YPPRP6SXRCZGXTZV0BYXQK/.live-sync-l3i_xv5f/sync.bundle HEAD
+exit=0
+$ git checkout -q --detach 3d20113a5480840d3183221c5661d706906f79d7
+exit=0
+$ git merge --ff-only 7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+Updating 3d20113..7a77bac
+Fast-forward
+ bin/backends/herdr.sh                   |   7 +-
+ bin/fm-claude-stop-autoarm.sh           |  16 ++
+ bin/fm-composer-lib.sh                  |  63 ++++++-
+ bin/fm-remote-delta-read.sh             | 131 +++++++++------
+ bin/fm-remote-job-lib.sh                |  59 +++++--
+ bin/fm-remote-job-worker.sh             |  48 ++++--
+ bin/fm-supervision-host.sh              |  73 +++++++--
+ bin/fm-wake-lib.sh                      |  59 +++++++
+ bin/fm-watch-arm.sh                     | 122 ++++++++++++--
+ docs/supervision-host.md                |   9 +-
+ docs/watcher-continuity.md              |   6 +-
+ tests/fm-backend-herdr.test.sh          |  40 ++++-
+ tests/fm-claude-stop-autoarm.test.sh    |  71 ++++++++
+ tests/fm-composer-lib.test.sh           |  54 ++++++
+ tests/fm-extension-binding.test.sh      |   2 +
+ tests/fm-remote-delta-read.test.sh      | 209 +++++++++++++++++++++++
+ tests/fm-remote-job-orphan-reap.test.sh |   3 +-
+ tests/fm-remote-job.test.sh             | 205 +++++++++++++++++++++++
+ tests/fm-supervision-host.test.sh       | 282 +++++++++++++++++++++++++++++++-
+ tests/fm-wake-queue.test.sh             |  52 ++++++
+ tests/fm-watch-arm.test.sh              | 156 ++++++++++++++++++
+ 21 files changed, 1553 insertions(+), 114 deletions(-)
+ create mode 100755 tests/fm-remote-delta-read.test.sh
+exit=0
+$ git rev-parse HEAD
+7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+exit=0
+$ git status --porcelain
+exit=0
+$ git merge-base --is-ancestor 3d20113a5480840d3183221c5661d706906f79d7 7a77bacb03375bd4d798ddc804a9b25ee22a8b46
+exit=0
+$ git merge --ff-only f50e9cdba5e1cd1bb108e38f101525b862e029e8
+Already up to date.
+exit=0

@@ -1,0 +1,26 @@
+Blocking read ignores partial line, returns completed append, preserves source:
+schema=fm-remote-delta.v1
+status=delta
+path=events.log
+from_offset=6
+to_offset=11
+from_prefix_sha256=b640e840b19d378660b32fb51ae18d67dccb4a8596a29e7bd72c1b2ae5928f41
+to_prefix_sha256=4a0ef4c924762a79b6167af7e745153b0cb0083930a111de215d42a67eed40bc
+payload_sha256=8a0956311647187d73d47ac672d55da73c8feae40cd9fd177414b72e75e0693f
+payload_bytes=5
+reason=
+
+next
+
+Same-size rewrite during polling rejects stale cursor:
+schema=fm-remote-delta.v1
+status=continuity-broken
+path=events.log
+from_offset=6
+to_offset=6
+from_prefix_sha256=b640e840b19d378660b32fb51ae18d67dccb4a8596a29e7bd72c1b2ae5928f41
+to_prefix_sha256=7e4fa2eb8c7ac089739d5defc4489fad68a100d92082ca35c6b40a4524821f87
+payload_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+payload_bytes=0
+reason=prefix-changed
+
