@@ -29,14 +29,15 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-remote-job-worker.sh` | Long-lived remote queue worker for tracked `fm-*.sh` commands in the account runtime |
 | `fm-remote-job-reap-orphans.sh` | Stop remote job workers left running by a pruned code root, never one whose checkout still exists |
 | `fm-remote-doctor.sh`    | Check, and with `--fix` repair, one remote account's second-mate readiness (remote job worker, Herdr, Aqua launch agents, PATH, and required tools), or with `--profile task` a sandbox task host's readiness without Herdr |
-| `fm-sandbox.sh`         | The provider-neutral sandbox adapter: the only Firstmate code that invokes the sandbox provider, argv only, validating its `key=value` output ([remote-sandboxes.md](remote-sandboxes.md)) |
+| `fm-sandbox.sh`         | The provider-neutral sandbox adapter: the only Firstmate code that invokes the sandbox provider, argv only, validating its `key=value` output, and the reader of `config/sandbox-provider` ([remote-sandboxes.md](remote-sandboxes.md)) |
+| `fm-sandbox-credentials-lib.sh` | Reader of `config/sandbox-credentials`: which credentials one sandbox task's provisioning manifest carries ([configuration.md](configuration.md#sandbox-credentials-configsandbox-credentials)) |
 | [`fm-backlog-handoff.sh`](../bin/fm-backlog-handoff.sh) | Move queued backlog items into a secondmate home; its header owns route-specific wake outcomes and retries |
 | `fm-backlog-receive.sh`  | Idempotently ingest one confined remote handoff outbox through tasks-axi             |
 | `fm-captain-hold.sh`     | Hold tasks for the captain, record the captain's answers, gate investigation completion, and report record divergence between the status log and the backlog |
 | `fm-decision-hold.sh`    | One-release compatibility shim mapping the retired decision commands onto fm-captain-hold.sh |
 | `fm-brief.sh`            | Scaffold ship (explicit `--mode`, plus the project's registered `--forge`), scout, secondmate-charter, and Herdr-lab briefs, with Captain's intent and Firstmate spec subsections on ship/scout; `--for-home`/`--for-root` render a ship or scout brief for a sandbox task's home |
 | [`fm-dod-lib.sh`](../bin/fm-dod-lib.sh) | Own ship/scout worker role scope, ship definitions of done, the named-head reachability gate on ship `done:` acceptance, and the no-mistakes `--intent` contract |
-| `fm-brief-heading-lib.sh` | Single owner of reading a brief's sections, shared by the `--intent` contract, spawn and promotion validation, and `fm-dispatch-resolve.sh`, and of the check that a brief names only its own home's status file |
+| `fm-brief-heading-lib.sh` | Single owner of reading a brief's sections, shared by the `--intent` contract, spawn and promotion validation, and `fm-dispatch-resolve.sh`, of the check that a brief names only its own home's status file, and of the sandbox placement readers |
 | `fm-herdr-lab.sh`        | Provision and guardedly operate an isolated, never-default Herdr lab session         |
 | `fm-herdr-lab-viewer.py` | The pty engine behind `fm-herdr-lab.sh viewer`: one real foreground Herdr client on a non-zero window grid |
 | `fm-lab-home.sh`         | Mint disposable lab homes and manage their isolated tmux socket directories       |
@@ -64,7 +65,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-remote-route-lib.sh` | Single owner of remote dispatch: whether a task record is local, a remote second mate, or a sandbox task, which control script serves it, and which route reaches it ([remote-sandboxes.md](remote-sandboxes.md#task-routes)) |
 | `fm-remote-task-control.sh` | Host-side control plane a sandbox task's one-task home runs: provision from a manifest, launch, observe, steer, control, and retire through the host's own spawn, control, crew-state, and teardown ([remote-sandboxes.md](remote-sandboxes.md#host-side-task-control)) |
 | [`fm-project-origin-lib.sh`](../bin/fm-project-origin-lib.sh) | Accepted origin-form owner shared by both remote provisioning boundaries |
-| `fm-spawn.sh`            | Spawn crewmates, scouts, `id=repo` batches, and secondmates on the resolved harness and runtime backend |
+| `fm-spawn.sh`            | Spawn crewmates, scouts, `id=repo` batches, and secondmates on the resolved harness and runtime backend, or a ship or scout in a sandbox with `--placement sandbox` ([remote-sandboxes.md](remote-sandboxes.md#placement)) |
 | `fm-git-strip-ai-trailers.sh` | Strip known AI commit trailers at commit-msg time and install that hook for a fleet launch |
 | `fm-backend.sh`          | Runtime-backend selection, meta helpers, selector resolution, and operation dispatch |
 | `fm-backend-hometag-lib.sh` | Shared per-installation home-tag derivation for zellij tab and cmux workspace titles |

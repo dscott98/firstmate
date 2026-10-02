@@ -14,8 +14,8 @@
 # charters still use a single `{TASK}` charter fill. Firstmate may adjust other
 # sections when the task genuinely deviates (e.g. working an existing external
 # PR instead of shipping a new one).
-# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--for-home <remote-home> --for-root <remote-root>]
-#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab] [--for-home <remote-home> --for-root <remote-root>]
+# Usage: fm-brief.sh <task-id> <repo-name> --mode <no-mistakes|direct-PR|local-only> [--branch-prefix <prefix>] [--forge <none|gerrit> [--shape squash]] [--herdr-lab] [--for-home <remote-home> --for-root <remote-root> [--sandbox-profile <name>]]
+#        fm-brief.sh <task-id> <repo-name> --scout [--herdr-lab] [--for-home <remote-home> --for-root <remote-root> [--sandbox-profile <name>]]
 #        fm-brief.sh <task-id> --secondmate {<project>...|--no-projects}
 #   --for-home and --for-root, given together, render a ship or scout brief for
 #   a sandbox task's one-task home on another host: every path the worker uses -
@@ -30,6 +30,12 @@
 #   with --secondmate and with --herdr-lab, whose lab helper assumes this
 #   host's Herdr. A remote scout is told to deliver a text report, because the
 #   supervising home cannot reach a board served from the sandbox.
+#   --sandbox-profile <name>, valid only with that pair, records the sandbox
+#   network profile this task is authorized to run on as one fixed
+#   "Sandbox profile: <name>" line in Setup. bin/fm-spawn.sh --placement sandbox
+#   refuses any profile but the provider's configured default unless the brief
+#   records it, and refuses a brief whose recorded profile disagrees with the
+#   spawn's, so a non-default profile such as open needs this task's own brief.
 #   bin/fm-spawn.sh refuses to launch a brief naming another home's status file,
 #   so a brief rendered for a sandbox launches only in that sandbox's home.
 #   --scout writes the scout contract instead: the deliverable is a report at
@@ -210,6 +216,8 @@ FOR_HOME=
 FOR_HOME_SET=0
 FOR_ROOT=
 FOR_ROOT_SET=0
+SANDBOX_PROFILE=
+SANDBOX_PROFILE_SET=0
 POS=()
 want_value=
 for a in "$@"; do
@@ -224,6 +232,7 @@ for a in "$@"; do
       shape) SHAPE=$a; SHAPE_SET=1 ;;
       for-home) FOR_HOME=$a; FOR_HOME_SET=1 ;;
       for-root) FOR_ROOT=$a; FOR_ROOT_SET=1 ;;
+      sandbox-profile) SANDBOX_PROFILE=$a; SANDBOX_PROFILE_SET=1 ;;
       *) echo "error: internal parser state for --$want_value" >&2; exit 1 ;;
     esac
     want_value=
@@ -246,6 +255,8 @@ for a in "$@"; do
     --for-home=*) FOR_HOME=${a#--for-home=}; FOR_HOME_SET=1 ;;
     --for-root) want_value=for-root ;;
     --for-root=*) FOR_ROOT=${a#--for-root=}; FOR_ROOT_SET=1 ;;
+    --sandbox-profile) want_value=sandbox-profile ;;
+    --sandbox-profile=*) SANDBOX_PROFILE=${a#--sandbox-profile=}; SANDBOX_PROFILE_SET=1 ;;
     # yolo never reaches the worker: it is firstmate's merge authority, not a
     # brief input. Refuse it loudly so it is never silently dropped here and then
     # believed to have been recorded.
@@ -360,6 +371,23 @@ if [ "$FOR_HOME_SET" -eq 1 ] || [ "$FOR_ROOT_SET" -eq 1 ]; then
   RENDER_ROOT=${FOR_ROOT%/}
   REMOTE_RENDER=1
   RENDER_NOTE=", for sandbox home ${FOR_HOME%/}"
+fi
+SANDBOX_PROFILE_BLOCK=
+if [ "$SANDBOX_PROFILE_SET" -eq 1 ]; then
+  if [ "$REMOTE_RENDER" -ne 1 ]; then
+    echo "error: --sandbox-profile records a sandbox task's network profile and applies only with --for-home and --for-root" >&2
+    exit 1
+  fi
+  case "$SANDBOX_PROFILE" in
+    ''|-*|*=*|*[[:space:]]*|*[![:print:]]*)
+      echo "error: --sandbox-profile must be a printable token without whitespace, '=', or a leading '-' (got '$SANDBOX_PROFILE')" >&2
+      exit 1
+      ;;
+  esac
+  SANDBOX_PROFILE_BLOCK="
+$FM_BRIEF_SANDBOX_PROFILE_PREFIX$SANDBOX_PROFILE
+This task's sandbox runs the provider's \`$SANDBOX_PROFILE\` network profile, authorized for this task only."
+  RENDER_NOTE="$RENDER_NOTE, profile $SANDBOX_PROFILE"
 fi
 
 # The optional home-local include is read before anything is written, so an
@@ -558,7 +586,7 @@ if [ "$HERDR_LAB" -eq 1 ]; then
 HERDR_LAB_HELPER=$(shell_quote "$FM_ROOT/bin/fm-herdr-lab.sh")
 # shellcheck disable=SC2016  # single quotes are deliberate: these lines are literal brief text whose backtick-wrapped $(...) and "$HERDR_LAB_SESSION" snippets must reach the reading agent verbatim, not expand at scaffold time; only the '"$VAR"' break-outs interpolate.
 HERDR_SECTION=$(printf '%s\n' \
-'# Herdr isolation - HARD SAFETY CONTRACT' \
+"$FM_BRIEF_HERDR_LAB_HEADING" \
 'This brief was explicitly scaffolded with `--herdr-lab` because the task will drive Herdr lifecycle behavior.' \
 'On Herdr 0.7.3 the API socket is not relocatable by `HERDR_CONFIG_PATH`, `XDG_CONFIG_HOME`, or `HOME`.' \
 'A named non-`default` session plus an explicit `--session <name>` Herdr option on every call is the only viable local isolation.' \
@@ -646,7 +674,7 @@ $TASK_SECTION
 $HERDR_SECTION
 
 # Setup
-You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
+You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.$SANDBOX_PROFILE_BLOCK
 This is a SCOUT task: the deliverable is a written report, not a PR.
 The worktree is your laboratory - install, run, edit, and make scratch commits freely; all of it is discarded at teardown.
 The report is the only thing that survives, so anything worth keeping must be in it.
@@ -717,7 +745,7 @@ $TASK_SECTION
 $HERDR_SECTION
 
 # Setup
-You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.
+You are in a disposable git worktree of $REPO, at a detached HEAD on a clean default branch.$SANDBOX_PROFILE_BLOCK
 
 **Verify isolation before anything else.** Run \`pwd -P\` and \`git rev-parse --show-toplevel\`; both must resolve to the disposable task worktree you were launched in, such as a treehouse pool path or an Orca-managed worktree, not the primary checkout firstmate operates from.
 The path check is authoritative: \`git rev-parse --git-dir\` and \`git rev-parse --git-common-dir\` can help inspect the repo, but they do not prove you are outside the primary checkout.

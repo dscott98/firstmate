@@ -38,8 +38,9 @@
 #   remote_home=. Its route must pass fm_remote_route_check_shape, and its code
 #   root and home must pass fm_remote_route_check_disjoint. A registry route is
 #   held to that same disjointness when bin/fm-secondmate-registry-lib.sh
-#   validates data/secondmates.md; a task record has no write-time validator in
-#   this home, so the read-time check here carries it. The record's other sandbox
+#   validates data/secondmates.md; bin/fm-spawn.sh --placement sandbox applies
+#   both checks before it writes a task record, and the read-time check here
+#   still carries every record a reader meets. The record's other sandbox
 #   fields (remote_backend, remote_target, worktree - a path on the VM that is
 #   never probed locally - sandbox_provider, sandbox_name, and sandbox_profile)
 #   are not routing inputs and stay with the consumers that need them.

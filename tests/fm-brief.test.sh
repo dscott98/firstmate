@@ -1431,6 +1431,31 @@ test_for_home_renders_every_worker_path_for_the_sandbox() {
   pass "fm-brief.sh: --for-home/--for-root render every worker path for the sandbox home and write the brief here"
 }
 
+# --sandbox-profile records the network profile one sandbox task is authorized
+# to run on as a fixed line, which bin/fm-spawn.sh --placement sandbox reads;
+# a sandbox brief without the flag records none.
+test_sandbox_profile_is_recorded_in_a_sandbox_brief() {
+  local home id brief out
+  home="$TMP_ROOT/sandbox-profile"
+  mkdir -p "$home/data"
+  id="brief-profile-ship"
+  out=$(FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --mode direct-PR \
+    --for-home /home/agent/fm-home --for-root /opt/firstmate --sandbox-profile open) || fail "a profiled sandbox ship brief should scaffold"
+  brief="$home/data/$id/brief.md"
+  assert_contains "$out" "for sandbox home /home/agent/fm-home, profile open" "the scaffold line did not name the profile"
+  [ "$(grep -c '^Sandbox profile: ' "$brief")" = 1 ] || fail "a profiled ship brief must record exactly one profile line"
+  grep -qx 'Sandbox profile: open' "$brief" || fail "the ship brief does not record the profile"
+  id="brief-profile-scout"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --scout \
+    --for-home /home/agent/fm-home --for-root /opt/firstmate --sandbox-profile=open >/dev/null || fail "a profiled sandbox scout brief should scaffold"
+  grep -qx 'Sandbox profile: open' "$home/data/$id/brief.md" || fail "the scout brief does not record the profile"
+  id="brief-profile-none"
+  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --mode direct-PR \
+    --for-home /home/agent/fm-home --for-root /opt/firstmate >/dev/null || fail "a sandbox brief should scaffold"
+  assert_no_grep "Sandbox profile:" "$home/data/$id/brief.md" "a sandbox brief without --sandbox-profile recorded one"
+  pass "fm-brief.sh: --sandbox-profile records one sandbox task's authorized profile and nothing records one by default"
+}
+
 test_for_home_flags_are_validated() {
   local home label args expect out status n=0
   home="$TMP_ROOT/for-home-refusals"
@@ -1455,6 +1480,9 @@ a home inside the root~alpha --mode direct-PR --for-home /opt/fm/home --for-root
 the same directory~alpha --mode direct-PR --for-home /opt/fm --for-root /opt/fm/~overlapping remote root and home
 a root inside the home~alpha --scout --for-home /h --for-root /h/root~remote code root inside its home
 a missing value~alpha --mode direct-PR --for-root /r --for-home~requires a value
+a profile without a sandbox home~alpha --scout --sandbox-profile open~applies only with --for-home and --for-root
+a profile with '='~alpha --mode direct-PR --for-home /h --for-root /r --sandbox-profile a=b~must be a printable token
+a profile with a leading dash~alpha --scout --for-home /h --for-root /r --sandbox-profile -open~must be a printable token
 ROWS
   pass "fm-brief.sh: --for-home and --for-root are refused unless they name a sandbox route a task could carry"
 }
@@ -1496,4 +1524,5 @@ test_branch_prefix_value_is_validated
 test_branch_prefix_command_is_shell_safe
 test_crewmate_scaffolds_forbid_pool_administration
 test_for_home_renders_every_worker_path_for_the_sandbox
+test_sandbox_profile_is_recorded_in_a_sandbox_brief
 test_for_home_flags_are_validated
