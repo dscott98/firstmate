@@ -67,8 +67,7 @@ if [ -s "$FM_REPLY_FETCH_MODE" ]; then
   if [ "$command" = fm-remote-file.sh ]; then
     case "$(cat "$FM_REPLY_FETCH_MODE")" in
       oversized) head -c 1048577 /dev/zero; exit 0 ;;
-      endless) exec python3 -c 'import os
-while True: os.write(1, b"x" * 65536)' ;;
+      endless) exec yes x ;;
       stderr) head -c 65537 /dev/zero >&2; exit 0 ;;
       stalled) printf partial; exec sleep 60 ;;
       partial) printf partial; exit 1 ;;
@@ -82,7 +81,7 @@ chmod +x "$FAKEBIN/fake-ssh"
 remote_env() {
   FM_HOME="$PARENT" \
   FM_REPLY_FETCH_MODE="$TMP_ROOT/fetch-mode" \
-  FM_REMOTE_REPLY_FETCH_SECONDS="${FM_REMOTE_REPLY_FETCH_SECONDS:-30}" \
+  FM_REMOTE_REPLY_FETCH_SECONDS="${FM_REMOTE_REPLY_FETCH_SECONDS:-}" \
   FM_ROOT_OVERRIDE="$ROOT" \
   FM_PROCEVENT_CLAIM_ROOT="$CLAIMS" \
   FM_SSH_BIN="$FAKEBIN/fake-ssh" \
@@ -1096,6 +1095,28 @@ stop_source_listener() { # <source-id>
   done
   return 1
 }
+# capture_once <source-id> <label> [VAR=value...]: run one listener for a
+# capture its adapter must leave unapplied or end, and fail rather than hang
+# when the listener instead applies it and keeps listening.
+capture_once() {
+  local sid=$1 label=$2 runner assignment _
+  shift 2
+  (
+    for assignment in "$@"; do export "${assignment?}"; done
+    remote_env "$ROOT/bin/fm-procevent.sh" start "$sid"
+  ) >/dev/null 2>&1 &
+  runner=$!
+  for _ in $(seq 1 600); do
+    if ! kill -0 "$runner" 2>/dev/null; then
+      wait "$runner" 2>/dev/null || true
+      return 0
+    fi
+    sleep 0.1
+  done
+  kill -TERM "$runner" 2>/dev/null || true
+  stop_source_listener "$sid" || true
+  fail "$label: the listener applied the capture and kept listening"
+}
 SHIP_GEN=0
 mirror_ship_lines() { # <line>...
   SHIP_GEN=$((SHIP_GEN + 1))
@@ -1250,6 +1271,56 @@ done
 rm -f "$TMP_ROOT/fetch-mode"
 pass "primary bounds hostile stdout, stderr, endless and timed-out report transfers"
 
+# A failure of the local receiver itself is a local storage failure, never a
+# refusal: here a file-size limit, with its signal ignored so writing fails as
+# a full disk does, stops the report write. The delta stays uncommitted for
+# retry, no note is written, and the report already delivered is untouched.
+stop_source_listener remote-reply-sbxscout || fail "the sandbox scout listener did not stop before the local failure"
+LOCALFAIL_BIN="$TMP_ROOT/localfail-bin"
+mkdir -p "$LOCALFAIL_BIN"
+REAL_PERL=$(command -v perl)
+{
+  cat <<'SH'
+#!/usr/bin/env bash
+for argument in "$@"; do
+  if [ "$argument" = fm-remote-file.sh ]; then
+    trap '' XFSZ
+    ulimit -c 0
+    ulimit -f 1
+    break
+  fi
+done
+SH
+  printf 'exec %q "$@"\n' "$REAL_PERL"
+} > "$LOCALFAIL_BIN/perl"
+chmod +x "$LOCALFAIL_BIN/perl"
+head -c 8192 /dev/zero | tr '\0' 'L' > "$TASK_REMOTE/data/sbxscout/report.md"
+printf '# report delivered earlier\n' > "$PARENT/data/sbxscout/report.md"
+localfail_cursor_before=$(cat "$PARENT/state/remote-replies/sbxscout.cursor")
+localfail_notes_before=$(grep -c 'did not transfer' "$PARENT/state/sbxscout.status" || true)
+printf 'done [at=1700001050]: report rewritten\n' >> "$TASK_REMOTE/state/sbxscout.status"
+SCOUT_GEN=$((SCOUT_GEN + 1))
+capture_once remote-reply-sbxscout "a local receiver failure" "PATH=$LOCALFAIL_BIN:$PATH"
+SCOUT_LOCALFAIL="$PARENT/state/procevent-inbox/remote-reply-sbxscout.$SCOUT_GEN.result"
+assert_present "$SCOUT_LOCALFAIL" "the terminal line behind the local failure was not captured"
+assert_absent "${SCOUT_LOCALFAIL%.result}.handled" "a capture whose local receiver failed was acknowledged"
+assert_no_grep 'report rewritten' "$PARENT/state/sbxscout.status" "a local receiver failure mirrored the line as though refused"
+assert_equals "$localfail_notes_before" "$(grep -c 'did not transfer' "$PARENT/state/sbxscout.status" || true)" \
+  "a local receiver failure wrote a refusal note"
+assert_equals '# report delivered earlier' "$(cat "$PARENT/data/sbxscout/report.md")" \
+  "a local receiver failure removed or replaced the delivered report"
+[ "$(cat "$PARENT/state/remote-replies/sbxscout.cursor")" = "$localfail_cursor_before" ] \
+  || fail "a local receiver failure advanced the scout's cursor"
+if compgen -G "$PARENT/data/sbxscout/.remote-doc.*" >/dev/null; then
+  fail "a local receiver failure left a partial staging file"
+fi
+remote_env "$ADAPTER" handle sbxscout "$SCOUT_GEN" "$SCOUT_LOCALFAIL" >/dev/null \
+  || fail "the scout's capture did not apply once the local receiver recovered"
+cmp -s "$TASK_REMOTE/data/sbxscout/report.md" "$PARENT/data/sbxscout/report.md" \
+  || fail "the recovered fetch did not deliver the rewritten report"
+assert_grep 'report rewritten' "$PARENT/state/sbxscout.status" "the recovered terminal line did not mirror"
+pass "a failing local receiver keeps the scout's delta uncommitted and its delivered report untouched"
+
 # Transport loss while fetching leaves the whole delta uncommitted for retry,
 # so the terminal line never lands ahead of its report.
 stop_source_listener remote-reply-sbxscout || fail "the sandbox scout's listener did not stop"
@@ -1257,7 +1328,7 @@ printf '# final findings\n' > "$TASK_REMOTE/data/sbxscout/report.md"
 scout_cursor_before=$(cat "$PARENT/state/remote-replies/sbxscout.cursor")
 printf 'done [at=1700001100]: final report ready\n' >> "$TASK_REMOTE/state/sbxscout.status"
 SCOUT_GEN=$((SCOUT_GEN + 1))
-FM_REMOTE_REPLY_FAIL_FILE=1 remote_env "$ROOT/bin/fm-procevent.sh" start remote-reply-sbxscout >/dev/null 2>&1 || true
+capture_once remote-reply-sbxscout "a lost report fetch" FM_REMOTE_REPLY_FAIL_FILE=1
 SCOUT_LOST="$PARENT/state/procevent-inbox/remote-reply-sbxscout.$SCOUT_GEN.result"
 assert_present "$SCOUT_LOST" "the scout's terminal line was not captured"
 assert_absent "${SCOUT_LOST%.result}.handled" "a capture whose report fetch lost its transport was acknowledged"
@@ -1276,7 +1347,7 @@ pass "a lost report fetch keeps the scout's terminal line uncommitted until the 
 stop_source_listener remote-reply-sbxship || fail "the sandbox ship's listener did not stop before the break"
 printf 'working: replaced log\n' > "$TASK_REMOTE/state/sbxship.status"
 SHIP_GEN=$((SHIP_GEN + 1))
-remote_env "$ROOT/bin/fm-procevent.sh" start remote-reply-sbxship >/dev/null 2>&1 || true
+capture_once remote-reply-sbxship "a broken sandbox mirror"
 sed -E 's/ \[at=[0-9]+\]//' "$PARENT/state/sbxship.status" \
   | grep -qF 'blocked [key=remote-reply-continuity-sbxship]: status mirror continuity broke for sandbox task sbxship (truncated)' \
   || fail "a sandbox task's continuity break was not escalated as its mirror's"

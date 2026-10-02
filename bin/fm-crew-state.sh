@@ -955,7 +955,9 @@ nm_run_head_matches_worktree() {
 #   - A host run-step reading is authoritative. A refused-daemon-socket
 #     blocker at the log's tip still reads blocked, an open decision the run
 #     moved past is flagged superseded, and an unknown run reading cannot
-#     close an open decision, so the log answers then.
+#     close an open decision, so the log answers then. A working run meets a
+#     CI-ready ship done as the local run-step path does: the done gate below
+#     decides, unless the host reports the run fixing or its CI not ready.
 #   - With no run on the host, busy reads working and idle falls back to the
 #     local declaration. A ship's done passes bin/fm-dod-lib.sh's gate only
 #     through a PR recorded in this home, because its worktree is not here.
@@ -964,7 +966,7 @@ nm_run_head_matches_worktree() {
 #     fails validation is unknown-remote, never death.
 sandbox_emit_status_done() {
   if fm_dod_accept_ship_done "$KIND" "$(meta_value mode)" "" "$(meta_value project)" "$LOG_LINE" "$STATE" "$ID" "$META" >/dev/null; then
-    emit done status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
+    emit "done" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
   fi
   emit blocked status-log "named head cannot be verified from this home: no PR recorded here carries it, and task $ID's worktree is on $SANDBOX_NOTE"
 }
@@ -1399,7 +1401,12 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
-  if [ -n "${FM_CREW_STATE_STATUS_OVERRIDE:-}" ] && [ "$RUN_STATE" = working ] \
+  # A sandbox host's read for its primary (bin/fm-remote-task-control.sh
+  # crew-state sets FM_CREW_STATE_FOR_PRIMARY=1) carries the CI-relapse
+  # evidence its log-free reading cannot otherwise show, as its own component,
+  # so the primary's CI-ready reconciliation keeps this path's safeguard. Every
+  # other read, local and fleet snapshot alike, is unchanged.
+  if [ "${FM_CREW_STATE_FOR_PRIMARY:-0}" = 1 ] && [ "$RUN_STATE" = working ] \
     && { [ "$RUN_STATUS" = fixing ] || [ "$CI_LOG_STATE" = not-ready ]; }; then
     RUN_DETAIL="$RUN_DETAIL${SEP}CI not ready"
   fi

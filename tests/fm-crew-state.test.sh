@@ -1348,8 +1348,10 @@ EOF
   assert_contains "$out" "source: run-step" "relapsed ci run remains run-step sourced"
   assert_not_contains "$out" "state: done" "relapsed ci run with stale done log must not read as done"
   : > "$d/empty.status"
+  out=$(FM_CREW_STATE_STATUS_OVERRIDE="$d/empty.status" FM_CREW_STATE_FOR_PRIMARY=1 run_crew_state "$d" feat-cireadyrelapse)
+  assert_contains "$out" 'CI not ready' 'a sandbox host read carries CI relapse without its status log'
   out=$(FM_CREW_STATE_STATUS_OVERRIDE="$d/empty.status" run_crew_state "$d" feat-cireadyrelapse)
-  assert_contains "$out" 'CI not ready' 'host components carry CI relapse without their status log'
+  assert_not_contains "$out" 'CI not ready' 'a fleet-snapshot style read must stay unchanged'
   pass "stale checks-green status log does not mask CI relapse"
 }
 

@@ -112,8 +112,10 @@
 # crew-state prints crew_state, this host's fm-crew-state.sh line computed with
 # the status log left out - its run-step attribution or its pane fallback -
 # because the primary's mirrored status log is the authoritative fold, plus
-# busy and busy_source. head prints branch (empty when detached), head, and
-# dirty (yes for any uncommitted or untracked change).
+# busy and busy_source. The read runs with FM_CREW_STATE_FOR_PRIMARY=1, so a
+# working run that is fixing or whose CI is not ready says so as its own
+# component for the primary's reconciliation. head prints branch (empty when
+# detached), head, and dirty (yes for any uncommitted or untracked change).
 #
 # control runs this host's fm-control.sh. interrupt and exit relay its output
 # and status. relaunch keeps the recorded harness, model, or effort given as -,
@@ -880,7 +882,7 @@ cmd_crew_state() {
   local id=$1 empty line verdict='unknown no-record' tail40=''
   empty=$(mktemp "${TMPDIR:-/tmp}/fm-task-crew-state.XXXXXX") || die "cannot stage the empty status log"
 
-  line=$(FM_CREW_STATE_STATUS_OVERRIDE="$empty" run_host fm-crew-state.sh "$id" 2>/dev/null) || line=
+  line=$(FM_CREW_STATE_STATUS_OVERRIDE="$empty" FM_CREW_STATE_FOR_PRIMARY=1 run_host fm-crew-state.sh "$id" 2>/dev/null) || line=
   rm -f -- "$empty"
   line=$(printf '%s\n' "$line" | tail -1)
   [ -n "$line" ] || line='state: unknown · source: none · crew state unreadable on the sandbox host'

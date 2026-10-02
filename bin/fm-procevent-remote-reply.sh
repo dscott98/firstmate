@@ -94,9 +94,12 @@
 # the fixed path data/<id>/report.md, at most 1 MiB, through the same
 # path-confined reader into this home's data/<id>/report.md, so the scout's
 # terminal line reaches the status log, and its wake, only after the report it
-# announces is local. A refused fetch fails open exactly as a refused offered
-# document does: the lines still mirror and one unkeyed note says why. An SSH
-# exit 255 or a local storage failure leaves the delta uncommitted for retry.
+# announces is local. A refused fetch, including one that broke the transfer
+# bounds fetch_remote_file enforces, fails open exactly as a refused offered
+# document does: the lines still mirror and one unkeyed note says why. It also
+# removes any earlier local copy, so an older report is never read as the one
+# the line announces. An SSH exit 255 or a local storage failure leaves the
+# delta uncommitted for retry and the local report untouched.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -446,12 +449,105 @@ summarize_fetch_reason() { # <stderr-file> <remote-relative>
 
 # Fetch one remote file through the path-confined reader into <destination>,
 # whose directory must resolve inside <base>. Returns 0 on success, 1 when the
-# remote reader refused the path or size, DOCUMENT_LOCAL_FAILURE when local
-# storage failed, and SSH_UNAVAILABLE when transport completion is unknown. A
-# refusal leaves the reader's own explanation in FETCH_DOC_REASON.
+# remote reader refused the path or size or the transfer broke its bounds,
+# DOCUMENT_LOCAL_FAILURE when local storage or the local receiver failed, and
+# SSH_UNAVAILABLE when transport completion is unknown. A refusal leaves its
+# reason in FETCH_DOC_REASON.
+#
+# The host's reader bounds its own output, but nothing a host sends is trusted,
+# so the receiver below enforces the bounds again here: it stops reading and
+# refuses once stdout passes <max-bytes> or stderr passes MAX_FETCH_ERR_BYTES,
+# and it refuses a transfer still unfinished after FM_REMOTE_REPLY_FETCH_SECONDS
+# (default 120), killing the transport either way. Only a complete, in-bounds
+# transfer the reader exited 0 on is installed, so an oversized, cut-off, or
+# stalled one never becomes the document. The receiver reports its outcome
+# through a status file rather than its exit code, so no remote exit status can
+# pose as a local failure; any failure of the receiver itself, such as a local
+# write error or a missing interpreter, is DOCUMENT_LOCAL_FAILURE, which keeps
+# the delta uncommitted for retry. It is perl, which the process-event runner
+# already requires.
 FETCH_DOC_REASON=''
+MAX_FETCH_ERR_BYTES=65536
+# shellcheck disable=SC2016  # Perl source; perl expands its own variables.
+FETCH_RECEIVER='
+use strict;
+use warnings;
+use IO::Select;
+use POSIX ();
+use Time::HiRes qw(time);
+my ($limit, $error_limit, $seconds, $status_file, @command) = @ARGV;
+sub finish {
+  open(my $status, ">", $status_file) or exit 3;
+  print {$status} "$_[0]\n" or exit 3;
+  close($status) or exit 3;
+  exit 0;
+}
+pipe(my $out_r, my $out_w) or exit 3;
+pipe(my $err_r, my $err_w) or exit 3;
+my $pid = fork;
+defined $pid or exit 3;
+if (!$pid) {
+  setpgrp(0, 0);
+  close($out_r);
+  close($err_r);
+  open(STDIN, "<", "/dev/null") or POSIX::_exit(127);
+  open(STDOUT, ">&", $out_w) or POSIX::_exit(127);
+  open(STDERR, ">&", $err_w) or POSIX::_exit(127);
+  exec { $command[0] } @command or POSIX::_exit(127);
+}
+setpgrp($pid, $pid);
+close($out_w);
+close($err_w);
+binmode(STDOUT);
+binmode(STDERR);
+my $select = IO::Select->new($out_r, $err_r);
+my %left = (fileno($out_r) => $limit, fileno($err_r) => $error_limit);
+my $errors = "";
+my $deadline = time + $seconds;
+my $outcome;
+while (!defined $outcome && $select->count) {
+  my $wait = $deadline - time;
+  if ($wait <= 0) { $outcome = "timeout"; last; }
+  for my $handle ($select->can_read($wait)) {
+    my $fd = fileno($handle);
+    my $want = $left{$fd} + 1;
+    $want = 65536 if $want > 65536;
+    my $read = sysread($handle, my $chunk, $want);
+    if (!defined $read) {
+      next if $!{EINTR} || $!{EAGAIN};
+      exit 3;
+    }
+    if ($read == 0) { $select->remove($handle); next; }
+    $left{$fd} -= $read;
+    if ($left{$fd} < 0) {
+      $outcome = $fd == fileno($out_r) ? "over:stdout" : "over:stderr";
+      last;
+    }
+    if ($fd == fileno($out_r)) { print STDOUT $chunk or exit 3; }
+    else { $errors .= $chunk; }
+  }
+}
+sub stop {
+  kill("KILL", -$pid);
+  waitpid($pid, 0);
+  finish($_[0]);
+}
+stop($outcome) if defined $outcome;
+my $status;
+while (1) {
+  my $done = waitpid($pid, POSIX::WNOHANG());
+  if ($done == $pid) { $status = $?; last; }
+  exit 3 if $done < 0;
+  stop("timeout") if time >= $deadline;
+  select(undef, undef, undef, 0.05);
+}
+close(STDOUT) or exit 3;
+print STDERR $errors or exit 3;
+close(STDERR) or exit 3;
+finish("exit:" . (($status & 127) ? 128 + ($status & 127) : $status >> 8));
+'
 fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
-  local id=$1 rel=$2 base=$3 destination=$4 max=$5 parent parent_real tmp err rc=0
+  local id=$1 rel=$2 base=$3 destination=$4 max=$5 parent parent_real tmp err status_file outcome seconds
   FETCH_DOC_REASON=''
   parent=$(dirname "$destination")
   mkdir -p "$parent" || return "$DOCUMENT_LOCAL_FAILURE"
@@ -459,70 +555,42 @@ fetch_remote_file() { # <id> <remote-relative> <base> <destination> <max-bytes>
   parent_real=$(CDPATH='' cd -- "$parent" 2>/dev/null && pwd -P) || return "$DOCUMENT_LOCAL_FAILURE"
   case "$parent_real" in "$base"|"$base"/*) ;; *) return "$DOCUMENT_LOCAL_FAILURE" ;; esac
   [ ! -L "$destination" ] || return "$DOCUMENT_LOCAL_FAILURE"
+  seconds=${FM_REMOTE_REPLY_FETCH_SECONDS:-120}
+  case "$seconds" in ''|*[!0-9]*|0) seconds=120 ;; esac
   err=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-doc-reason.XXXXXX") || return "$DOCUMENT_LOCAL_FAILURE"
-  tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
-  python3 - "$max" "${FM_REMOTE_REPLY_FETCH_SECONDS:-30}" \
-    "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" > "$tmp" 2> "$err" <<'PYFETCH' || rc=$?
-import os
-import selectors
-import signal
-import subprocess
-import sys
-import time
-
-limit = int(sys.argv[1])
-seconds = int(sys.argv[2])
-if limit <= 0 or seconds <= 0:
-    sys.exit("invalid remote document transfer bound")
-deadline = time.monotonic() + seconds
-proc = subprocess.Popen(sys.argv[3:], stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                        start_new_session=True)
-selector = selectors.DefaultSelector()
-selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
-selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
-remaining = {"stdout": limit, "stderr": 65536}
-errors = bytearray()
-try:
-    while selector.get_map():
-        wait = deadline - time.monotonic()
-        if wait <= 0:
-            raise TimeoutError
-        for key, _ in selector.select(wait):
-            stream = key.data
-            chunk = os.read(key.fd, min(65536, remaining[stream] + 1))
-            if not chunk:
-                selector.unregister(key.fileobj)
-                continue
-            remaining[stream] -= len(chunk)
-            if remaining[stream] < 0:
-                raise ValueError(f"remote document {stream} exceeds max-bytes")
-            if stream == "stdout":
-                sys.stdout.buffer.write(chunk)
-            else:
-                errors.extend(chunk)
-    status = proc.wait(timeout=max(0, deadline - time.monotonic()))
-    sys.stdout.buffer.flush()
-    sys.stderr.buffer.write(errors)
-    sys.exit(status if status >= 0 else 128 - status)
-except (TimeoutError, subprocess.TimeoutExpired):
-    sys.exit("remote document transfer timed out")
-except ValueError as error:
-    sys.exit(str(error))
-finally:
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    proc.wait()
-    selector.close()
-PYFETCH
-  if [ "$rc" -ne 0 ]; then
-    FETCH_DOC_REASON=$(summarize_fetch_reason "$err" "$rel")
-    rm -f -- "$tmp" "$err"
-    [ "$rc" -ne "$SSH_UNAVAILABLE" ] || return "$SSH_UNAVAILABLE"
-    return 1
+  status_file=$(umask 077; mktemp "${TMPDIR:-/tmp}/fm-remote-doc-status.XXXXXX") \
+    || { rm -f -- "$err"; return "$DOCUMENT_LOCAL_FAILURE"; }
+  tmp=$(umask 077; mktemp "$parent/.remote-doc.XXXXXX") \
+    || { rm -f -- "$err" "$status_file"; return "$DOCUMENT_LOCAL_FAILURE"; }
+  if ! perl -e "$FETCH_RECEIVER" "$max" "$MAX_FETCH_ERR_BYTES" "$seconds" "$status_file" \
+    "$SCRIPT_DIR/fm-on.sh" "$id" fm-remote-file.sh get "$rel" "$max" < /dev/null > "$tmp" 2> "$err"; then
+    rm -f -- "$tmp" "$err" "$status_file"
+    return "$DOCUMENT_LOCAL_FAILURE"
   fi
+  outcome=$(cat "$status_file" 2>/dev/null) || outcome=
+  rm -f -- "$status_file"
+  case "$outcome" in
+    exit:0) ;;
+    exit:[0-9]*)
+      FETCH_DOC_REASON=$(summarize_fetch_reason "$err" "$rel")
+      rm -f -- "$tmp" "$err"
+      [ "$outcome" != "exit:$SSH_UNAVAILABLE" ] || return "$SSH_UNAVAILABLE"
+      return 1
+      ;;
+    over:stdout|over:stderr|timeout)
+      case "$outcome" in
+        over:stdout) FETCH_DOC_REASON='remote document stdout exceeds max-bytes' ;;
+        over:stderr) FETCH_DOC_REASON='remote document stderr exceeds max-bytes' ;;
+        *) FETCH_DOC_REASON='remote document transfer timed out' ;;
+      esac
+      rm -f -- "$tmp" "$err"
+      return 1
+      ;;
+    *)
+      rm -f -- "$tmp" "$err"
+      return "$DOCUMENT_LOCAL_FAILURE"
+      ;;
+  esac
   rm -f -- "$err"
   chmod 600 "$tmp" || { rm -f -- "$tmp"; return "$DOCUMENT_LOCAL_FAILURE"; }
   mv -f -- "$tmp" "$destination" || { rm -f -- "$tmp"; return "$DOCUMENT_LOCAL_FAILURE"; }
