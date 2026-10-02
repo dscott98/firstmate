@@ -867,12 +867,14 @@ printf '#!/usr/bin/env bash\nexit 0\n' > "$MANAGER_BIN/codex"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$MANAGER_BIN/grok"
 chmod +x "$MANAGER_BIN/codex" "$MANAGER_BIN/grok"
 mv "$CASE_BIN/tasks-axi" "$MANAGER_BIN/tasks-axi"
-doctor
+MANAGER_BASE_PATH=$(fm_test_base_path_sans "$BASE_PATH" \
+  tasks-axi treehouse claude codex opencode pi pi-signed grok kimi)
+BASE_PATH=$MANAGER_BASE_PATH doctor
 expect_code 1 "$DOCTOR_RC" "a version-manager-only required tool was reported ready"
 assert_contains "$DOCTOR_OUT" 'required tasks-axi=MISSING' "the missing managed tool was not reported"
 assert_contains "$DOCTOR_OUT" 'tools in an unselected nvm version or outside the discovered asdf or mise paths need an absolute wrapper' \
   "the missing-tool diagnostic contradicted filesystem version-manager discovery"
-doctor --fix
+BASE_PATH=$MANAGER_BASE_PATH doctor --fix
 expect_code 0 "$DOCTOR_RC" "--fix did not create a wrapper for the discoverable managed tool"
 assert_contains "$DOCTOR_OUT" 'fix required-tasks-axi=applied:' "--fix did not report the owned wrapper"
 assert_contains "$DOCTOR_OUT" "required tasks-axi=$CASE_HOME/.local/bin/tasks-axi" \
@@ -885,7 +887,7 @@ assert_absent "$CASE_HOME/.local/bin/codex" "--fix wrapped an alternate harness 
 assert_absent "$CASE_HOME/.local/bin/grok" "--fix wrapped an alternate harness when claude already satisfied readiness"
 
 rm -f "$CASE_BIN/claude"
-doctor --fix
+BASE_PATH=$MANAGER_BASE_PATH doctor --fix
 expect_code 0 "$DOCTOR_RC" "--fix did not wrap one discoverable harness when none resolved"
 assert_present "$CASE_HOME/.local/bin/codex" "--fix did not create the first needed harness wrapper"
 assert_absent "$CASE_HOME/.local/bin/grok" "--fix created more harness wrappers than readiness requires"
@@ -893,7 +895,7 @@ assert_absent "$CASE_HOME/.local/bin/grok" "--fix created more harness wrappers 
 mv "$CASE_BIN/treehouse" "$MANAGER_BIN/treehouse"
 mkdir -p "$CASE_HOME/.local/bin"
 printf 'operator wrapper\n' > "$CASE_HOME/.local/bin/treehouse"
-doctor --fix
+BASE_PATH=$MANAGER_BASE_PATH doctor --fix
 expect_code 1 "$DOCTOR_RC" "--fix overwrote an operator-owned reserved wrapper"
 assert_contains "$DOCTOR_OUT" 'fix required-treehouse=failed:' \
   "the non-Firstmate wrapper refusal was not reported"

@@ -35,12 +35,12 @@ The placement flag, host-side task control, status mirroring, teardown, and supe
 - Placement is an explicit, per-task choice.
   Nothing infers it, and a sandbox outage is a blocker; firstmate never falls back silently to local placement.
 - The feature is default-off.
-  With no `config/sandbox-provider`, every sandbox request refuses and nothing else changes.
+  Provider operations require [provider configuration](configuration.md#sandbox-provider-configsandbox-provider); task transport requires an explicit [task route](#task-routes).
 - The contract is provider-neutral.
   It names verbs and labels, not Proxmox, so an LXC or microVM provider can implement it later.
   The reference provider `pve-sandbox` lives in the proxmox-lab project.
 - Firstmate never holds the Proxmox token and never calls the Proxmox API.
-  Every effect and every observation flows through `bin/fm-sandbox.sh`, which invokes the provider with argv only, never a shell string.
+  Every provider effect and observation flows through `bin/fm-sandbox.sh`, which invokes the provider with argv only, never a shell string.
 - Every sandbox carries two labels: `fm_task=<task-id>` and `fm_home=<home tag>`.
   `extend`, `hold`, `release`, `policy`, `exec`, `snapshot`, and `rollback` require an existing sandbox belonging to this home, enforced by the [adapter's shared status guard](../bin/fm-sandbox.sh).
   Destroying a sandbox refuses when the labels disagree, so one home can never destroy another home's sandbox, and an already-absent sandbox is success, so cleanup is idempotent.
@@ -79,9 +79,7 @@ The provider command must satisfy the invocation, record framing, ownership-labe
 
 ## Task routes
 
-A sandbox task's record in this home's `state/<id>.meta` declares its placement: `placement=sandbox` and `remote_kind=task` on a ship or scout, the SSH alias in `remote_host`, the VM's Firstmate code root in `remote_root`, and its one-task home in `remote_home`.
-Placement is never inferred: a record without `placement=sandbox` is never treated as a sandbox task, and a record whose placement fields contradict each other is refused rather than guessed at.
-[`bin/fm-remote-route-lib.sh`](../bin/fm-remote-route-lib.sh) is the one owner of that record contract and of remote dispatch for every command.
+A sandbox task's explicit placement and route come from this home's `state/<id>.meta`; [`bin/fm-remote-route-lib.sh`](../bin/fm-remote-route-lib.sh) owns the required fields, validation, and remote dispatch contract.
 
 - `bin/fm-on.sh <task-id> <fm-command>` resolves the route from the task's record, selected by its exact task id.
   It applies the same transport checks as a second-mate registry route, refuses a code root and home that overlap, and refuses a task id that also names a registry route.
@@ -92,17 +90,8 @@ Placement is never inferred: a record without `placement=sandbox` is never treat
 
 ## Task readiness
 
-`bin/fm-on.sh <task-id> fm-remote-doctor.sh --profile task` checks a sandbox host against the task profile, and `--fix` repairs it the same way it repairs a second-mate host.
-The [doctor's header](../bin/fm-remote-doctor.sh) owns the line protocol and every check.
-
-| Requirement | Tools |
-| --- | --- |
-| Always required | `git`, `jq`, `tmux`, and `treehouse` |
-| At least one of | `claude`, `codex`, `opencode`, `pi`, `pi-signed`, `grok`, or `kimi` |
-| Optional | `tasks-axi`, because a task home's backlog is manual, plus `no-mistakes` and `gh` |
-
-The task profile runs no Herdr session: it reports every Herdr check as skipped and never inspects, starts, or writes a Herdr server or launch agent.
-It still requires the remote job worker and the entrypoint symlink, because every command other than the doctor runs through that worker.
+`bin/fm-on.sh <task-id> fm-remote-doctor.sh --profile task` checks a sandbox host against the task profile; add `--fix` to repair its automatable gaps.
+The [doctor's header and tool declarations](../bin/fm-remote-doctor.sh) own the profile's requirements, Herdr exclusions, repair boundaries, and line protocol.
 
 ## Capacity and failures
 
