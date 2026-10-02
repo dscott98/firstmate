@@ -36,6 +36,7 @@ The placement flag, task control, status mirroring, teardown, and supervision in
 - Firstmate never holds the Proxmox token and never calls the Proxmox API.
   Every effect and every observation flows through `bin/fm-sandbox.sh`, which invokes the provider with argv only, never a shell string.
 - Every sandbox carries two labels: `fm_task=<task-id>` and `fm_home=<home tag>`.
+  `extend`, `hold`, `release`, `policy`, `exec`, `snapshot`, and `rollback` require an existing sandbox belonging to this home, enforced by the [adapter's shared status guard](../bin/fm-sandbox.sh).
   Destroying a sandbox refuses when the labels disagree, so one home can never destroy another home's sandbox, and an already-absent sandbox is success, so cleanup is idempotent.
 - Preserve unlanded work before invoking `destroy` manually.
   The adapter checks no landing evidence; the landed-work gate ships with the teardown integration.
@@ -78,7 +79,7 @@ Treat it like any other infrastructure blocker: surface it, free sandboxes, or w
 Refusals name the concrete configuration, provider, or output problem, and provider failures include its stderr.
 Invalid output is withheld, but refusal does not roll back effects the provider already performed.
 Usage errors are rejected before invoking the provider.
-After local validation, `exec` relays raw provider output and exit status unchanged, including nonzero statuses; it does not apply lifecycle record validation or capacity translation.
+After the ownership status check, `exec` relays raw provider output and exit status unchanged, including nonzero statuses; it does not apply lifecycle record validation or capacity translation.
 
 ## Verification
 

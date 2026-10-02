@@ -50,6 +50,10 @@ if [ "$verb" = destroy ] && [ -f "$CTRL_DIR/expected-home" ] && [ "$home_tag" !=
   printf 'fm_home label mismatch\n' >&2
   exit 1
 fi
+if [ "$verb" = status ] && [ -f "$CTRL_DIR/status-out" ]; then
+  cat "$CTRL_DIR/status-out"
+  exit 0
+fi
 if [ -f "$CTRL_DIR/out" ]; then
   cat "$CTRL_DIR/out"
 fi
@@ -195,7 +199,7 @@ grep -q 'default_profile=open' "$ERR" || fail "refusal must name the forbidden d
 
 write_config
 set_fake 0 "" ""
-run hold sbx-1
+run list
 [ "$RC" -eq 0 ] || fail "a valid config must be accepted, got $RC (stderr: $(cat "$ERR"))"
 pass "ok - a valid config with comments and blank lines is accepted"
 
@@ -394,6 +398,52 @@ run list
 printf 'name=sbx-owned-gone state=absent fm_home=%s\n' "$TAG" | cmp -s - "$OUT" || fail "absent list records must still obey home filtering"
 
 # --- extend, hold, release, policy, snapshot, rollback --------------------------
+
+for verb in extend hold release policy exec snapshot rollback; do
+  args=("$verb" sbx-a)
+  case "$verb" in
+    exec) args+=(-- printf '%s' literal) ;;
+    snapshot|rollback) args+=(before-change) ;;
+  esac
+  set_fake 0 "" ""
+  [ "$verb" != policy ] || set_fake 0 "" "profile=default"
+  for state in running stopped; do
+    for ownership in own foreign missing absent; do
+      case "$ownership" in
+        own) record="state=$state fm_task=t1 fm_home=$TAG" ;;
+        foreign) record="state=$state fm_task=t1 fm_home=$OTHER_TAG" ;;
+        missing) record="state=$state fm_task=t1" ;;
+        absent) record="state=absent" ;;
+      esac
+      printf '%s\n' "$record" > "$CTRL/status-out"
+      reset_argv_log
+      run "${args[@]}"
+      if [ "$ownership" = own ]; then
+        [ "$RC" -eq 0 ] || fail "$verb must accept own-home $state sandbox: $(cat "$ERR")"
+        expected=("${args[@]}")
+        [ "$verb" != extend ] || expected+=(--ttl 4h)
+        printf 'ARG:%s\n' status sbx-a "${expected[@]}" | cmp -s - "$ARGV_LOG" || fail "$verb must check status before invoking the requested argv"
+        if [ "$verb" = policy ]; then
+          printf 'profile=default\n' | cmp -s - "$OUT" || fail "ownership check must not leak status into policy output"
+        else
+          [ ! -s "$OUT" ] || fail "ownership check must not emit status"
+        fi
+      else
+        [ "$RC" -eq 3 ] || fail "$verb must refuse $ownership sandbox"
+        printf 'ARG:%s\n' status sbx-a | cmp -s - "$ARGV_LOG" || fail "$verb must not run after ownership refusal"
+        [ ! -s "$OUT" ] || fail "ownership refusal must emit no trusted output"
+        case "$ownership" in
+          foreign) reason='fm_home label mismatch' ;;
+          missing) reason="missing required key 'fm_home'" ;;
+          absent) reason='is absent' ;;
+        esac
+        grep -qF "$reason" "$ERR" || fail "$verb refusal must name $reason"
+      fi
+    done
+  done
+done
+printf 'state=running fm_task=t1 fm_home=%s\n' "$TAG" > "$CTRL/status-out"
+pass "ok - every guarded verb checks ownership before acting and refuses foreign, unlabelled, or absent sandboxes"
 
 reset_argv_log
 set_fake 0 "" ""

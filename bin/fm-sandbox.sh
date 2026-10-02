@@ -30,7 +30,7 @@
 # owns the file format, required keys, and default-profile restrictions.
 #
 # HOME TAG. Sandboxes are labelled fm_home=<tag> so two firstmate homes
-# sharing one provider namespace have separate list and destroy scopes.
+# sharing one provider namespace have separate lifecycle scopes.
 # The tag comes from fm_home_hometag (bin/fm-backend-hometag-lib.sh),
 # derived from the resolved operational FM_HOME path.
 #
@@ -54,6 +54,9 @@
 # sandbox's fm_task or fm_home labels disagree with --expect-task or --home,
 # and must treat an already-absent sandbox as success. exec is bootstrap
 # only: its argv after -- is the command argv, relayed verbatim.
+# Before extend, hold, release, policy, exec, snapshot, or rollback, this
+# adapter reads and validates status and refuses absent sandboxes or a
+# missing/mismatched fm_home label. No requested verb runs on refusal.
 #
 # PROVIDER OUTPUT CONTRACT (every verb except exec): stdout is key=value
 # records, one record per line, with space-separated key=value fields,
@@ -312,11 +315,13 @@ fm_sandbox_check_semantics() {
 }
 
 FM_SANDBOX_RECORD_HOME=
+FM_SANDBOX_RECORD_STATE=
 
 fm_sandbox_validate_record() {
   local keyset=$1 required=$2 verb=$3 line=$4 tag=${5:-} field key state='' seen=" "
   local -a fields=()
   FM_SANDBOX_RECORD_HOME=
+  FM_SANDBOX_RECORD_STATE=
   IFS=' ' read -r -a fields <<<"$line"
   [ "${#fields[@]}" -gt 0 ] || refuse "empty provider record for $verb"
   for field in "${fields[@]}"; do
@@ -332,7 +337,7 @@ fm_sandbox_validate_record() {
     seen="$seen$key "
     case "$key" in
       fm_home) FM_SANDBOX_RECORD_HOME=$FM_SANDBOX_LINE_VALUE ;;
-      state) state=$FM_SANDBOX_LINE_VALUE ;;
+      state) state=$FM_SANDBOX_LINE_VALUE; FM_SANDBOX_RECORD_STATE=$state ;;
     esac
   done
   if [ "$state" = running ] || [ "$state" = stopped ]; then
@@ -358,6 +363,13 @@ fm_sandbox_emit_single() {
   esac
   fm_sandbox_validate_record "$keyset" "$required" "$verb" "$FM_SANDBOX_OUT"
   printf '%s\n' "$FM_SANDBOX_OUT"
+}
+
+fm_sandbox_require_owned() {
+  fm_sandbox_invoke status "$NAME"
+  fm_sandbox_emit_single object state status >/dev/null
+  [ "$FM_SANDBOX_RECORD_STATE" != absent ] || refuse "$VERB requires an existing sandbox: '$NAME' is absent"
+  [ "$FM_SANDBOX_RECORD_HOME" = "$TAG" ] || refuse "$VERB refused for '$NAME': fm_home label mismatch (expected '$TAG', got '$FM_SANDBOX_RECORD_HOME')"
 }
 
 fm_sandbox_emit_list() {
@@ -506,6 +518,10 @@ esac
 
 fm_sandbox_read_config
 TAG=$(fm_home_hometag) || refuse "cannot resolve operational home '$FM_HOME'"
+
+case "$VERB" in
+  extend|hold|release|policy|exec|snapshot|rollback) fm_sandbox_require_owned ;;
+esac
 
 case "$VERB" in
   create)
