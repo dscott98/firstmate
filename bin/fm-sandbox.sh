@@ -84,8 +84,8 @@
 # command's stdout and exit status verbatim and this script passes both
 # through untouched, including non-zero statuses.
 #
-# EXIT STATUSES (exec relays the provider status unchanged after local
-# validation, as described above):
+# EXIT STATUSES (these also apply to the ownership status check before
+# exec; once that check succeeds, exec relays the provider status unchanged):
 #   0  success (create/status/list/policy print validated key=value lines)
 #   2  usage error: unknown verb, missing or malformed arguments, or a
 #      name, task id, label, or profile that is not a safe single token
@@ -93,7 +93,8 @@
 #   3  refusal: no config/sandbox-provider (default-off), a malformed
 #      config, a provider command that is missing or not executable, a
 #      provider exit that is neither 0 nor 75 (its stderr is included), or
-#      provider output that violates the contract above
+#      provider output that violates the contract above, or an ownership
+#      status check that finds an absent or foreign-home sandbox
 #   4  capacity blocker: the provider exited 75, its dedicated capacity
 #      refusal status. A capacity refusal is a blocker to surface, never a
 #      reason to fall back to local placement or to retry silently.

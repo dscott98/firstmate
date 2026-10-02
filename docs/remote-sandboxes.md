@@ -73,7 +73,7 @@ The provider command must satisfy the invocation, record framing, ownership-labe
 
 ## Capacity and failures
 
-For lifecycle verbs other than `exec`, a provider capacity refusal surfaces as a blocker; [the adapter header](../bin/fm-sandbox.sh) owns the exact exit statuses.
+Provider capacity refusals during lifecycle calls and ownership status checks surface as blockers; [the adapter header](../bin/fm-sandbox.sh) owns the exact exit statuses, including the raw relay behavior once `exec` begins.
 Treat it like any other infrastructure blocker: surface it, free sandboxes, or wait; never fall back to local placement.
 
 Refusals name the concrete configuration, provider, or output problem, and provider failures include its stderr.
