@@ -21,8 +21,9 @@ A failed script's duration is excluded even when its lane uploaded an artifact.
 In particular, run 36664663190's serial 5 finished in 22m15s with an assertion failure, not a timeout; treating that as a healthy whole-lane sample would hide the failure.
 Collect successful per-script measurements for every member before calculating a split.
 
-`tests/fm-supervision-host.test.sh` uses 789123 ms from run 36669175457, after the merged [host runtime fix](https://github.com/kunchenguid/firstmate/pull/6179), rather than its pre-fix maximum of 1065298 ms.
-That post-fix value has only one sample in this baseline, so further green runs must establish its variance.
+`tests/fm-supervision-host.test.sh` uses 1171000 ms from PR #21's successful green run (run 37092646056), the slowest successful `FM_TEST_END` mark for the post-fix version across the dscott98 fork's CI samples.
+That post-fix value has only one successful sample; PR #22 (run 37094845324) and the same-PR-supersession cancellation on this branch (run 37122992743) both hit the supersession-timeout channel at 1636s and 1558s respectively, so the runtime stays close enough to the 30-minute job cap that the runner needs the test in its own serial shard.
+PR #22 was a docs-only change, meaning the supervision-host runtime regression was not a regression at all - the test was already wide-variance.
 The native-Windows-only `tests/fm-pi-windows-shell-invocation.test.sh` retains its separate 5121 ms measurement from 2026-09-06T21:02Z instead of a portable capability skip.
 The session-start hint retains its pre-optimization maximum until CI measures the shorter fixture-only home-summary bound; do not discount a local speedup from CI packing weights.
 
