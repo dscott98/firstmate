@@ -224,18 +224,14 @@ TURN_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_TURN_TIMEOUT:-}" 1200)
 ROTATE_TURNS=$(numeric_or "${FM_SUPERVISION_HOST_ROTATE_TURNS:-}" 20)
 READY_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_READY_TIMEOUT:-}" 25)
 POLL=$(numeric_or "${FM_SUPERVISION_HOST_POLL:-}" 1)
-# In test mode only, a tighter inner step makes await_close detect test-clock
-# boundary changes and start_successor detect a ready successor at the same
-# sub-second cadence the rest of the suite uses. Production callers leave
-# FM_TEST_SEAM unset so the production 0.5s / 0.2s sleeps are unchanged.
-if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_SUPERVISION_HOST_POLL_STEP:-}" ]; then
-  INNER_STEP=$FM_SUPERVISION_HOST_POLL_STEP
-else
-  INNER_STEP=0.5
+INNER_STEP=0.5
+INNER_ITERS=$((POLL * 2))
+SUCCESSOR_STEP=0.2
+if [ "${FM_TEST_SEAM:-}" = 1 ] && [ "${FM_SUPERVISION_HOST_POLL_STEP:-}" = 0.05 ]; then
+  INNER_STEP=0.05
+  INNER_ITERS=$((POLL * 20))
+  SUCCESSOR_STEP=0.05
 fi
-case "$INNER_STEP" in
-  *[!0-9.]*) INNER_STEP=0.5 ;;
-esac
 COOLDOWN=$FM_SUPERVISION_HOST_COOLDOWN
 COOLDOWN_MAX=3600
 AUTOARM_GEN=${FM_SUPERVISION_HOST_AUTOARM_GEN:-}
@@ -551,9 +547,7 @@ await_close() {
     boundary_reached && return 1
     # Probe the arm's exit twice a second between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
-    # The inner step is the production 0.5s, or the test seam value when
-    # FM_TEST_SEAM=1 and FM_SUPERVISION_HOST_POLL_STEP are both set.
-    i=$((POLL * 2))
+    i=$INNER_ITERS
     while [ "$i" -gt 0 ] && fm_pid_alive "$ARM_PID"; do
       sleep "$INNER_STEP"
       i=$((i - 1))
@@ -686,9 +680,7 @@ start_successor() {  # <predecessor-arm-pid>
     fi
     fm_pid_alive "$SUCCESSOR_PID" || return 1
     [ "$(date +%s)" -lt "$deadline" ] || return 1
-    # Successor-ready probe uses the same test seam as await_close so the
-    # next park is ready at the same cadence the rest of the suite uses.
-    sleep "$INNER_STEP"
+    sleep "$SUCCESSOR_STEP"
   done
 }
 
