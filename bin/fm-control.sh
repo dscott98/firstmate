@@ -47,10 +47,12 @@
 #              preserves did not survive; a pane that turns out to be there and
 #              idle is the ordinary `already-stopped`; one whose agent is back
 #              takes the ordinary interrupt-then-exit path. A tmux `missing`
-#              always REFUSES: a task record carries no socket identity for its
+#              REFUSES: a task record carries no socket identity for its
 #              endpoint, so this verb cannot tell a destroyed window from one on
 #              a tmux server it cannot address, and it will not claim a stop it
-#              cannot see.
+#              cannot see. The one exception is a sandbox host's own control
+#              plane, which accepts that host's reboot since the record's launch
+#              as the proof, because no tmux server survives a reboot.
 #   relaunch   Transactionally replace the running agent with a new one, in the
 #              SAME worktree - and the same endpoint whenever that endpoint
 #              still exists - on the same or a newly chosen
@@ -63,7 +65,8 @@
 #              it, rather than being stranded with a parked approval nobody can
 #              answer. Reclaim is HERDR-ONLY for the reason `exit` gives above:
 #              a tmux `missing` cannot be proven absent from a task record, so
-#              it refuses.
+#              it refuses - except on a sandbox host rebooted since the record's
+#              launch, where the window is re-created in the recorded worktree.
 #              An explicit `default` model or effort clears that
 #              axis for the replacement. With no explicit axis, a secondmate
 #              re-resolves its durable config/secondmate-harness pin (harness
@@ -106,8 +109,10 @@
 #
 # A remotely placed secondmate is refused by name: its agent runs on another
 # host, so no postcondition this plane verifies could be read for it here. A
-# sandbox task is refused by name for the same reason, and a record whose
-# placement bin/fm-remote-route-lib.sh rejects is refused with its defect.
+# sandbox task's verbs run on its host's own copy of this plane instead, and a
+# relaunch republishes this home's record from the identity the host confirms
+# (sandbox_control below owns that sequence). A record whose placement
+# bin/fm-remote-route-lib.sh rejects is refused with its defect.
 #
 # Fail-closed boundaries:
 #   - An unverified harness, or a harness whose control mechanics are unknown,
@@ -339,16 +344,182 @@ fi
 # operator about a correctly configured remote route. Name the placement
 # instead, from the same remote dispatch bin/fm-send.sh routes on
 # (bin/fm-remote-route-lib.sh). A sandbox task's agent likewise runs on its VM,
-# and this version does not yet route lifecycle control to that host's task
-# control plane, so it is refused by name too; a record whose placement is
-# malformed is refused with its defect.
+# so its lifecycle runs there (sandbox_control below), and a record whose
+# placement is malformed is refused with its defect.
 fm_remote_route_resolve "$META" "$ID" \
   || die "task $ID was not touched: $FM_REMOTE_ROUTE_ERROR"
+
+# --- a sandbox task: its lifecycle runs on its host --------------------------
+#
+# A sandbox task's agent, endpoint, and worktree live on its VM, so every
+# postcondition this plane verifies can only be read there. Each verb runs
+# that host's own fm-control.sh through its task control plane
+# (bin/fm-remote-task-control.sh control, reached through bin/fm-on.sh's task
+# route), and the host's output and exit status are relayed unchanged, so the
+# full local contract - checkpoint, journal, rollback, and postconditions -
+# applies on the host. SSH exit 255 is unknown completion: whether the action
+# landed there is unknown, nothing here changed, and the status is returned
+# unchanged so a caller can tell an unreachable host from a refusal.
+#
+# relaunch runs as one primary-side sequence around that host transaction:
+#   1. Refuse, before the host is touched, anything the sandbox cannot run: a
+#      missing --note, a different harness, Claude (pending the PR7 real-host
+#      smoke test), and for a Pi harness a model whose provider differs from
+#      the recorded one - a sandbox holds only the credentials it was
+#      provisioned with, so a replacement it cannot authenticate would only
+#      stop the running agent.
+#   2. Send this home's data/<id>/brief.md through the host's brief-update when
+#      its digest differs from the record's brief_sha256= (the brief the host
+#      last received from a relaunch here; a record never relaunched has none,
+#      so its first relaunch always sends it), because the host's relaunch
+#      briefs the replacement from the brief on its own disk, and an unchanged
+#      brief keeps the progress notes earlier relaunches appended there. A
+#      failed send stops here with the agent untouched.
+#   3. Run the host's relaunch with the note, keeping each axis given as - and
+#      passing an explicit model or effort (default clears it).
+#   4. Validate the route block the host confirms, field by field
+#      (fm_remote_route_task_block_parse) and against this record's worktree,
+#      then republish this home's record from it under the meta lock: harness,
+#      model, effort, spawn_gen, remote_backend, remote_target, and
+#      brief_sha256 come first, and every other line keeps its relative order,
+#      so a pr= identity block stays last, as bin/fm-remote-secondmate-relaunch.sh
+#      republishes a remote secondmate's. A refused or failed relaunch, or a
+#      block that fails validation, leaves this record untouched.
+# The host's own control plane, not this one, may accept its reboot as proof
+# that a tmux endpoint is gone (fm_control_endpoint_absence_verdict), so after
+# a VM reboot or HA restart `exit` reports endpoint-gone and relaunch
+# re-creates the window in the worktree on the VM's disk.
+sandbox_unknown_completion() {  # <what>
+  echo "error: task $ID's sandbox host $FM_REMOTE_ROUTE_HOST could not be reached (SSH exit 255), so whether its $1 happened there is unknown; nothing here was changed - read its state with bin/fm-crew-state.sh $ID or bin/fm-peek.sh $ID before retrying" >&2
+}
+
+sandbox_relaunch() {
+  local kind harness model effort want_model want_effort provider recorded_provider
+  local brief sha recorded_sha out rc=0 block line meta_lock tmp sent=unchanged h=- m=- e=- wt written=1
+  kind=$(fm_meta_get "$META" kind)
+  harness=$(fm_meta_get "$META" harness)
+  model=$(fm_meta_get "$META" model)
+  effort=$(fm_meta_get "$META" effort)
+  [ -n "$model" ] || model=default
+  [ -n "$effort" ] || effort=default
+  [ "$NOTE_SET" = 1 ] && [ -n "$NOTE" ] \
+    || die "relaunch of a $kind task requires --note (or --note-file): the replacement worker inherits the local copy but none of the conversation, so it must be told what happened"
+  [ "$harness" != claude ] \
+    || die "Claude in sandboxes waits for the PR7 real-host smoke test, so task $ID's sandbox cannot run a Claude replacement; nothing was changed"
+  if [ "$HARNESS_SET" = 1 ] && [ "$NEW_HARNESS" != "$harness" ]; then
+    die "task $ID's sandbox was provisioned with credentials for harness $harness only, so it cannot relaunch onto $NEW_HARNESS; nothing was changed"
+  fi
+  want_model=$model
+  if [ "$MODEL_SET" = 1 ]; then
+    want_model=$NEW_MODEL
+    m=$NEW_MODEL
+    case "$harness" in
+      pi|pi-signed)
+        provider=$(fm_worker_account_pi_provider "$NEW_MODEL") || provider=
+        recorded_provider=$(fm_worker_account_pi_provider "$model") || recorded_provider=
+        if [ -z "$provider" ] || [ "$provider" != "$recorded_provider" ]; then
+          die "task $ID's sandbox holds only the credential for Pi provider ${recorded_provider:-(none)}, so it cannot relaunch onto model '$NEW_MODEL'; nothing was changed"
+        fi
+        ;;
+    esac
+  fi
+  want_effort=$effort
+  if [ "$EFFORT_SET" = 1 ]; then
+    want_effort=$NEW_EFFORT
+    e=$NEW_EFFORT
+  fi
+  [ "$HARNESS_SET" = 0 ] || h=$NEW_HARNESS
+
+  brief="$DATA/$ID/brief.md"
+  [ -f "$brief" ] \
+    || die "task $ID has no instructions at $brief; refusing to relaunch a worker with nothing to work from"
+  sha=$(fm_pr_sha256 "$brief") || sha=
+  case "$sha" in
+    [0-9a-f]*) [ "${#sha}" -eq 64 ] || sha= ;;
+    *) sha= ;;
+  esac
+  [ -n "$sha" ] || die "task $ID's brief could not be fingerprinted, so whether its host holds it is unknown; nothing was changed"
+  recorded_sha=$(fm_meta_get "$META" brief_sha256)
+  if [ "$sha" != "$recorded_sha" ]; then
+    out=$("$SCRIPT_DIR/fm-on.sh" --stdin "$ID" "$FM_REMOTE_ROUTE_CONTROL" brief-update "$ID" < "$brief") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      [ -z "$out" ] || printf '%s\n' "$out"
+      [ "$rc" -ne 255 ] || sandbox_unknown_completion "brief update"
+      echo "error: task $ID's brief did not reach its host, so the relaunch was not started and its agent is untouched" >&2
+      exit "$rc"
+    fi
+    if [ "$(printf '%s\n' "$out" | sed -n 's/^brief_sha256=//p' | tail -1)" != "$sha" ]; then
+      die "task $ID's host did not confirm the brief this home sent, so the relaunch was not started and its agent is untouched"
+    fi
+    sent=sent
+  fi
+
+  out=$("$SCRIPT_DIR/fm-on.sh" "$ID" "$FM_REMOTE_ROUTE_CONTROL" control "$ID" relaunch "$h" "$m" "$e" "$NOTE" </dev/null) || rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out"
+  if [ "$rc" -ne 0 ]; then
+    [ "$rc" -ne 255 ] || sandbox_unknown_completion relaunch
+    exit "$rc"
+  fi
+  # The confirmed identity is the route block that ends the host's output,
+  # never its human-readable summary line.
+  block=$(printf '%s\n' "$out" | awk '$0 == "schema=fm-remote-task-control.v1" { buf = "" ; on = 1 } on { buf = buf $0 "\n" } END { printf "%s", buf }')
+  if ! fm_remote_route_task_block_parse "$block" "$ID" "$kind" "$(fm_meta_get "$META" branch)" "$harness" "$want_model" "$want_effort"; then
+    die "task $ID was relaunched on its host, but the route the host confirmed failed validation ($FM_REMOTE_TASK_ROUTE_DEFECT); this home's record was not republished - reconcile it with the host before any further control action"
+  fi
+  wt=$(fm_meta_get "$META" worktree)
+  [ "$FM_REMOTE_TASK_ROUTE_WORKTREE" = "$wt" ] \
+    || die "task $ID was relaunched on its host, but the host reports worktree $FM_REMOTE_TASK_ROUTE_WORKTREE where this home records $wt; this home's record was not republished - reconcile it with the host before any further control action"
+
+  meta_lock=$(fm_meta_lock_path "$META") || die "metadata lock path is invalid for $ID"
+  fm_lock_acquire_wait "$meta_lock"
+  tmp=$(mktemp "$STATE/.fm-sandbox-relaunch-meta.XXXXXX") || {
+    fm_lock_release "$meta_lock"
+    die "task $ID was relaunched on its host, but its record could not be staged for republishing; reconcile it with the host before any further control action"
+  }
+  {
+    printf 'harness=%s\n' "$FM_REMOTE_TASK_ROUTE_HARNESS"
+    printf 'model=%s\n' "$FM_REMOTE_TASK_ROUTE_MODEL"
+    printf 'effort=%s\n' "$FM_REMOTE_TASK_ROUTE_EFFORT"
+    printf 'spawn_gen=%s\n' "$FM_REMOTE_TASK_ROUTE_SPAWN_GEN"
+    printf 'remote_backend=%s\n' "$FM_REMOTE_TASK_ROUTE_BACKEND"
+    printf 'remote_target=%s\n' "$FM_REMOTE_TASK_ROUTE_TARGET"
+    printf 'brief_sha256=%s\n' "$sha"
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        harness=*|model=*|effort=*|spawn_gen=*|remote_backend=*|remote_target=*|brief_sha256=*) ;;
+        *) printf '%s\n' "$line" ;;
+      esac
+    done < "$META"
+  } > "$tmp" || written=0
+  if [ "$written" -eq 0 ] || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$META"; then
+    rm -f -- "$tmp"
+    fm_lock_release "$meta_lock"
+    die "task $ID was relaunched on its host, but its record could not be republished; reconcile it with the host before any further control action"
+  fi
+  fm_lock_release "$meta_lock"
+  echo "republished $ID from its sandbox host $FM_REMOTE_ROUTE_HOST: harness=$FM_REMOTE_TASK_ROUTE_HARNESS model=$FM_REMOTE_TASK_ROUTE_MODEL effort=$FM_REMOTE_TASK_ROUTE_EFFORT spawn_gen=$FM_REMOTE_TASK_ROUTE_SPAWN_GEN endpoint=$FM_REMOTE_TASK_ROUTE_TARGET brief=$sent"
+}
+
+sandbox_control() {
+  local rc=0
+  case "$VERB" in
+    interrupt|exit)
+      "$SCRIPT_DIR/fm-on.sh" "$ID" "$FM_REMOTE_ROUTE_CONTROL" control "$ID" "$VERB" </dev/null || rc=$?
+      [ "$rc" -ne 255 ] || sandbox_unknown_completion "$VERB"
+      exit "$rc"
+      ;;
+    relaunch)
+      sandbox_relaunch
+      exit 0
+      ;;
+  esac
+}
+
 case "$FM_REMOTE_ROUTE_KIND" in
   secondmate)
     die "task $ID is a remotely placed secondmate on $FM_REMOTE_ROUTE_HOST; its agent runs outside this home, so no lifecycle action here could verify that it interrupted, stopped, or came back. Drive its lifecycle on that host, and reconcile it through the secondmate recovery path rather than this plane"
     ;;
-  task) die "$(fm_remote_route_unsupported "$ID" "lifecycle control")" ;;
+  task) sandbox_control ;;
 esac
 
 fm_backend_validate_task_endpoint "$META" "$ID" || exit 1
@@ -584,7 +755,7 @@ do_exit() {
       # "destroyed" with "unreachable from this seat". Route it through the
       # control plane's one absence proof - the same one the relaunch gate uses
       # - and report what that proof actually established, never more.
-      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T")
+      absence=$(fm_control_endpoint_absence_verdict "$BACKEND" "$T" "$META")
       case "${absence%%$'\t'*}" in
         gone)
           # Proven gone, so the agent that lived in it went with it: exit's

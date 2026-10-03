@@ -687,11 +687,24 @@ test_read_verbs_report_the_endpoint() {
     "observe hashes the pane as the watcher does"
   case "$(route_value "$out" worktree_write)" in ''|*[!0-9]*) fail "observe worktree_write is not an epoch" ;; esac
   assert_equals none "$(route_value "$out" inbox_oldest)" "no steer is waiting"
+  case "$(route_value "$out" turn_at)" in ''|*[!0-9]*) fail "observe turn_at is not an epoch" ;; esac
+  assert_equals "$(stat -c %Y "$TASK_HOME/state/$ID.meta" 2>/dev/null || stat -f %m "$TASK_HOME/state/$ID.meta")" \
+    "$(route_value "$out" turn_at)" "before a completed turn, turn_at is the spawn record's time"
 
   run_control send "$ID" "rebase onto main" 0123456789abcdef >/dev/null 2>&1 || fail "send failed"
   out=$(run_control observe "$ID" 2>&1)
   assert_equals 001.msg "$(route_value "$out" inbox_oldest)" "observe names the oldest unacknowledged steer"
   case "$(route_value "$out" inbox_oldest_at)" in ''|*[!0-9]*) fail "observe inbox_oldest_at is not an epoch" ;; esac
+
+  : > "$TMUX_DIR/log"
+  out=$(run_control ring "$ID" 001.msg 2>&1) || fail "ring failed: $out"
+  assert_equals fm-remote-task-control.v1 "$(route_value "$out" schema)" "ring is schema-tagged"
+  assert_equals rang "$(route_value "$out" ring)" "ring rings the doorbell for an unacknowledged steer"
+  grep -q 'Firstmate instruction waiting' "$TMUX_DIR/log" || fail "ring typed no doorbell"
+  out=$(run_control ring "$ID" 009.msg 2>&1) || fail "ring of an absent record failed: $out"
+  assert_equals absent "$(route_value "$out" ring)" "ring reports a record that does not exist"
+  out=$(run_control ring "$ID" ../001.msg 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "ring accepted a record name that is not NNN.msg"
 
   out=$(run_control capture "$ID" 5 2>&1) || fail "capture failed"
   assert_contains "$out" "fake pane line two" "capture returns the pane"
@@ -720,6 +733,11 @@ test_read_verbs_report_the_endpoint() {
 
   printf 'bash\n' > "$TMUX_DIR/pane-command"
   assert_equals dead "$(run_control state "$ID" 2>/dev/null)" "state reads an exited agent as dead"
+  out=$(run_control ring "$ID" 001.msg 2>&1) || fail "ring of an exited agent failed: $out"
+  assert_equals unavailable "$(route_value "$out" ring)" "ring types nothing into an exited agent's pane"
+  mv "$TASK_HOME/state/$ID.inbox/001.msg" "$TASK_HOME/state/$ID.inbox/handled/"
+  out=$(run_control ring "$ID" 001.msg 2>&1) || fail "ring of an acknowledged record failed: $out"
+  assert_equals handled "$(route_value "$out" ring)" "ring reports an acknowledged steer"
   out=$(run_control observe "$ID" 2>&1) || fail "observe of an exited agent failed"
   assert_equals dead "$(route_value "$out" busy)" "an exited agent cannot remain busy"
   assert_equals endpoint-gone "$(route_value "$out" busy_source)" "observe identifies the exited agent"
@@ -732,7 +750,7 @@ test_read_verbs_report_the_endpoint() {
   out=$(run_control crew-state "$ID" 2>&1) || fail "crew-state of a vanished window failed"
   assert_equals dead "$(route_value "$out" busy)" "crew-state ignores the stale busy record"
   assert_equals endpoint-gone "$(route_value "$out" busy_source)" "crew-state attributes death to the endpoint"
-  pass "state, observe, capture, head, and crew-state read the host-local endpoint"
+  pass "state, observe, ring, capture, head, and crew-state read the host-local endpoint"
 }
 
 test_send_writes_one_durable_record_per_steer() {

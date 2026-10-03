@@ -79,6 +79,14 @@ fm_backend_tmux_container_ensure() {
   fi
 }
 
+# fm_backend_tmux_session_ensure: ensure the exactly named detached session
+# exists, creating it (and the server it lives on) when it does not. A relaunch
+# that re-creates a proven-gone endpoint pins the session its record names
+# rather than whichever one this process happens to sit in.
+fm_backend_tmux_session_ensure() {  # <session>
+  tmux has-session -t "=$1" 2>/dev/null || tmux new-session -d -s "$1"
+}
+
 # fm_backend_tmux_create_task: create the task's window in <proj-abs>,
 # refusing an existing <window-name> in <session>. Mirrors fm-spawn.sh's
 # duplicate-check-then-new-window sequence, including the exact error text

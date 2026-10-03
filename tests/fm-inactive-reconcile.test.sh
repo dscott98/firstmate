@@ -1016,6 +1016,68 @@ test_notice_recovery_does_not_duplicate_wake() {
 
 # Forge command shims fail loudly. A successful scan proves this path never uses
 # them while reconciling a local terminal outcome.
+# A sandbox task's worktree and runs live on its VM and its host is never read
+# from this poll-path scan: its state read folds the mirrored status log alone,
+# and its done gate never probes the recorded worktree path, even when a local
+# directory happens to sit at that path.
+write_sandbox_child() { # <home> <id> <status>
+  local home=$1 id=$2 status=$3 sha
+  mkdir -p "$home/projects/$id"
+  git -C "$home/projects/$id" init -q
+  git -C "$home/projects/$id" commit -q --allow-empty -m init
+  sha=$(git -C "$home/projects/$id" rev-parse HEAD)
+  git -C "$home/projects/$id" update-ref refs/remotes/origin/main "$sha"
+  fm_write_meta "$home/state/$id.meta" \
+    "window=remote:$id" "endpoint_task_id=$id" "worktree=$home/projects/$id" "project=$home/projects/$id" \
+    'harness=pi' 'kind=ship' 'mode=no-mistakes' 'yolo=off' "spawn_gen=s1700000000.$RANDOM.1" \
+    'placement=sandbox' 'remote_kind=task' "remote_host=alias-$id" 'remote_root=/opt/firstmate' \
+    'remote_home=/home/agent/fm-home' 'remote_backend=tmux' "remote_target=firstmate:fm-$id"
+  printf '%s\n' "$status" > "$home/state/$id.status"
+  age "$home/state/$id.meta" "$home/state/$id.status"
+}
+
+test_sandbox_child_is_reconciled_without_its_host() {
+  make_world sandbox-child
+  write_child "$MAIN" local-child 'working: quiet since'
+  write_sandbox_child "$MAIN" sbx-child 'failed: the suite cannot run on this image'
+  cat > "$WORLD/fakebin/fm-crew-state.sh" <<'SH'
+#!/usr/bin/env bash
+printf '%s %s\n' "$1" "${FM_CREW_STATE_LOCAL_FOLD:-unset}" >> "${FM_LOCAL_FOLD_LOG:?}"
+printf 'state: unknown · source: fake\n'
+SH
+  chmod +x "$WORLD/fakebin/fm-crew-state.sh"
+  export FM_LOCAL_FOLD_LOG="$WORLD/local-fold.log"
+  run_reconcile "$MAIN" --startup
+  unset FM_LOCAL_FOLD_LOG
+  assert_grep 'sbx-child 1' "$WORLD/local-fold.log" "a sandbox child's state read was not the local fold"
+  assert_grep 'local-child 0' "$WORLD/local-fold.log" "a local child's state read changed"
+
+  # The real reader then answers from the mirrored log, with no transport call.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexit 255\n' "$WORLD/ssh.log" > "$WORLD/fakebin/ssh"
+  chmod +x "$WORLD/fakebin/ssh"
+  rm -rf "$MAIN/state/terminal-outcomes" "$MAIN/state/.inactive-outcome-reconcile" \
+    "$MAIN/state/local-child.meta" "$MAIN/state/local-child.status" "$MAIN/state/local-child.turn-ended"
+  PATH="$WORLD/fakebin:$PATH" FM_ROOT_OVERRIDE="$WORLD/root" FM_HOME="$MAIN" \
+    FM_STATE_OVERRIDE="$MAIN/state" FM_DATA_OVERRIDE="$MAIN/data" FM_CONFIG_OVERRIDE="$MAIN/config" \
+    FM_INACTIVE_RECONCILE_SECS=60 FM_SSH_BIN="$WORLD/fakebin/ssh" \
+    FM_FORGE_LOG="$WORLD/forge.log" "$RECON" scan --startup
+  [ ! -s "$WORLD/ssh.log" ] || fail "the inactive scan read a sandbox host: $(cat "$WORLD/ssh.log")"
+  grep -q 'inactive-outcome:' "$MAIN/state/.wake-queue" 2>/dev/null \
+    || fail "a sandbox child's mirrored failed: line was not reconciled from the local fold"
+
+  # In a secondmate home, a sandbox child's done gate never probes the
+  # recorded worktree path, so a done with no recorded PR is not published even
+  # though a reachable local copy sits at that path.
+  bind_secondmate local
+  write_sandbox_child "$MATE" sbx-ship 'done: PR https://example.test/owner/repo/pull/1 checks green'
+  FM_FAKE_CREW_STATE='unknown' run_reconcile "$MATE"
+  if [ -s "$MAIN/state/mate.status" ] && grep -q 'child-outcome-sbx-ship-done' "$MAIN/state/mate.status"; then
+    fail "a sandbox child's done was published on the strength of a local path its worktree does not live at"
+  fi
+  [ "$(outcome_count "$MATE" reported)" = 0 ] || fail "a sandbox child's unverifiable done left a delivery receipt"
+  pass "a sandbox child is reconciled from the mirrored log alone, never through its host or a local worktree probe"
+}
+
 test_reconciliation_never_calls_forge() {
   make_world forge; write_child "$MAIN" child 'done: green'
   FM_FAKE_CREW_STATE='done' run_reconcile "$MAIN" --startup
@@ -1075,5 +1137,6 @@ test_notice_recovery_does_not_duplicate_wake
 test_missing_parent_binding_names_itself
 test_reconciliation_never_calls_forge
 test_reconciliation_sets_no_forge_mode_for_state_read
+test_sandbox_child_is_reconciled_without_its_host
 
 echo "all inactive reconciliation tests passed"

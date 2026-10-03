@@ -706,6 +706,38 @@ test_ring_ladder_policy() {
   pass "inbox: the re-ring ladder paces by grace, escalates once, and resets on ack"
 }
 
+# A sandbox task's records live on its host, so its ladder takes the oldest
+# unacknowledged record and its age as input and keeps its bookkeeping in a
+# directory the caller names, under the same policy as a local inbox.
+test_observed_ring_ladder_policy() {
+  local dir action
+  dir="$TMP_ROOT/observed-ladder/ladder"; mkdir -p "$dir"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg 10)
+  [ "$action" = quiet ] || fail "an observed record inside grace should be quiet, got: $action"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg 600)
+  [ "$action" = "ring 001.msg" ] || fail "an aged observed record should be due a ring by name, got: $action"
+  inbox_lib "$dir" fm_task_inbox_record_ring_observed "$dir" 001.msg || fail "the observed ring was not recorded"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg 600)
+  [ "$action" = quiet ] || fail "an observed ring within the spacing window should be quiet, got: $action"
+  printf '001.msg\t3\t100\n' > "$dir/.ring-state"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 FM_TASK_INBOX_RING_MAX=3 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg 600)
+  [ "$action" = "escalate 001.msg 3" ] || fail "a spent observed budget should escalate, got: $action"
+  inbox_lib "$dir" fm_task_inbox_record_escalated_observed "$dir" 001.msg || fail "the observed escalation was not recorded"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 FM_TASK_INBOX_RING_MAX=3 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg 600)
+  [ "$action" = quiet ] || fail "an escalated observed record should stay quiet, got: $action"
+  action=$(FM_TASK_INBOX_GRACE_SECS=60 FM_TASK_INBOX_RING_MAX=3 inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 002.msg 600)
+  [ "$action" = "ring 002.msg" ] || fail "a newer oldest record should start a fresh ladder, got: $action"
+  action=$(inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" none 0)
+  [ "$action" = quiet ] || fail "an empty observed inbox should be quiet, got: $action"
+  [ ! -e "$dir/.ring-state" ] && [ ! -e "$dir/.escalated" ] || fail "an empty observed inbox should reset the ladder"
+  inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" ../001.msg 600 >/dev/null \
+    && fail "an observed record name that is not NNN.msg was accepted"
+  inbox_lib "$dir" fm_task_inbox_due_action_observed "$dir" 001.msg soon >/dev/null \
+    && fail "an observed age that is not a number was accepted"
+  [ ! -e "$TMP_ROOT/observed-ladder/ladder.inbox" ] || fail "the observed ladder created a local inbox"
+  pass "inbox: the observed ladder paces a host's records by name and age under the same policy"
+}
+
 setup_watch_case() {  # <name> -> echoes case dir; state in <dir>/state
   local name=$1 dir
   dir="$TMP_ROOT/$name"
@@ -1031,6 +1063,7 @@ test_fire_and_forget_records_never_enter_the_ladder
 test_fire_and_forget_retry_is_owed_once
 test_fire_and_forget_retry_is_quiet_without_the_flag
 test_ring_ladder_policy
+test_observed_ring_ladder_policy
 test_watcher_rerings_idle_pane_quietly
 test_watcher_waits_on_busy_pane
 test_watcher_quiet_on_healthy_inbox

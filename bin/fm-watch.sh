@@ -149,6 +149,16 @@
 #                          budget and is parked until a probe reads it live
 #                          again (FM_SECONDMATE_LIVENESS_MAX_ATTEMPTS and
 #                          FM_SECONDMATE_LIVENESS_WINDOW_SECS)
+#   check: sandbox <id> unreachable: <n> consecutive observations ...
+#                          a sandbox task's host could not be observed
+#                          FM_REMOTE_UNREACHABLE_COUNT times in a row; one wake
+#                          per failure streak, its worker's state unknown and
+#                          never dead (sandbox_observe_check owns the sandbox
+#                          observe branch, whose stale wakes - a stale pane, the
+#                          steering ladder's escalations, and the once-per-
+#                          incarnation `agent dead|missing on sandbox host`
+#                          report - keep the stale: reasons above, read at the
+#                          FM_REMOTE_OBSERVE_SECS cadence)
 # For normal supervision, resume the session-start primary-harness protocol
 # after each printed reason. Direct duplicate invocations of this script still
 # no-op through the watcher singleton lock. A live holder whose beacon is stale
@@ -230,9 +240,14 @@ WATCH_HOME_EXISTED=0
 # shellcheck source=bin/fm-afk-contract.sh
 . "$SCRIPT_DIR/fm-afk-contract.sh"
 # Remote dispatch: bin/fm-remote-route-lib.sh owns whether a record is local,
-# a remote secondmate, or a sandbox task (secondmate_wake_stall_tick below).
+# a remote secondmate, or a sandbox task (secondmate_wake_stall_tick and
+# sandbox_observe_check below).
 # shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
 . "$SCRIPT_DIR/fm-remote-route-lib.sh"
+# The boot-time absence proof a sandbox's dead-record report names
+# (sandbox_dead_record below); the library is side-effect free to source.
+# shellcheck source=/dev/null # Analyzed separately as a canonical lint root.
+. "$SCRIPT_DIR/fm-control-lib.sh"
 # Persistent-secondmate endpoint liveness: the shared probe/relaunch library is
 # the same one bin/fm-bootstrap.sh's session-start sweep drives, so ordinary
 # supervision recovers a positively dead or missing mate through the identical
@@ -336,7 +351,8 @@ STALE_ESCALATE_SECS=${FM_STALE_ESCALATE_SECS:-240}  # idle secs before a provabl
 # so a hung foreground call can remain hidden even while its rendered busy
 # footer changes every poll. BUSY_TURN_MAX_SECS bounds how long any busy pane
 # may go without a completed turn or explicit native-harness progress (the
-# marker-selection contract is in busy_turn_over_age below). Once this bound
+# marker-selection contract is crew_busy_turn_marker in bin/fm-classify-lib.sh,
+# which busy_turn_over_age below ages). Once this bound
 # is crossed, busy_turn_over_age routes the pane through
 # busy_turn_bound_check, which hands a crossed bound to the same
 # STALE_ESCALATE_SECS-paced wedge_timer_check used for a provably-working
@@ -373,6 +389,17 @@ SECONDMATE_LIVENESS_MAX_ATTEMPTS=${FM_SECONDMATE_LIVENESS_MAX_ATTEMPTS:-}
 case "$SECONDMATE_LIVENESS_MAX_ATTEMPTS" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_MAX_ATTEMPTS=3 ;; esac
 SECONDMATE_LIVENESS_WINDOW_SECS=${FM_SECONDMATE_LIVENESS_WINDOW_SECS:-}
 case "$SECONDMATE_LIVENESS_WINDOW_SECS" in ''|*[!0-9]*|0) SECONDMATE_LIVENESS_WINDOW_SECS=3600 ;; esac
+# A sandbox task's pane, agent, worktree, and inbox live on its VM, so the stale
+# loop observes it through its host's observe verb (sandbox_observe_check
+# below): one bounded remote call per task per REMOTE_OBSERVE_SECS, never on
+# every poll, bounded by REMOTE_OBSERVE_TIMEOUT. REMOTE_UNREACHABLE_COUNT
+# consecutive failed observations produce the one keyed unreachable check wake.
+REMOTE_OBSERVE_SECS=${FM_REMOTE_OBSERVE_SECS:-}
+case "$REMOTE_OBSERVE_SECS" in ''|*[!0-9]*|0) REMOTE_OBSERVE_SECS=60 ;; esac
+REMOTE_OBSERVE_TIMEOUT=${FM_REMOTE_OBSERVE_TIMEOUT:-}
+case "$REMOTE_OBSERVE_TIMEOUT" in ''|*[!0-9]*|0) REMOTE_OBSERVE_TIMEOUT=20 ;; esac
+REMOTE_UNREACHABLE_COUNT=${FM_REMOTE_UNREACHABLE_COUNT:-}
+case "$REMOTE_UNREACHABLE_COUNT" in ''|*[!0-9]*|0) REMOTE_UNREACHABLE_COUNT=3 ;; esac
 # A crew that declared a pause is idling on a known external wait, so its stale
 # pane is absorbed rather than wedge-escalated.
 # A captain-held or paused crew whose agent has confidently exited uses the same
@@ -440,6 +467,11 @@ hash_pane() {
 # its fm-spawn seed from reading as provably working.
 window_is_busy() {  # <window> <tail40>
   local w=$1 tail40=$2 task meta verdict
+  # A sandbox window's verdict is the one its host's observe classified.
+  if window_observed "$w"; then
+    [ "$OBS_BUSY" = busy ]
+    return
+  fi
   task=$(window_to_task "$w" "$STATE")
   meta="$STATE/$task.meta"
   if [ -n "$task" ] && [ -f "$meta" ]; then
@@ -1140,6 +1172,456 @@ secondmate_liveness_tick() {
   [ "$failed" -eq 0 ]
 }
 
+# --- sandbox tasks: supervision through the host's observe ---------------------
+#
+# A sandbox task's pane, agent, worktree, and steering inbox live on its VM, so
+# the stale loop cannot read them here; it observes the task instead through its
+# host's observe verb (bin/fm-remote-task-control.sh, reached through
+# bin/fm-on.sh's task route that bin/fm-remote-route-lib.sh resolves). That is
+# one call per task per REMOTE_OBSERVE_SECS, bounded by REMOTE_OBSERVE_TIMEOUT
+# and by bin/fm-remote-receive.sh's byte caps, so remote calls stay off the
+# ordinary poll: a poll on which no observation is due reads nothing for the
+# task. A due observation feeds the existing machinery rather than a second
+# copy of it:
+#   - the re-ring ladder (fm_task_inbox_due_action_observed) gets the oldest
+#     unacknowledged record and its age on the host's clock, a busy verdict
+#     waits, a due ring crosses to the host's ring verb, and a spent budget or
+#     a positively gone agent surfaces through the same stale reasons a local
+#     task's ladder uses;
+#   - a VM-side `dead` or `missing` agent takes the once-per-incarnation
+#     dead-record report (sandbox_dead_record), keyed on the record's
+#     spawn_gen, and is never treated as a wedge;
+#   - otherwise the observed pane hash and busy verdict enter the ordinary
+#     hash, busy, and wedge logic of the stale loop, whose agent, liveness,
+#     worktree-write, and busy-turn reads take the observation for that window
+#     (window_observed) instead of a local read.
+# Stale reads therefore run at the observe cadence, and the worktree-write
+# deferral uses the host's newest-write field instead of a local walk. Turn-end
+# notifications stay on the VM, so mirrored status lines remain the primary
+# signal.
+# Transport loss, a host refusal, or a malformed observation is unknown, never
+# stale and never dead. Each failure extends the task's streak, and the
+# REMOTE_UNREACHABLE_COUNT-th consecutive one queues one keyed `check: sandbox
+# <id> unreachable` wake for that streak; a host that keeps failing after it is
+# observed every fifth cadence until it answers, and its next good observation
+# ends the streak. No observation runs while a lifecycle action holds the task -
+# a control action, its teardown, or the spawn still placing it - so a relaunch
+# in flight or a launch still under way is never reported as a death.
+# Bookkeeping lives in state/.sandbox-observe-<id>/: tick (the cadence marker),
+# last (the newest valid observation plus observed_at on this home's clock,
+# which bin/fm-fleet-snapshot.sh reads), failures and alerted (the streak), and
+# the ladder's .ring-state and .escalated; teardown removes it.
+
+OBS_WINDOW=
+OBS_TASK=
+OBS_HOST=
+OBS_LOCAL_AT=
+OBS_NOW=
+OBS_BOOT=
+OBS_AGENT=
+OBS_BUSY=
+OBS_BUSY_SOURCE=
+OBS_HASH=
+OBS_WRITE=
+OBS_INBOX_OLDEST=
+OBS_INBOX_OLDEST_AT=
+OBS_TURN_AT=
+OBS_DEFECT=
+OBS_BLOCK=
+
+# 0 iff <window>/<task> is the sandbox task whose fresh observation this poll
+# holds; the stale loop's endpoint reads take that observation instead.
+window_observed() { [ -n "$OBS_WINDOW" ] && [ "$OBS_WINDOW" = "$1" ]; }
+window_observed_task() { [ -n "$OBS_WINDOW" ] && [ "$OBS_TASK" = "$1" ]; }
+
+# The recovery-grade agent state of <window>: the observed one for a sandbox
+# window, else the backend's own read, unreadable when that read fails.
+window_agent_state() {  # <window>
+  local state
+  if window_observed "$1"; then
+    printf '%s' "$OBS_AGENT"
+    return 0
+  fi
+  state=$(fm_backend_agent_state "$(window_backend "$1")" "$1" 2>/dev/null) || state=unreadable
+  printf '%s' "$state"
+}
+
+# fm_backend_agent_alive's alive / dead / unknown reading of <window>.
+window_agent_alive() {  # <window>
+  local alive
+  if window_observed "$1"; then
+    case "$OBS_AGENT" in
+      alive) printf 'alive' ;;
+      dead|missing) printf 'dead' ;;
+      *) printf 'unknown' ;;
+    esac
+    return 0
+  fi
+  alive=$(fm_backend_agent_alive "$(window_backend "$1")" "$1" 2>/dev/null) || alive=unknown
+  printf '%s' "$alive"
+}
+
+# The worktree-write evidence of crew_worktree_written_since, from the host's
+# newest-write field for a sandbox task: written since <anchor> iff that write
+# is younger on the host's clock than the anchor is on this one.
+task_worktree_written_since() {  # <task> <anchor-file>
+  local anchor_mtime
+  if window_observed_task "$1"; then
+    case "$OBS_WRITE" in ''|*[!0-9]*) return 1 ;; esac
+    anchor_mtime=$(stat_mtime "$2") || return 1
+    case "$anchor_mtime" in ''|*[!0-9]*) return 1 ;; esac
+    [ $(( OBS_NOW - OBS_WRITE )) -lt $(( OBS_LOCAL_AT - anchor_mtime )) ]
+    return
+  fi
+  crew_worktree_written_since "$1" "$STATE" "$2"
+}
+
+# 0 iff <task>'s record names a sandbox task (bin/fm-remote-route-lib.sh); a
+# record without placement= never does, so the common case reads one grep.
+sandbox_task_route() {  # <task>
+  local meta="$STATE/$1.meta"
+  [ -f "$meta" ] && [ ! -L "$meta" ] || return 1
+  LC_ALL=C grep -q '^placement=' "$meta" 2>/dev/null || return 1
+  fm_remote_route_resolve "$meta" "$1" || return 1
+  [ "$FM_REMOTE_ROUTE_KIND" = task ]
+}
+
+# 0 while a live lifecycle action holds <task>: a control action or teardown
+# (its control lock) or the sandbox spawn that is still placing it (its spawn
+# lock, held while the record is only provisional).
+task_lifecycle_in_progress() {  # <task>
+  local lock pid
+  for lock in "$STATE/.control-$1.lock" "$STATE/.spawn-$1.lock"; do
+    [ -d "$lock" ] || continue
+    pid=$(cat "$lock/pid" 2>/dev/null || true)
+    [ -n "$pid" ] && fm_pid_alive "$pid" && return 0
+  done
+  return 1
+}
+
+# One printable line of at most 200 bytes from untrusted host text.
+sandbox_first_line() {  # <text>
+  printf '%s\n' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177' | awk 'NF { print; exit }' | cut -c1-200
+}
+
+# One bounded host verb for <task>. Sets SBX_READ_OUT (its stdout) and
+# SBX_READ_FAILURE (empty on success, else why the read failed); 0 only for a
+# completed read that exited 0.
+sandbox_remote_read() {  # <task> <verb> [args...]
+  local task=$1 dir status err
+  SBX_READ_OUT=
+  SBX_READ_FAILURE=
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/fm-watch-sandbox.XXXXXX") || {
+    SBX_READ_FAILURE="no local scratch directory for the read"
+    return 1
+  }
+  if bash "$SCRIPT_DIR/fm-remote-receive.sh" "$REMOTE_OBSERVE_TIMEOUT" 65536 65536 "$dir/status" \
+      "$SCRIPT_DIR/fm-on.sh" "$task" fm-remote-task-control.sh "${@:2}" \
+      < /dev/null > "$dir/out" 2> "$dir/err"; then
+    status=$(cat "$dir/status" 2>/dev/null || true)
+  else
+    status=receiver-failed
+  fi
+  SBX_READ_OUT=$(cat "$dir/out" 2>/dev/null || true)
+  err=$(sandbox_first_line "$(cat "$dir/err" 2>/dev/null || true)")
+  rm -rf -- "$dir"
+  case "$status" in
+    exit:0) return 0 ;;
+    exit:255) SBX_READ_FAILURE="SSH exit 255: the host could not be reached" ;;
+    exit:*) SBX_READ_FAILURE="the host refused (exit ${status#exit:})${err:+: $err}" ;;
+    timeout) SBX_READ_FAILURE="no answer within ${REMOTE_OBSERVE_TIMEOUT}s" ;;
+    over:*) SBX_READ_FAILURE="the host's answer exceeded its byte bound" ;;
+    *) SBX_READ_FAILURE="the bounded read failed here${err:+: $err}" ;;
+  esac
+  return 1
+}
+
+# Validate one observe block field by field into OBS_*, or set OBS_DEFECT and
+# return 1. The block is untrusted input about its own task. turn_at is
+# optional, because a host converged before it existed omits it.
+sandbox_observe_parse() {  # <block>
+  local line key value seen=' ' schema=''
+  OBS_DEFECT=
+  OBS_NOW=''
+  OBS_BOOT=''
+  OBS_AGENT=''
+  OBS_BUSY=''
+  OBS_BUSY_SOURCE=''
+  OBS_HASH=''
+  OBS_WRITE=''
+  OBS_INBOX_OLDEST=''
+  OBS_INBOX_OLDEST_AT=''
+  OBS_TURN_AT=unknown
+  while IFS= read -r line; do
+    case "$line" in *=*) ;; *) OBS_DEFECT="a line that is not key=value"; return 1 ;; esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$seen" in *" $key "*) OBS_DEFECT="field $key appears more than once"; return 1 ;; esac
+    seen="$seen$key "
+    case "$value" in *[[:cntrl:]]*) OBS_DEFECT="field $key holds a control character"; return 1 ;; esac
+    case "$key" in
+      schema) schema=$value ;;
+      now) OBS_NOW=$value ;;
+      boot) OBS_BOOT=$value ;;
+      agent) OBS_AGENT=$value ;;
+      busy) OBS_BUSY=$value ;;
+      busy_source) OBS_BUSY_SOURCE=$value ;;
+      pane_hash) OBS_HASH=$value ;;
+      worktree_write) OBS_WRITE=$value ;;
+      inbox_oldest) OBS_INBOX_OLDEST=$value ;;
+      inbox_oldest_at) OBS_INBOX_OLDEST_AT=$value ;;
+      turn_at) OBS_TURN_AT=$value ;;
+      *) OBS_DEFECT="unknown field $key"; return 1 ;;
+    esac
+  done <<OBSERVE
+$1
+OBSERVE
+  for key in schema now boot agent busy busy_source pane_hash worktree_write inbox_oldest inbox_oldest_at; do
+    case "$seen" in *" $key "*) ;; *) OBS_DEFECT="field $key is missing"; return 1 ;; esac
+  done
+  [ "$schema" = fm-remote-task-control.v1 ] || { OBS_DEFECT="schema is not fm-remote-task-control.v1"; return 1; }
+  case "$OBS_NOW" in ''|*[!0-9]*) OBS_DEFECT="now is not an epoch"; return 1 ;; esac
+  case "$OBS_BOOT" in unknown) ;; ''|*[!0-9]*) OBS_DEFECT="boot is neither an epoch nor unknown"; return 1 ;; esac
+  case "$OBS_AGENT" in
+    alive|dead|missing|ambiguous|unreadable|unverified) ;;
+    *) OBS_DEFECT="agent is not a recovery-grade verdict"; return 1 ;;
+  esac
+  case "$OBS_BUSY" in busy|idle|unknown|dead) ;; *) OBS_DEFECT="busy is not busy, idle, unknown, or dead"; return 1 ;; esac
+  case "$OBS_BUSY_SOURCE" in ''|*[!A-Za-z0-9._-]*) OBS_DEFECT="busy_source is not a source token"; return 1 ;; esac
+  [ "${#OBS_BUSY_SOURCE}" -le 64 ] || { OBS_DEFECT="busy_source is not a source token"; return 1; }
+  case "$OBS_HASH" in unknown) ;; ''|*[!0-9a-f]*) OBS_DEFECT="pane_hash is not a hash"; return 1 ;; esac
+  [ "${#OBS_HASH}" -le 64 ] || { OBS_DEFECT="pane_hash is not a hash"; return 1; }
+  case "$OBS_WRITE" in none|unknown) ;; ''|*[!0-9]*) OBS_DEFECT="worktree_write is not an epoch"; return 1 ;; esac
+  case "$OBS_INBOX_OLDEST" in
+    none) ;;
+    *) fm_task_inbox_seq_of "$OBS_INBOX_OLDEST" >/dev/null || { OBS_DEFECT="inbox_oldest is not a record name"; return 1; } ;;
+  esac
+  case "$OBS_INBOX_OLDEST_AT" in none|unknown) ;; ''|*[!0-9]*) OBS_DEFECT="inbox_oldest_at is not an epoch"; return 1 ;; esac
+  case "$OBS_TURN_AT" in unknown) ;; ''|*[!0-9]*) OBS_DEFECT="turn_at is not an epoch"; return 1 ;; esac
+  OBS_BLOCK=$1
+  return 0
+}
+
+# The streak of consecutive failed observations of <dir>'s task: count, then
+# the epoch the streak began.
+sandbox_observe_streak() {  # <dir>
+  local count='' since=''
+  read -r count since < "$1/failures" 2>/dev/null || true
+  case "$count" in ''|*[!0-9]*) count=0 ;; esac
+  case "$since" in ''|*[!0-9]*) since=0 ;; esac
+  printf '%s %s' "$count" "$since"
+}
+
+# The cadence for <dir>'s task: every REMOTE_OBSERVE_SECS, and every fifth one
+# once its host has failed often enough to be reported unreachable.
+sandbox_observe_interval() {  # <dir>
+  local streak
+  streak=$(sandbox_observe_streak "$1")
+  if [ "${streak%% *}" -ge "$REMOTE_UNREACHABLE_COUNT" ]; then
+    printf '%s' $(( REMOTE_OBSERVE_SECS * 5 ))
+  else
+    printf '%s' "$REMOTE_OBSERVE_SECS"
+  fi
+}
+
+# One failed observation: extend the streak and, at REMOTE_UNREACHABLE_COUNT,
+# queue the streak's one keyed unreachable wake. Never stale, never dead.
+sandbox_observe_failed() {  # <task> <dir> <host> <why>
+  local task=$1 dir=$2 host=$3 why=$4 streak count since now notify_key reason queued
+  now=$(date +%s)
+  streak=$(sandbox_observe_streak "$dir")
+  count=$(( ${streak%% *} + 1 ))
+  since=${streak#* }
+  [ "$count" -gt 1 ] && [ "$since" -gt 0 ] || since=$now
+  printf '%s %s\n' "$count" "$since" > "$dir/failures" || return 1
+  triage_log "sandbox $task observation failed ($count in a row): $why"
+  [ "$count" -ge "$REMOTE_UNREACHABLE_COUNT" ] || return 0
+  [ ! -e "$dir/alerted" ] || return 0
+  notify_key="sandbox-unreachable-$task-$since"
+  reason="check: sandbox $task unreachable: $count consecutive observations of its host $host failed over $(( now - since ))s ($why); its worker's state is unknown, not dead - check the sandbox and its provider before any recovery"
+  queued=$(fm_wake_queued_keys check)
+  if ! printf '%s\n' "$queued" | grep -Fx "$notify_key" >/dev/null 2>&1; then
+    fm_wake_append check "$notify_key" "$reason" || exit 1
+  fi
+  printf '%s\n' "$notify_key" > "$dir/alerted" || return 1
+  wake "$reason"
+}
+
+# One bounded ring of <task>'s host doorbell for <record>; prints rang, skipped,
+# failed, unavailable, handled, absent, or unreached.
+sandbox_ring() {  # <task> <record-name>
+  local result
+  if ! sandbox_remote_read "$1" ring "$1" "$2"; then
+    printf 'unreached'
+    return 0
+  fi
+  if [ "$(printf '%s\n' "$SBX_READ_OUT" | sed -n '1p')" != schema=fm-remote-task-control.v1 ]; then
+    printf 'failed'
+    return 0
+  fi
+  result=$(printf '%s\n' "$SBX_READ_OUT" | sed -n 's/^ring=//p' | tail -1)
+  case "$result" in
+    rang|skipped|failed|unavailable|handled|absent) printf '%s' "$result" ;;
+    *) printf 'failed' ;;
+  esac
+}
+
+sandbox_inbox_escalate() {  # <window> <task> <dir> <record-name> <reason>
+  fm_wake_append stale "$1" "$5" || exit 1
+  if ! fm_task_inbox_record_escalated_observed "$3" "$4"; then
+    echo "error: stale wake was queued for $2 but its sandbox inbox escalation marker could not be written" >&2
+    exit 1
+  fi
+  wake "$5"
+}
+
+# The steering re-ring ladder for a sandbox task, driven by its observation;
+# inbox_steer_check above is the local twin whose policy it shares.
+sandbox_inbox_ladder() {  # <window> <task> <dir>
+  local w=$1 task=$2 dir=$3 age=0 action verb name count result where reason
+  case "$OBS_INBOX_OLDEST" in
+    none) ;;
+    *)
+      case "$OBS_INBOX_OLDEST_AT" in ''|*[!0-9]*) return 0 ;; esac
+      age=$(( OBS_NOW - OBS_INBOX_OLDEST_AT ))
+      [ "$age" -ge 0 ] || age=0
+      ;;
+  esac
+  action=$(fm_task_inbox_due_action_observed "$dir" "$OBS_INBOX_OLDEST" "$age") || return 0
+  verb=${action%% *}
+  [ "$verb" != quiet ] || return 0
+  name=${action#* }
+  count=
+  case "$verb" in
+    escalate)
+      count=${name##* }
+      name=${name% *}
+      ;;
+  esac
+  where="$name in its sandbox inbox on $OBS_HOST"
+  case "$OBS_AGENT" in
+    dead|missing)
+      sandbox_inbox_escalate "$w" "$task" "$dir" "$name" \
+        "stale: $w (unread firstmate instruction: $where is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
+      return 0
+      ;;
+  esac
+  [ "$OBS_BUSY" != busy ] || return 0
+  case "$verb" in
+    ring)
+      result=$(sandbox_ring "$task" "$name")
+      case "$result" in
+        unavailable)
+          sandbox_inbox_escalate "$w" "$task" "$dir" "$name" \
+            "stale: $w (unread firstmate instruction: $where is unhandled and the worker's agent has exited or its endpoint is missing, so the doorbell was not typed; recover the worker)"
+          return 0
+          ;;
+        handled|absent) return 0 ;;
+      esac
+      if ! fm_task_inbox_record_ring_observed "$dir" "$name"; then
+        reason="stale: $w (steering-inbox ladder bookkeeping unwritable: $dir/.ring-state cannot be written while $where stays unhandled; the doorbell cannot advance toward escalation - inspect $dir)"
+        fm_wake_append stale "$w" "$reason" || exit 1
+        wake "$reason"
+      fi
+      triage_log "steer-inbox delivery attempt: $task $name result=$result (sandbox host $OBS_HOST)"
+      ;;
+    escalate)
+      sandbox_inbox_escalate "$w" "$task" "$dir" "$name" \
+        "stale: $w (unread firstmate instruction: $where still unhandled after $count doorbell delivery attempts with an idle pane; inspect the worker)"
+      ;;
+  esac
+}
+
+# The once-per-incarnation dead-record report for a sandbox task whose host
+# positively reads its agent dead or its endpoint missing - wedge_dead_record's
+# contract and marker, keyed on the record's spawn_gen (republished with every
+# relaunch) since the busy incarnation lives on the host. The hint names the
+# recovery the host can actually perform: a dead endpoint relaunches in place,
+# a missing one only once the host has rebooted since this incarnation's launch
+# (fm_control_boot_proves_absence), and otherwise the sandbox needs inspection.
+sandbox_dead_record() {  # <window> <task>
+  local w=$1 task=$2 key marker id detail hint reason
+  key=$(window_key "$w")
+  marker="$STATE/.dead-reported-$key"
+  id=$(fm_meta_get "$STATE/$task.meta" spawn_gen)
+  [ -n "$id" ] || id=$OBS_HASH
+  if [ "$(cat "$marker" 2>/dev/null || true)" = "$OBS_AGENT $id" ]; then
+    triage_log "absorbed sandbox $task (agent $OBS_AGENT, already reported once): $w"
+    return 0
+  fi
+  case "$OBS_AGENT" in
+    dead)
+      detail='its endpoint is still there with no agent running in it'
+      hint="relaunch it in place with bin/fm-control.sh $task relaunch, or reconcile this record"
+      ;;
+    *)
+      detail='its recorded endpoint is gone there'
+      if fm_control_boot_proves_absence "$OBS_BOOT" "$id"; then
+        hint="the sandbox booted after this worker launched, so no tmux server survived; relaunch it from its brief with bin/fm-control.sh $task relaunch"
+      else
+        hint="the host has not rebooted since this worker launched, so it cannot prove that endpoint absent; inspect the sandbox before any relaunch"
+      fi
+      ;;
+  esac
+  reason="stale: $w (agent $OBS_AGENT on sandbox host $OBS_HOST - $detail, so this is not a wedge; reported once and not re-escalated while it stays that way - $hint; check for unlanded work before any cleanup)"
+  # Append before the marker, as wedge_dead_record does.
+  fm_wake_append stale "$w" "$reason" || exit 1
+  printf '%s %s' "$OBS_AGENT" "$id" > "$marker"
+  clear_write_tracking "$key"
+  wake "$reason"
+}
+
+# Observe one sandbox task when its cadence is due. Returns 0 with OBS_* set and
+# OBS_WINDOW naming <window> when a fresh, usable observation should enter the
+# stale loop's hash, busy, and wedge logic, and 1 when the loop has nothing to
+# classify for this window this poll (not due, deferred, failed, handled as a
+# dead record, or no pane hash).
+sandbox_observe_check() {  # <window> <task>
+  local w=$1 task=$2 dir host
+  OBS_WINDOW=
+  host=$FM_REMOTE_ROUTE_HOST
+  dir="$STATE/.sandbox-observe-$task"
+  [ ! -L "$dir" ] || return 1
+  [ "$(age_of "$dir/tick")" -ge "$(sandbox_observe_interval "$dir")" ] || return 1
+  if task_lifecycle_in_progress "$task"; then
+    triage_log "sandbox $task observation deferred: a lifecycle action holds it"
+    return 1
+  fi
+  [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 1
+  touch "$dir/tick" || return 1
+  if ! sandbox_remote_read "$task" observe "$task"; then
+    sandbox_observe_failed "$task" "$dir" "$host" "$SBX_READ_FAILURE" || return 1
+    return 1
+  fi
+  if ! sandbox_observe_parse "$SBX_READ_OUT"; then
+    sandbox_observe_failed "$task" "$dir" "$host" "the host's observation was malformed: $OBS_DEFECT" || return 1
+    return 1
+  fi
+  OBS_LOCAL_AT=$(date +%s)
+  if ! { printf '%s\nobserved_at=%s\n' "$OBS_BLOCK" "$OBS_LOCAL_AT" > "$dir/last.new" \
+      && mv -f "$dir/last.new" "$dir/last"; }; then
+    rm -f "$dir/last.new"
+  fi
+  rm -f "$dir/failures" "$dir/alerted"
+  [ "$OBS_AGENT" != alive ] || rm -f "$STATE/.dead-reported-$(window_key "$w")"
+  OBS_WINDOW=$w
+  OBS_TASK=$task
+  OBS_HOST=$host
+  sandbox_inbox_ladder "$w" "$task" "$dir"
+  case "$OBS_AGENT" in
+    dead|missing)
+      sandbox_dead_record "$w" "$task"
+      OBS_WINDOW=
+      return 1
+      ;;
+  esac
+  if [ "$OBS_HASH" = unknown ]; then
+    OBS_WINDOW=
+    return 1
+  fi
+  return 0
+}
+
 # Consecutive wedge-escalation count for a window past FM_WEDGE_DEMAND_INSPECT_COUNT
 # (default 3): a pane that keeps re-wedging on the SAME stale hash - each
 # escalation gets absorbed again as "still validating" one poll later, since the
@@ -1474,7 +1956,7 @@ wedge_dead_record() {  # <window> <since-file> <triage-label> <idle-age> <pane-h
   local win=$1 since_file=$2 label=$3 age=$4 hash=$5 task=$6 key marker agent_state detail reason gen id
   key=$(window_key "$win")
   marker="$STATE/.dead-reported-$key"
-  agent_state=$(fm_backend_agent_state "$(window_backend "$win")" "$win" 2>/dev/null) || agent_state=unreadable
+  agent_state=$(window_agent_state "$win")
   case "$agent_state" in
     dead) detail='the endpoint is still there with no agent running in it' ;;
     missing) detail='the recorded endpoint is gone' ;;
@@ -1540,7 +2022,7 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
            wedge_defer_wait "$win" "$since_file" "$label" "$age" "$evidence"; then
           return 0
         fi
-        if crew_worktree_written_since "$task" "$STATE" "$since_file"; then
+        if task_worktree_written_since "$task" "$since_file"; then
           wedge_defer_writing "$win" "$since_file" "$label" "$age"
           return 0
         fi
@@ -1563,17 +2045,20 @@ wedge_timer_check() {  # <window> <since-file> <triage-label> <escalation-count-
 }
 
 # busy_turn_over_age: 0 iff the last completed turn or explicit native-harness
-# progress is at least BUSY_TURN_MAX_SECS old. Progress is actual observed model
-# or tool activity, never a timer or a busy footer. It does not emit a wake or
-# change semantic busy state. Before either marker exists, age the spawn record.
+# progress is at least BUSY_TURN_MAX_SECS old. It does not emit a wake or change
+# semantic busy state; crew_busy_turn_marker (bin/fm-classify-lib.sh) owns which
+# marker is that clock. A sandbox task's markers live on its host, whose observe
+# reports that same marker's time, aged against the host's own clock; a time it
+# could not read is as overdue as a missing marker is here.
 # The caller checks busy state and routes a crossed bound through inspection.
 busy_turn_over_age() {  # <task>
-  local task=$1 f progress
-  f="$STATE/$task.turn-ended"
-  [ -e "$f" ] || f="$STATE/$task.meta"
-  progress="$STATE/$task.progress"
-  if [ -f "$progress" ] && [ "$progress" -nt "$f" ]; then f="$progress"; fi
-  [ "$(age_of "$f")" -ge "$BUSY_TURN_MAX_SECS" ]
+  local task=$1
+  if window_observed_task "$task"; then
+    case "$OBS_TURN_AT" in ''|*[!0-9]*) return 0 ;; esac
+    [ $(( OBS_NOW - OBS_TURN_AT )) -ge "$BUSY_TURN_MAX_SECS" ]
+    return
+  fi
+  [ "$(age_of "$(crew_busy_turn_marker "$STATE" "$task")")" -ge "$BUSY_TURN_MAX_SECS" ]
 }
 
 # Absorb a stale pane under a declared external-wait pause (paused:) or a
@@ -1749,7 +2234,7 @@ pause_state_class() {  # <window> <task>
   kind=$(window_kind "$win")
   if [ -e "$STATE/.paused-$key" ] && [ "$(age_of "$recheck_file")" -lt "$STALE_ESCALATE_SECS" ]; then
     if [ "$kind" != secondmate ]; then
-      agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+      agent_alive=$(window_agent_alive "$win")
       if [ "$agent_alive" != dead ]; then
         rm -f "$recheck_file"
         printf 'none'
@@ -1766,7 +2251,7 @@ pause_state_class() {  # <window> <task>
     return
   fi
   if [ "$kind" != secondmate ]; then
-    agent_alive=$(fm_backend_agent_alive "$(window_backend "$win")" "$win" 2>/dev/null) || agent_alive=unknown
+    agent_alive=$(window_agent_alive "$win")
     if [ "$agent_alive" != dead ]; then
       rm -f "$recheck_file"
       printf 'none'
@@ -3005,9 +3490,16 @@ EOF
   while IFS= read -r w; do
     kind=$(window_kind "$w")
     task=$(window_to_task "$w" "$STATE")
-    # Steering-inbox loss detection runs before the secondmate stale
-    # exemption below, because a mate's steers land in an inbox too.
-    [ -z "$task" ] || inbox_steer_check "$w" "$task"
+    OBS_WINDOW=
+    if [ -n "$task" ] && sandbox_task_route "$task"; then
+      # A sandbox task is read only through its host's observe, on that
+      # cadence, which also runs its steering ladder; nothing here is local.
+      sandbox_observe_check "$w" "$task" || continue
+    else
+      # Steering-inbox loss detection runs before the secondmate stale
+      # exemption below, because a mate's steers land in an inbox too.
+      [ -z "$task" ] || inbox_steer_check "$w" "$task"
+    fi
     key=$(window_key "$w")
     last=$(status_declared_wait_line "$STATE/$task.status")
     if ! status_is_paused_or_captain_held "$last" && [ -e "$STATE/.paused-$key" ]; then
@@ -3023,8 +3515,13 @@ EOF
     if [ "$kind" = secondmate ] && ! status_is_paused_or_captain_held "$last"; then
       continue
     fi
-    tail40=$(fm_backend_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" 2>/dev/null) || continue
-    h=$(printf '%s' "$tail40" | hash_pane)
+    if window_observed "$w"; then
+      tail40=
+      h=$OBS_HASH
+    else
+      tail40=$(fm_backend_capture "$(window_backend "$w")" "$w" 40 "$(window_label "$w")" 2>/dev/null) || continue
+      h=$(printf '%s' "$tail40" | hash_pane)
+    fi
     hf="$STATE/.hash-$key"
     cf="$STATE/.count-$key"
     sf="$STATE/.stale-$key"
@@ -3218,6 +3715,8 @@ EOF
       fi
     fi
   done < <(recorded_windows)
+  # An observation describes its own window on this poll only.
+  OBS_WINDOW=
 
   # Heartbeat: the watcher runs a cheap fleet-scan at a regular cadence no matter
   # what. Time-based via .last-heartbeat mtime; interval doubles per consecutive

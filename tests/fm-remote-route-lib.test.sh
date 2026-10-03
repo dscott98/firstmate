@@ -8,10 +8,10 @@
 # fm-control.sh, fm-teardown.sh, and fm-crew-state.sh, the secondmate liveness
 # probe, and the watcher's foreign-queue stall tick against a home that holds a
 # sandbox task record, with a logging, always-failing ssh, tmux, and herdr first
-# on PATH. Peek, steering, and the current-state read cross only the transport
-# to the task's own host and fail loudly when it fails; teardown takes the
-# sandbox task branch, which refuses an unconfirmed sandbox; every other
-# consumer refuses with the library's named reason. None of those refusals
+# on PATH. Peek, steering, lifecycle control, and the current-state read cross
+# only the transport to the task's own host and fail loudly when it fails;
+# teardown takes the sandbox task branch, which refuses an unconfirmed sandbox;
+# every other consumer refuses with the library's named reason. None of those refusals
 # reaches the transport or a local backend. All leave the record
 # byte-identical, so a sandbox task can never fall into secondmate-only code or
 # be read as local.
@@ -328,18 +328,19 @@ test_send_routes_a_sandbox_task_by_id() {
   pass "fm-send routes a sandbox task by id to its host and refuses typing at its recorded window"
 }
 
-test_control_refuses_a_sandbox_task() {
+test_control_routes_a_sandbox_task() {
   local verb
   for verb in interrupt exit; do
     run_consumer fm-control.sh t1 "$verb"
-    expect_code 1 "$RC" "control $verb of a sandbox task"
-    assert_contains "$OUT" "task t1 runs in a sandbox on sbx-t1; lifecycle control is not supported" "control $verb names the refusal"
+    expect_code 1 "$RC" "control $verb of a sandbox task whose host fails"
+    assert_not_contains "$OUT" "malformed" "a sandbox task is routed by placement, not refused as malformed metadata"
+    assert_routed_only "control $verb" 1
   done
   run_consumer fm-control.sh t1 relaunch --note 'recover'
-  expect_code 1 "$RC" "control relaunch of a sandbox task"
-  assert_not_contains "$OUT" "malformed" "a sandbox task is refused by placement, not as malformed metadata"
-  assert_untouched "control"
-  pass "fm-control refuses every lifecycle verb for a sandbox task"
+  expect_code 1 "$RC" "control relaunch of a sandbox task with no brief in this home"
+  assert_contains "$OUT" "task t1 has no instructions at $HOME_DIR/data/t1/brief.md" "relaunch names the missing brief"
+  assert_untouched "a relaunch refused before its host"
+  pass "fm-control routes a sandbox task's lifecycle verbs to its host only"
 }
 
 # Teardown takes a sandbox task's own branch (tests/fm-teardown-remote-task.test.sh
@@ -456,7 +457,7 @@ test_sandbox_route_shape_and_disjointness
 test_shape_check_and_refusal_wording
 test_peek_routes_a_sandbox_task_by_id
 test_send_routes_a_sandbox_task_by_id
-test_control_refuses_a_sandbox_task
+test_control_routes_a_sandbox_task
 test_teardown_takes_the_sandbox_branch
 test_crew_state_routes_a_sandbox_task
 test_invalid_placement_is_refused_by_consumers

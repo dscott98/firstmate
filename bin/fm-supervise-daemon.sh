@@ -202,6 +202,11 @@ FM_HOME="${FM_HOME:-${FM_ROOT_OVERRIDE:-$FM_ROOT}}"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$FM_DAEMON_DIR/fm-busy-lib.sh"
 
+# Remote dispatch: which recorded windows are sandbox tasks, whose panes this
+# daemon reads only through the watcher's observations (stale_window_is_busy).
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$FM_DAEMON_DIR/fm-remote-route-lib.sh"
+
 # --- tunables ---------------------------------------------------------------
 # Supervisor backends this daemon knows how to inject into today. zellij, orca,
 # and cmux are real backends elsewhere in firstmate (bin/fm-backend.sh) but this
@@ -732,11 +737,19 @@ task_window_harness() {  # <window> <state>
 # when the endpoint could not be read at all. Only an exact busy verdict is
 # working: unknown semantic state never becomes busy and never becomes a
 # silent idle, so a stale pane whose state cannot be proven surfaces.
+# A sandbox task's pane lives on its host, so its verdict is the busy field of
+# the watcher's last observation of it (sandbox_observation_field), never a
+# local capture, and a task the watcher has not observed reads unreadable.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40 verdict
+  task=$(window_to_task "$win" "$state")
+  if fm_remote_route_resolve "$state/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    verdict=$(sandbox_observation_field "$state" "$task" busy) || return 2
+    [ "$verdict" = busy ]
+    return
+  fi
   backend=$(task_window_backend "$win" "$state")
   harness=$(task_window_harness "$win" "$state")
-  task=$(window_to_task "$win" "$state")
   label="fm-$task"
   tail40=$(fm_backend_capture "$backend" "$win" 40 "$label" 2>/dev/null) || return 2
   verdict=$(fm_busy_classify "$backend" "$win" "$harness" "$task" "$state" "$tail40")

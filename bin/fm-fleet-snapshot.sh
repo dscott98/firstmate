@@ -68,6 +68,20 @@
 #     endpoint.agent_alive is populated for local secondmates only, where it is
 #     useful return-channel supervision data; remote secondmates use "unknown"
 #     without a probe, and other tasks use "not_checked".
+#     remote is null for a local record and {kind,host,root,home} for one that
+#     records a remote host, kind being secondmate, task, or invalid as
+#     bin/fm-remote-route-lib.sh resolves it; an invalid one reports its
+#     defect as current_state and is never probed. A sandbox task row (remote
+#     kind task) adds sandbox: {provider,name,profile,unreachable_streak,
+#     observation}, where observation is the watcher's last observation of its
+#     host (bin/fm-watch.sh's sandbox_observe_check: observed_at, age_seconds,
+#     agent, busy, busy_source, boot) or null before the first, and
+#     unreachable_streak counts the failed observations since. Its endpoint
+#     fields come from that observation with freshness "cached" ("unobserved"
+#     before one), its worktree is a path on the sandbox and never probed
+#     (present null), and its current_state is fm-crew-state.sh's composition
+#     with its host's bounded leg (crew_state_json owns the one exception).
+#     Every other row has sandbox null.
 #   scout_reports[]: present data/<id>/report.md pointers.
 #   main_inventory: {valid,reason,orphan_in_flight[],unstructured_current_count} -
 #     main-home current-inventory checks shared with secondmate_home_summary_json
@@ -231,6 +245,9 @@ esac
 . "$SCRIPT_DIR/fm-merge-authority-lib.sh"
 # shellcheck source=bin/fm-hold-reason-lib.sh
 . "$SCRIPT_DIR/fm-hold-reason-lib.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"  # which records are remote, and how
 
 usage() {
   cat <<'EOF'
@@ -319,14 +336,24 @@ last_nonempty_line() {  # <file>
   grep -v '^[[:space:]]*$' "$1" 2>/dev/null | tail -1
 }
 
-# A local crew-state read is bounded so one slow child cannot extend this
-# snapshot without limit. Remote secondmate endpoint liveness is never read here.
-# A local read that hits the bound folds to state unknown.
+# A crew-state read is bounded so one slow child cannot extend this snapshot
+# without limit. Remote secondmate endpoint liveness is never read here. A
+# sandbox task's read includes fm-crew-state.sh's bounded host leg, given two
+# seconds less than this bound so its own unknown-remote verdict, not this
+# bound, answers for an unreachable host - except in the periodic
+# --secondmate-home-summary publication, which a watcher refreshes in the
+# background, where it folds this home's mirrored status log alone
+# (FM_CREW_STATE_LOCAL_FOLD) so that refresh never calls a sandbox host. A read
+# that hits the bound folds to state unknown.
 crew_state_json() {  # <id> [<captured-meta>] [<captured-status>]
-  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep
+  local id=$1 captured_meta=${2:-} captured_status=${3:-} raw rest state source detail sep remote_seconds local_fold=0
+  remote_seconds=$(( FM_SNAPSHOT_CREW_STATE_TIMEOUT > 3 ? FM_SNAPSHOT_CREW_STATE_TIMEOUT - 2 : 1 ))
+  [ "$OUTPUT_MODE" != secondmate-home-summary ] || local_fold=1
   raw=$(
     fm_run_timed "$FM_SNAPSHOT_CREW_STATE_TIMEOUT" \
       env FM_ROOT_OVERRIDE="$FM_ROOT" \
+      FM_CREW_STATE_REMOTE_SECONDS="$remote_seconds" \
+      FM_CREW_STATE_LOCAL_FOLD="$local_fold" \
       FM_HOME="$FM_HOME" \
       FM_STATE_OVERRIDE="$STATE" \
       FM_CREW_STATE_META_OVERRIDE="$captured_meta" \
@@ -630,11 +657,35 @@ snapshot_task_generation_is_current() {  # <captured-meta> <id>
   fi
 }
 
+# The observation the watcher last recorded for sandbox task <id>
+# (bin/fm-watch.sh's sandbox_observe_check owns state/.sandbox-observe-<id>/),
+# copied beside the task's other observations with its failure streak. The
+# snapshot never probes a sandbox itself.
+snapshot_capture_sandbox_observation() {  # <id> <destination>
+  local dir="$STATE/.sandbox-observe-$1" streak='' destination=$2 key value
+  : > "$destination" || return 1
+  for key in observed_at agent busy busy_source boot; do
+    value=$(sandbox_observation_field "$STATE" "$1" "$key") || continue
+    printf '%s=%s\n' "$key" "$value" >> "$destination" || return 1
+  done
+  if [ -f "$dir/failures" ] && [ ! -L "$dir/failures" ]; then
+    read -r streak _ < "$dir/failures" 2>/dev/null || streak=
+  fi
+  case "$streak" in ''|*[!0-9]*) streak=0 ;; esac
+  printf 'failures=%s\n' "$streak" >> "$destination"
+}
+
 prefetch_task_observations() {  # <meta> <id>
   local meta=$1 id=$2 remote_host current_file endpoint_file current_pid='' current_rc=0
-  local status_log status_capture report_path report_capture
+  local status_log status_capture report_path report_capture route_kind
   local kind backend target endpoint_exists=null agent_alive=not_checked generation_current=1
+  local sandbox_capture observed_agent
   remote_host=$(meta_value "$meta" remote_host)
+  if fm_remote_route_resolve "$meta" "$id"; then
+    route_kind=$FM_REMOTE_ROUTE_KIND
+  else
+    route_kind=invalid
+  fi
   current_file="$SNAPSHOT_TASK_DIR/$id.json"
   endpoint_file="$SNAPSHOT_TASK_DIR/$id.endpoint"
   status_log="$STATE/$id.status"
@@ -648,9 +699,34 @@ prefetch_task_observations() {  # <meta> <id>
     snapshot_mark_optional_present "$report_path" "$report_capture" || current_rc=1
   fi
 
-  if [ -n "$remote_host" ]; then
-    jq -n '{state:"unknown",source:"none",detail:"remote endpoint liveness not collected by fleet snapshot",raw:""}' \
+  if [ "$route_kind" = task ] && [ "$generation_current" = 1 ]; then
+    # A sandbox task: its current state is fm-crew-state.sh's composition with
+    # its host's bounded leg, and its endpoint is the watcher's last
+    # observation, never a local probe.
+    crew_state_json "$id" "$meta" "$status_capture" > "$current_file" &
+    current_pid=$!
+    sandbox_capture="$SNAPSHOT_TASK_DIR/$id.sandbox"
+    snapshot_capture_sandbox_observation "$id" "$sandbox_capture" || current_rc=1
+    observed_agent=$(sed -n 's/^agent=//p' "$sandbox_capture" 2>/dev/null | head -1)
+    case "$observed_agent" in
+      alive) endpoint_exists=true; agent_alive=alive ;;
+      dead) endpoint_exists=true; agent_alive=dead ;;
+      missing) endpoint_exists=false; agent_alive=dead ;;
+      ambiguous) endpoint_exists=true; agent_alive=unknown ;;
+      *) agent_alive=unknown ;;
+    esac
+  elif [ "$route_kind" = task ]; then
+    jq -n '{state:"unknown",source:"none",detail:"task generation changed during snapshot",raw:""}' \
       > "$current_file" || current_rc=1
+    agent_alive=unknown
+  elif [ -n "$remote_host" ] || [ "$route_kind" = invalid ]; then
+    if [ "$route_kind" = invalid ]; then
+      jq -n --arg detail "$FM_REMOTE_ROUTE_ERROR" '{state:"unknown",source:"none",detail:$detail,raw:""}' \
+        > "$current_file" || current_rc=1
+    else
+      jq -n '{state:"unknown",source:"none",detail:"remote endpoint liveness not collected by fleet snapshot",raw:""}' \
+        > "$current_file" || current_rc=1
+    fi
     agent_alive=unknown
   elif [ "$generation_current" = 1 ]; then
     crew_state_json "$id" "$meta" "$status_capture" > "$current_file" &
@@ -678,7 +754,7 @@ prefetch_task_observations() {  # <meta> <id>
   # All mutable observations must belong to the metadata generation captured in
   # the manifest. If teardown/relaunch raced any read, discard the whole sample.
   if ! snapshot_task_generation_is_current "$meta" "$id"; then
-    rm -f -- "$status_capture" "$report_capture"
+    rm -f -- "$status_capture" "$report_capture" "$SNAPSHOT_TASK_DIR/$id.sandbox"
     jq -n '{state:"unknown",source:"none",detail:"task generation changed during snapshot",raw:""}' \
       > "$current_file" || current_rc=1
     endpoint_exists=null
@@ -742,9 +818,56 @@ prefetch_task_current_states() {
   fi
 }
 
+# The sandbox object of a sandbox task row: its provider-facing identity from
+# the record, and the watcher's last observation of it with its failure streak
+# (null observation when the watcher has not observed it yet).
+sandbox_task_json() {  # <captured-meta> <captured-observation>
+  local meta=$1 capture=$2 observed_at='' agent='' busy='' busy_source='' boot='' failures=0 line observed_iso='' age=null
+  if [ -f "$capture" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in
+        observed_at=*) observed_at=${line#*=} ;;
+        agent=*) agent=${line#*=} ;;
+        busy=*) busy=${line#*=} ;;
+        busy_source=*) busy_source=${line#*=} ;;
+        boot=*) boot=${line#*=} ;;
+        failures=*) failures=${line#*=} ;;
+      esac
+    done < "$capture"
+  fi
+  case "$failures" in ''|*[!0-9]*) failures=0 ;; esac
+  case "$observed_at" in
+    ''|*[!0-9]*) observed_at= ;;
+    *)
+      observed_iso=$(jq -nr --argjson t "$observed_at" '$t | todate')
+      [ "$observed_at" -gt "$SNAPSHOT_EPOCH" ] || age=$(( SNAPSHOT_EPOCH - observed_at ))
+      ;;
+  esac
+  case "$boot" in ''|*[!0-9]*) boot= ;; esac
+  jq -n \
+    --arg provider "$(meta_value "$meta" sandbox_provider)" \
+    --arg name "$(meta_value "$meta" sandbox_name)" \
+    --arg profile "$(meta_value "$meta" sandbox_profile)" \
+    --arg observed_at "$observed_iso" \
+    --argjson age "$age" \
+    --arg agent "$agent" \
+    --arg busy "$busy" \
+    --arg busy_source "$busy_source" \
+    --arg boot "$boot" \
+    --argjson failures "$failures" '
+    def nullable: if . == "" then null else . end;
+    {provider:($provider | nullable),name:($name | nullable),profile:($profile | nullable),
+     unreachable_streak:$failures,
+     observation:(if $observed_at == "" then null else
+       {observed_at:$observed_at,age_seconds:$age,agent:($agent | nullable),busy:($busy | nullable),
+        busy_source:($busy_source | nullable),
+        boot:(if $boot == "" then null else ($boot | tonumber | todate) end)} end)}'
+}
+
 task_json_lines() {
   local meta original_meta id kind harness mode yolo project worktree home projects spawn_gen backend target status_log report_path
   local remote_host remote_root current_file endpoint_file observation_line index=0
+  local remote_kind remote_home sandbox_json sandbox_capture endpoint_observed_at endpoint_freshness
   local pr pr_source event_json current_json endpoint_exists agent_alive meta_json status_json report_json worktree_json home_json
   local last_event_raw current_state current_source pending_decision blocked_event report_present=0 pr_from_status
   local open_decisions_tsv open_decisions_json
@@ -767,6 +890,13 @@ task_json_lines() {
     branch=$(meta_value "$meta" branch)
     remote_host=$(meta_value "$meta" remote_host)
     remote_root=$(meta_value "$meta" remote_root)
+    remote_kind=
+    remote_home=
+    if fm_remote_route_resolve "$meta" "$id"; then
+      [ "$FM_REMOTE_ROUTE_KIND" = none ] || { remote_kind=$FM_REMOTE_ROUTE_KIND; remote_home=$FM_REMOTE_ROUTE_HOME; }
+    else
+      remote_kind=invalid
+    fi
     if [ -n "$remote_host" ]; then
       backend=$(meta_value "$meta" remote_backend)
       [ -n "$backend" ] || backend=unknown
@@ -846,7 +976,23 @@ task_json_lines() {
     meta_json=$(path_present_json "$original_meta" "$meta")
     status_json=$event_json
     report_json=$(path_present_json "$DATA/$id/report.md" "$report_path")
-    if [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json=$(jq -n '{path:null,present:false}'); fi
+    sandbox_json=null
+    endpoint_observed_at=$SNAPSHOT_NOW
+    endpoint_freshness=fresh
+    if [ "$remote_kind" = task ]; then
+      # A sandbox task's worktree is a path on its VM, never probed here, and
+      # its endpoint fields are the watcher's last observation of it.
+      worktree_json=$(jq -n --arg path "$worktree" '{path:(if $path == "" then null else $path end),present:null}')
+      sandbox_capture="$SNAPSHOT_TASK_DIR/$id.sandbox"
+      sandbox_json=$(sandbox_task_json "$meta" "$sandbox_capture")
+      endpoint_observed_at=$(printf '%s' "$sandbox_json" | jq -r '.observation.observed_at // empty')
+      if [ -n "$endpoint_observed_at" ]; then
+        endpoint_freshness=cached
+      else
+        endpoint_observed_at=
+        endpoint_freshness=unobserved
+      fi
+    elif [ -n "$worktree" ]; then worktree_json=$(path_present_json "$worktree"); else worktree_json=$(jq -n '{path:null,present:false}'); fi
     if [ -n "$home" ] && [ -n "$remote_host" ]; then
       home_json=$(jq -n --arg path "$home" '{path:$path,present:null}')
     elif [ -n "$home" ]; then
@@ -871,6 +1017,11 @@ task_json_lines() {
       --arg target "$target" \
       --arg remote_host "$remote_host" \
       --arg remote_root "$remote_root" \
+      --arg remote_kind "$remote_kind" \
+      --arg remote_home "$remote_home" \
+      --arg endpoint_observed_at "$endpoint_observed_at" \
+      --arg endpoint_freshness "$endpoint_freshness" \
+      --argjson sandbox "$sandbox_json" \
       --arg pr "$pr" \
       --arg pr_source "$pr_source" \
       --arg pr_head "$(meta_value "$meta" pr_head)" \
@@ -898,7 +1049,10 @@ task_json_lines() {
         project:($project // ""),
         spawn_gen:($spawn_gen | if . == "" then null else . end),
         backend:$backend,
-        remote:(if $remote_host == "" then null else {host:$remote_host,root:$remote_root} end),
+        remote:(if $remote_host == "" then null
+                else {kind:($remote_kind | if . == "" then null else . end),host:$remote_host,root:$remote_root,
+                      home:($remote_home | if . == "" then null else . end)} end),
+        sandbox:$sandbox,
         paths:{
           meta:$meta_path,
           status_log:$status_log,
@@ -912,7 +1066,7 @@ task_json_lines() {
           status:(if $endpoint_exists == false then "absent"
                   elif $agent_alive == "alive" or $agent_alive == "dead" then $agent_alive
                   else "unknown" end),
-          observed_at:$observed_at,freshness:"fresh"},
+          observed_at:($endpoint_observed_at | if . == "" then null else . end),freshness:$endpoint_freshness},
         pr:{url:($pr | if . == "" then null else . end),source:$pr_source,head:($pr_head | if . == "" then null else . end)},
         hints:{
           pending_decision:$pending_decision,
@@ -922,7 +1076,12 @@ task_json_lines() {
           last_event_text:$last_event_raw
         },
         actions:(
-          if $kind == "secondmate" then
+          if $sandbox != null then
+            {watch:"bin/fm-peek.sh \($id)",
+             steer:"bin/fm-send.sh \($id) \u0027<instruction>\u0027",
+             control:"bin/fm-control.sh \($id) interrupt|exit|relaunch",
+             return_channel_note:"Status lines are mirrored from the sandbox host into this home\u0027s status log."}
+          elif $kind == "secondmate" then
             {send:"bin/fm-send.sh fm-\($id) \u0027<request>\u0027",
              watch:"read status/doc return channel; do not routinely fm-peek a secondmate for answers",
              return_channel_note:"Secondmate answers come back through status/doc paths after a marked fm-send request."}

@@ -1380,6 +1380,48 @@ test_housekeeping_captain_held_stale_marker_transitions_to_pause() {
   pass "housekeeping moves a captain hold's existing stale marker to pause before wedge escalation"
 }
 
+# A sandbox task's pane lives on its host, so the daemon ages its stale marker
+# against the watcher's last observation of it rather than a local capture: an
+# idle observation escalates as a possible wedge, a busy one clears the marker,
+# and a task the watcher never observed is unreadable, never a local read.
+test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
+  local dir state fakebin key case_name
+  for case_name in idle busy unobserved; do
+    dir=$(make_supercase "sandbox-stale-$case_name")
+    state="$dir/state"; fakebin="$dir/fakebin"
+    fm_write_meta "$state/sbx.meta" "window=remote:sbx" "endpoint_task_id=sbx" \
+      "worktree=/home/agent/fm-home/projects/alpha-wt" "project=/primary/projects/alpha" \
+      "harness=pi" "kind=ship" "mode=direct-PR" "yolo=off" "spawn_gen=s1700000000.1.1" \
+      "placement=sandbox" "remote_kind=task" "remote_host=alias-sbx" "remote_root=/opt/firstmate" \
+      "remote_home=/home/agent/fm-home"
+    printf 'working: rebasing\n' > "$state/sbx.status"
+    if [ "$case_name" != unobserved ]; then
+      mkdir -p "$state/.sandbox-observe-sbx"
+      printf 'schema=fm-remote-task-control.v1\nagent=alive\nbusy=%s\nbusy_source=pi-ext\nobserved_at=%s\n' \
+        "$case_name" "$(date +%s)" > "$state/.sandbox-observe-sbx/last"
+    fi
+    key=sbx
+    echo $(( $(date +%s) - 5000 )) > "$state/.subsuper-stale-$key"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexit 1\n' "$dir/local-tmux.log" > "$fakebin/tmux"
+    chmod +x "$fakebin/tmux"
+    PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=240 housekeeping "$state"
+    case "$case_name" in
+      idle)
+        grep -F 'stale persisted' "$state/.subsuper-escalations" 2>/dev/null | grep -F 'remote:sbx' >/dev/null \
+          || fail "an idle observed sandbox pane was not escalated: $(cat "$state/.subsuper-escalations" 2>/dev/null)"
+        ;;
+      busy|unobserved)
+        [ ! -s "$state/.subsuper-escalations" ] || fail "a $case_name sandbox pane was escalated"
+        [ ! -e "$state/.subsuper-stale-$key" ] || fail "a $case_name sandbox pane kept its stale marker"
+        ;;
+    esac
+    if [ -s "$dir/local-tmux.log" ] && grep -q 'remote:sbx' "$dir/local-tmux.log"; then
+      fail "the daemon read a sandbox task's pane locally: $(cat "$dir/local-tmux.log")"
+    fi
+  done
+  pass "housekeeping ages a sandbox stale marker from the watcher's observation, never a local capture"
+}
+
 test_housekeeping_pause_marker_transitions_to_clear() {
   local dir state fakebin win pane key
   dir=$(make_supercase paused-to-stale)
@@ -3178,6 +3220,7 @@ test_housekeeping_declared_time_controls_pause_recheck
 test_housekeeping_paused_unpaused_cleared
 test_housekeeping_captain_held_resolved_cleared
 test_housekeeping_stale_marker_transitions_to_pause
+test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation
 test_housekeeping_captain_held_stale_marker_transitions_to_pause
 test_housekeeping_pause_marker_transitions_to_clear
 test_housekeeping_herdr_persistent_stale_resolves_meta

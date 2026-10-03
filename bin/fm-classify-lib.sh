@@ -2653,6 +2653,37 @@ crew_worktree_written_since() {  # <id> <state> <anchor-file>
   [ -n "$hit" ]
 }
 
+# The file whose mtime is when crew <id> last completed a turn or showed
+# explicit native-harness progress: the clock of the watcher's busy-turn bound
+# (bin/fm-watch.sh's busy_turn_over_age, and a sandbox host's observe, which
+# reports this time to its supervising watcher). A completed turn is
+# <state>/<id>.turn-ended; before the first one the spawn record <id>.meta
+# stands in; <id>.progress replaces either when it is newer. Progress is actual
+# observed model or tool activity, never a timer or a busy footer.
+crew_busy_turn_marker() {  # <state> <id>
+  local f="$1/$2.turn-ended" progress="$1/$2.progress"
+  [ -e "$f" ] || f="$1/$2.meta"
+  if [ -f "$progress" ] && [ "$progress" -nt "$f" ]; then f=$progress; fi
+  printf '%s\n' "$f"
+}
+
+# The watcher's last observation of sandbox task <id> through its host:
+# bin/fm-watch.sh's sandbox_observe_check writes <state>/.sandbox-observe-<id>/last,
+# one key=value line per field of the host's validated observe block plus
+# observed_at on this home's clock. Prints the value of <key>, and fails when
+# there is no observation or no such field. The away-mode daemon and the fleet
+# snapshot read a sandbox task's endpoint here rather than probing its host.
+sandbox_observation_field() {  # <state> <id> <key>
+  local file="$1/.sandbox-observe-$2/last" line
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$3="*) printf '%s\n' "${line#*=}"; return 0 ;;
+    esac
+  done < "$file"
+  return 1
+}
+
 # 0 (benign/absorb) if EVERY task referenced by a no-verb "signal:" wake is provably
 # working; 1 (actionable/surface) if any is not, or no task can be resolved. Pass the
 # same space-separated file list the caller classified with the span read above.

@@ -15,9 +15,11 @@
 # This file owns three capability tables plus their pure artifact-path tables,
 # and ONE named exception to that purity - fm_control_endpoint_absence_verdict,
 # the single owner of the per-backend endpoint-absence proof, which does run
-# backend reads. Everything else has no side effects, runs no backend command,
-# and reads no state, so sourcing this file is still free and the tables can be
-# read by a test as a pure contract:
+# backend reads, together with the host boot-time read
+# (fm_control_host_boot_epoch) its tmux reboot proof takes. Everything else has
+# no side effects, runs no backend command, and reads no state, so sourcing
+# this file is still free and the tables can be read by a test as a pure
+# contract:
 #
 #   1. Verb allowlist. There is no arbitrary-text and no generic raw-key entry
 #      point on the control plane; a caller either names an allowlisted verb or
@@ -301,6 +303,58 @@ fm_control_backend_state_verified() {  # <backend>
   return 1
 }
 
+# fm_control_host_boot_epoch: this host's boot time in epoch seconds, from the
+# kernel (Linux /proc/stat btime, else BSD kern.boottime); fails when neither is
+# readable. With FM_TEST_SEAM=1, FM_TEST_HOST_BOOT_EPOCH stands in for it so a
+# test can model a reboot.
+fm_control_host_boot_epoch() {
+  local key value raw
+  if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_TEST_HOST_BOOT_EPOCH:-}" ]; then
+    case "$FM_TEST_HOST_BOOT_EPOCH" in *[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$FM_TEST_HOST_BOOT_EPOCH"
+    return 0
+  fi
+  if [ -r /proc/stat ]; then
+    while read -r key value _; do
+      [ "$key" = btime ] || continue
+      case "$value" in ''|*[!0-9]*) return 1 ;; esac
+      printf '%s\n' "$value"
+      return 0
+    done < /proc/stat
+  fi
+  raw=$(sysctl -n kern.boottime 2>/dev/null) || return 1
+  value=${raw#*sec = }
+  value=${value%%,*}
+  case "$value" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$value"
+}
+
+# fm_control_spawn_gen_epoch <spawn_gen>: the launch epoch a spawn_gen=
+# incarnation token carries. bin/fm-spawn.sh mints s<epoch>.<pid>.<random> after
+# the endpoint exists, so the epoch is no earlier than the endpoint's creation.
+# Fails for any other shape.
+fm_control_spawn_gen_epoch() {  # <spawn_gen>
+  local gen=${1-} epoch
+  case "$gen" in s[0-9]*.*) ;; *) return 1 ;; esac
+  epoch=${gen#s}
+  epoch=${epoch%%.*}
+  case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$epoch"
+}
+
+# fm_control_boot_proves_absence <boot-epoch> <spawn_gen>: 0 iff the host
+# booted after the incarnation's launch, so no endpoint that launch created -
+# and no agent in it - can still exist on that host. Both values come from the
+# host's own clock. A clock stepped forward after a launch can only move the
+# boot time later; that residual is accepted only where the caller opts in
+# (fm_control_endpoint_absence_verdict).
+fm_control_boot_proves_absence() {  # <boot-epoch> <spawn_gen>
+  local boot=${1-} spawn
+  case "$boot" in ''|*[!0-9]*) return 1 ;; esac
+  spawn=$(fm_control_spawn_gen_epoch "${2-}") || return 1
+  [ "$boot" -gt "$spawn" ]
+}
+
 # fm_control_endpoint_absence_verdict: the ONE owner of the per-backend proof
 # that an endpoint reading `missing` is actually GONE rather than merely
 # unreachable from this seat. Call it only for a `missing` raw state.
@@ -335,18 +389,36 @@ fm_control_backend_state_verified() {  # <backend>
 #     process addresses (its TMUX_TMPDIR/socket), and a task's record does not
 #     carry the endpoint's socket identity - so a different but running server
 #     would answer "not anywhere" about a window it was never able to see.
-#     There is no read available here that closes that gap, so tmux always
-#     returns `unproven` and both verbs refuse. tmux is left exactly as
-#     deadlocked as it was before this change - no worse - but deliberately.
+#     There is no read available here that closes that gap, so tmux returns
+#     `unproven` and both verbs refuse. tmux is left exactly as deadlocked as
+#     it was before this change - no worse - but deliberately.
+#     The one exception is a host's own reboot, which no tmux server survives:
+#     when the caller passes the task's <meta> and FM_CONTROL_BOOT_ABSENCE_PROOF=1
+#     - set only by a sandbox host's control plane
+#     (bin/fm-remote-task-control.sh), where the VM's tmux server dies with a
+#     reboot or HA restart while its disk survives - a host booted after the
+#     record's own launch (fm_control_boot_proves_absence) proves `gone`.
+#     Without that proof the tmux refusal stands.
 #
 # Both control-plane callers share this one implementation so the proof cannot
 # drift into two answers for the same endpoint.
-fm_control_endpoint_absence_verdict() {  # <backend> <target>
-  local backend=${1-} target=${2-}
+fm_control_endpoint_absence_verdict() {  # <backend> <target> [<meta>]
+  local backend=${1-} target=${2-} meta=${3-} spawn_gen boot
   fm_backend_source "$backend" \
     || { printf 'unproven\tbackend %s could not be loaded to prove anything about that endpoint' "'$backend'"; return 0; }
   case "$backend" in
     tmux)
+      if [ "${FM_CONTROL_BOOT_ABSENCE_PROOF:-}" = 1 ] && [ -n "$meta" ]; then
+        spawn_gen=$(fm_backend_meta_exact_value "$meta" spawn_gen 2>/dev/null) || spawn_gen=
+        boot=$(fm_control_host_boot_epoch) || boot=
+        if fm_control_boot_proves_absence "$boot" "$spawn_gen"; then
+          printf 'gone\t'
+          return 0
+        fi
+        printf 'unproven\tthis host booted at %s, which is not after the launch of the recorded endpoint (incarnation %s), so no reboot proves it gone and a tmux server this process cannot address may still hold it' \
+          "${boot:-an unreadable time}" "${spawn_gen:-unrecorded}"
+        return 0
+      fi
       printf 'unproven\ttmux absence cannot be proven from a task record: the record does not carry the endpoint'"'"'s socket identity, and a server-wide window inventory only describes the tmux server this process addresses, so a window absent from it may still be alive on another'
       ;;
     herdr)

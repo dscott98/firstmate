@@ -3631,6 +3631,9 @@ sandbox_task_teardown() {
   fm_wake_queue_prune_task "$STATE" "$ID" "$T" 2>/dev/null || true
   rm -f "$STATE/$ID.turn-ended" "$STATE/$ID.progress" \
     "$(fm_wake_signal_seen_path "$STATE" "$STATE/$ID.turn-ended")" "$STATE/$ID.reconcile-nudged"
+  # The watcher's observation of this sandbox (bin/fm-watch.sh's
+  # sandbox_observe_check) describes a host about to be destroyed.
+  rm -rf -- "$STATE/.sandbox-observe-$ID"
   if [ "$BACKLOG_CLOSED" = 1 ]; then
     BACKLOG_CLOSE_MARKER=$(fm_backlog_close_marker_path "$STATE" "$ID") || exit 1
     if ! fm_backlog_atomic_transition "$BACKLOG_TRANSITION" "$STATE/$ID.meta" "$BACKLOG_CLOSE_MARKER" \
