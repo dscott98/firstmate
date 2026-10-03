@@ -739,12 +739,15 @@ task_window_harness() {  # <window> <state>
 # silent idle, so a stale pane whose state cannot be proven surfaces.
 # A sandbox task's pane lives on its host, so its verdict is the busy field of
 # the watcher's last observation of it (sandbox_observation_field), never a
-# local capture, and a task the watcher has not observed reads unreadable.
+# local capture; absent, obsolete, and positively gone endpoints read unreadable.
 stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40 verdict
   task=$(window_to_task "$win" "$state")
   if fm_remote_route_resolve "$state/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
     sandbox_observation_current "$state" "$task" || return 2
+    case "$(sandbox_observation_field "$state" "$task" agent)" in
+      dead|missing) return 2 ;;
+    esac
     verdict=$(sandbox_observation_field "$state" "$task" busy) || return 2
     [ "$verdict" = busy ]
     return
@@ -1625,6 +1628,13 @@ handle_wake() {  # <reason> <state>
                          || decision="escalate|${reason#stale: }"
                        ;;
                    esac ;;
+              esac
+              case "$stale_detail" in
+                "agent dead on sandbox host "*|"agent missing on sandbox host "*)
+                  if fm_remote_route_resolve "$state/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+                    decision="escalate|${reason#stale: }"
+                  fi
+                  ;;
               esac ;;
     check:*)  decision=$(classify_check "$reason") ;;
     heartbeat|heartbeat:*) decision=$(classify_heartbeat) ;;

@@ -289,11 +289,15 @@ test_interrupt_and_exit_run_on_the_host() {
 # --- relaunch: the host relaunches, this home republishes ------------------------
 
 test_relaunch_republishes_from_the_host_confirmed_identity() {
-  local out new_gen host_brief canonical_sha notes last_two
+  local out new_gen host_brief canonical_sha notes last_two field
   new_case relaunch
   printf 'pr=https://github.com/example/alpha/pull/7\npr_head=0123456789abcdef0123456789abcdef01234567\n' \
     >> "$PRIMARY/state/$ID.meta"
   canonical_sha=$(sha256_of "$PRIMARY/data/$ID/brief.md")
+  mkdir -p "$PRIMARY/state/.sandbox-observe-$ID"
+  printf 'agent=missing\nbusy=dead\nobserved_at=%s\n' "$(date +%s)" > "$PRIMARY/state/.sandbox-observe-$ID/last"
+  printf '3 %s\n' "$(date +%s)" > "$PRIMARY/state/.sandbox-observe-$ID/failures"
+  touch "$PRIMARY/state/.sandbox-observe-$ID/alerted" "$PRIMARY/state/.sandbox-observe-$ID/tick"
 
   run_primary "$CONTROL" "$ID" relaunch --note 'Resume from the committed rebase.'
   expect_code 0 "$RC" "relaunch of a sandbox task"$'\n'"$OUT"
@@ -301,6 +305,9 @@ test_relaunch_republishes_from_the_host_confirmed_identity() {
   new_gen=$(sed -n 's/^spawn_gen=//p' "$HOST_HOME/state/$ID.meta")
   [ -n "$new_gen" ] && [ "$new_gen" != "$SPAWN_GEN" ] || fail "the host did not relaunch a new incarnation"
   assert_equals "$new_gen" "$(meta_value spawn_gen)" "this home's record carries the host's new incarnation"
+  for field in last failures alerted tick; do
+    assert_absent "$PRIMARY/state/.sandbox-observe-$ID/$field" "the replacement cannot inherit $field from its predecessor"
+  done
   assert_equals "$canonical_sha" "$(meta_value brief_sha256)" "the record names the brief the host holds"
   assert_equals pi "$(meta_value harness)" "the harness is republished from the host"
   assert_equals minimax/m2 "$(meta_value model)" "the model is republished from the host"

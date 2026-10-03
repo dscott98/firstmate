@@ -162,14 +162,14 @@ The watcher supervises a placed task through its host's `observe` verb rather th
 - A positive `dead` or `missing` verdict from the host takes the once-per-incarnation dead-record report, keyed on the record's `spawn_gen`, and names whether the host has rebooted since the worker launched.
 - An unreachable host, a host refusal, or a malformed observation is unknown, never stale and never dead: `FM_REMOTE_UNREACHABLE_COUNT` (default 3) consecutive failures queue one keyed `check: sandbox <id> unreachable` wake per failure streak, and observations retain the configured cadence throughout the outage.
 - No observation runs while a control action, its teardown, or the spawn still placing the task holds it, so a relaunch in flight or a launch still under way is never reported as a death.
-- In away mode the supervise daemon ages a placed task's stale wake against the watcher's last observation too, never a local capture ([its stale read](../bin/fm-supervise-daemon.sh)).
+- In away mode the supervise daemon preserves confirmed-death recovery reports and ages other stale wakes only against current observations of surviving endpoints ([its stale read](../bin/fm-supervise-daemon.sh)).
 
 [`bin/fm-control.sh`](../bin/fm-control.sh) runs `interrupt`, `exit`, and `relaunch` for a placed task on its host's own copy of the control plane and relays the result; its header owns the sequence.
 
 - SSH exit 255 is unknown completion, returned unchanged, and nothing on the primary changes.
 - `relaunch` refuses before the host is touched when the note is missing, the harness would change, or a Pi model would name another provider, because a sandbox holds only the credentials it was provisioned with, and it refuses Claude as [placement](#placement) does.
 - `relaunch` first sends this home's brief through the host's `brief-update` when it differs from the brief the host last received, because the replacement is briefed from the brief on the host's disk.
-- After the host relaunches, the primary validates the route block the host confirms and republishes its own record from it, keeping a `pr=` identity block last.
+- After the host relaunches, the primary validates the route block the host confirms and invalidates the predecessor’s cached observation and failure streak under the lifecycle lock, and republishes its own record from it, keeping a `pr=` identity block last.
 - After a VM reboot or HA restart, the watcher's dead-record report says so, and `relaunch` recovers the task from the brief on disk, as [host-side task control](#host-side-task-control) describes.
 
 The fleet snapshot gives a placed task's row its remote kind, provider, sandbox name, and profile, the watcher's last observation as the endpoint, and its current state through its host; [the snapshot header](../bin/fm-fleet-snapshot.sh) owns the fields.

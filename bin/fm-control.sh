@@ -110,7 +110,8 @@
 # A remotely placed secondmate is refused by name: its agent runs on another
 # host, so no postcondition this plane verifies could be read for it here. A
 # sandbox task's verbs run on its host's own copy of this plane instead, and a
-# relaunch republishes this home's record from the identity the host confirms
+# relaunch invalidates its cached observation and republishes this home's record
+# from the identity the host confirms under the lifecycle lock
 # (sandbox_control below owns that sequence). A record whose placement
 # bin/fm-remote-route-lib.sh rejects is refused with its defect.
 #
@@ -491,7 +492,10 @@ sandbox_relaunch() {
       esac
     done < "$META"
   } > "$tmp" || written=0
-  if [ "$written" -eq 0 ] || ! chmod 0600 "$tmp" || ! mv -f -- "$tmp" "$META"; then
+  if [ "$written" -eq 0 ] || ! chmod 0600 "$tmp" \
+    || ! rm -f -- "$STATE/.sandbox-observe-$ID/last" "$STATE/.sandbox-observe-$ID/failures" \
+      "$STATE/.sandbox-observe-$ID/alerted" "$STATE/.sandbox-observe-$ID/tick" \
+    || ! mv -f -- "$tmp" "$META"; then
     rm -f -- "$tmp"
     fm_lock_release "$meta_lock"
     die "task $ID was relaunched on its host, but its record could not be republished; reconcile it with the host before any further control action"

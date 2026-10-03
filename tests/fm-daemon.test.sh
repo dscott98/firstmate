@@ -1385,8 +1385,8 @@ test_housekeeping_captain_held_stale_marker_transitions_to_pause() {
 # idle observation escalates as a possible wedge, a busy one clears the marker,
 # and a task the watcher never observed is unreadable, never a local read.
 test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
-  local dir state fakebin key case_name verdict observed
-  for case_name in idle busy unobserved failed expired; do
+  local dir state fakebin key case_name verdict observed agent reason
+  for case_name in idle busy unobserved failed expired dead missing; do
     dir=$(make_supercase "sandbox-stale-$case_name")
     state="$dir/state"; fakebin="$dir/fakebin"
     fm_write_meta "$state/sbx.meta" "window=remote:sbx" "endpoint_task_id=sbx" \
@@ -1398,13 +1398,15 @@ test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
     if [ "$case_name" != unobserved ]; then
       mkdir -p "$state/.sandbox-observe-sbx"
       verdict=$case_name
+      agent=alive
       observed=$(date +%s)
       case "$case_name" in
         failed) verdict=idle; printf '1 %s\n' "$observed" > "$state/.sandbox-observe-sbx/failures" ;;
         expired) verdict=idle; observed=$(( observed - 141 )) ;;
+        dead|missing) verdict=dead; agent=$case_name ;;
       esac
-      printf 'schema=fm-remote-task-control.v1\nagent=alive\nbusy=%s\nbusy_source=pi-ext\nobserved_at=%s\n' \
-        "$verdict" "$observed" > "$state/.sandbox-observe-sbx/last"
+      printf 'schema=fm-remote-task-control.v1\nagent=%s\nbusy=%s\nbusy_source=pi-ext\nobserved_at=%s\n' \
+        "$agent" "$verdict" "$observed" > "$state/.sandbox-observe-sbx/last"
     fi
     key=sbx
     echo $(( $(date +%s) - 5000 )) > "$state/.subsuper-stale-$key"
@@ -1416,9 +1418,17 @@ test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
         grep -F 'stale persisted' "$state/.subsuper-escalations" 2>/dev/null | grep -F 'remote:sbx' >/dev/null \
           || fail "an idle observed sandbox pane was not escalated: $(cat "$state/.subsuper-escalations" 2>/dev/null)"
         ;;
-      busy|unobserved|failed|expired)
+      busy|unobserved|failed|expired|dead|missing)
         [ ! -s "$state/.subsuper-escalations" ] || fail "a $case_name sandbox pane was escalated"
         [ ! -e "$state/.subsuper-stale-$key" ] || fail "a $case_name sandbox pane kept its stale marker"
+        ;;
+    esac
+    case "$case_name" in
+      dead|missing)
+        reason="stale: remote:sbx (agent $case_name on sandbox host alias-sbx - recover with bin/fm-control.sh sbx relaunch)"
+        FM_STATE_OVERRIDE="$state" FM_ESCALATE_BATCH_SECS=999999 handle_wake "$reason" "$state"
+        assert_equals "${reason#stale: }" "$(cat "$state/.subsuper-escalations")" "the confirmed death retains its recovery reason"
+        assert_absent "$state/.subsuper-stale-$key" "confirmed death must not start wedge aging"
         ;;
     esac
     if [ -s "$dir/local-tmux.log" ] && grep -q 'remote:sbx' "$dir/local-tmux.log"; then
