@@ -659,19 +659,6 @@ IFS= read -r -d '' SHARED_INFRA_RULE <<'EOF' || true
 EOF
 SHARED_INFRA_RULE=${SHARED_INFRA_RULE%$'\n'}
 
-# One shared string keeps the ship and scout network-exposure rule identical.
-# A worker must never expose a listening service beyond localhost or open a
-# public tunnel unless its brief explicitly authorizes it, and then only
-# behind an explicit allowlist or an authenticated/protected tunnel. The
-# secondmate charter deliberately omits this rule because a secondmate
-# operates its own home and delegates the actual implementation work to its
-# own crewmates, who each carry the rule in their own brief.
-IFS= read -r -d '' SHARED_EXPOSURE_RULE <<'EOF' || true
-8. Never expose a listening service beyond localhost or open a public tunnel without explicit brief authorization. Examples that fall under this rule include `cloudflared tunnel --url`, `ngrok`, `localhost.run`, and binding `0.0.0.0` on a host the network can reach.
-   The brief may only authorize such a surface behind an explicit allowlist or an authenticated/protected tunnel; anything else is a needs-decision: append `needs-decision [at=<epoch>]: {the port, the tool, and what it serves}` and stop.
-EOF
-SHARED_EXPOSURE_RULE=${SHARED_EXPOSURE_RULE%$'\n'}
-
 if [ "$KIND" = scout ]; then
 if [ "$REMOTE_RENDER" -eq 1 ]; then
   LAVISH_LINE='This scout runs in a sandbox whose local servers the supervising firstmate cannot reach, so deliver your findings as a text report without Lavish, even for a visual deliverable.'
@@ -714,8 +701,6 @@ $CREWMATE_PAUSE_INSTRUCTIONS
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
-
-$SHARED_EXPOSURE_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 
@@ -794,8 +779,6 @@ $ASK_USER_BLOCK
    A decision or blocker you opened stays open until a \`resolved\` line carrying its exact key lands; a later \`done:\` or \`working:\` line never closes it, even when the answer is what started that work.
    Firstmate's reply normally writes that closing line at answer time; when a blocker or wait clears WITHOUT a firstmate reply, append \`resolved [at=<epoch>]: {how it cleared}\` yourself (same \`[key=<slug>]\` if you opened it with one) as you resume.
 $SHARED_INFRA_RULE
-
-$SHARED_EXPOSURE_RULE
 
 $WAIT_BLOCK$INBOX_SECTION
 

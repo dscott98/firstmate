@@ -1395,71 +1395,6 @@ test_crewmate_scaffolds_forbid_pool_administration() {
   pass "fm-brief.sh: every crewmate scaffold forbids administering the shared worktree pool"
 }
 
-# A worker that opens a port to the world uses an explicit allowlist, never a
-# default-open surface (a quick tunnel without authentication is reachable by
-# anyone). Every crewmate scaffold must carry the same single-owner rule, and a
-# secondmate charter does not inherit it because a secondmate delegates the
-# actual implementation to its own crewmates, who each carry the rule.
-test_crewmate_scaffolds_forbid_default_open_network_exposure() {
-  local home id brief mode ship_rule scout_rule
-  home="$TMP_ROOT/network-exposure-home"
-  mkdir -p "$home/data"
-
-  for mode in no-mistakes direct-PR local-only; do
-    id="brief-exposure-$mode"
-    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" "$id" alpha --mode "$mode" >/dev/null 2>&1 \
-      || fail "fm-brief.sh --mode $mode exited non-zero"
-    brief="$home/data/$id/brief.md"
-    assert_grep "Never expose a listening service beyond localhost" "$brief" \
-      "$mode ship brief did not state the exposure rule's opening line"
-    assert_grep "explicit brief authorization" "$brief" \
-      "$mode ship brief did not require explicit brief authorization"
-    # shellcheck disable=SC2016 # Literal backticks and brace tokens must remain unexpanded.
-    assert_grep '`cloudflared tunnel --url`' "$brief" \
-      "$mode ship brief did not name the cloudflared quick-tunnel example"
-    assert_grep "ngrok" "$brief" \
-      "$mode ship brief did not name the ngrok example"
-    assert_grep "binding \`0.0.0.0\`" "$brief" \
-      "$mode ship brief did not name the 0.0.0.0 binding example"
-    assert_grep "allowlist" "$brief" \
-      "$mode ship brief did not require an explicit allowlist when authorized"
-    assert_grep "authenticated/protected tunnel" "$brief" \
-      "$mode ship brief did not require an authenticated or protected tunnel when authorized"
-    # shellcheck disable=SC2016 # Literal backticks and braces must remain unexpanded.
-    assert_grep 'needs-decision [at=<epoch>]: {the port, the tool, and what it serves}' "$brief" \
-      "$mode ship brief did not route the unauthorized case through needs-decision"
-  done
-
-  FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-exposure-scout alpha --scout >/dev/null 2>&1 \
-    || fail "fm-brief.sh --scout exited non-zero"
-  brief="$home/data/brief-exposure-scout/brief.md"
-  assert_grep "Never expose a listening service beyond localhost" "$brief" \
-    "scout brief did not state the exposure rule's opening line"
-  # shellcheck disable=SC2016 # Literal backticks and braces must remain unexpanded.
-  assert_grep 'needs-decision [at=<epoch>]: {the port, the tool, and what it serves}' "$brief" \
-    "scout brief did not route the unauthorized case through needs-decision"
-
-  # One shared string, not two copies: the emitted rule must be byte-identical
-  # across the ship and scout scaffolds so a later edit cannot fix one and miss
-  # the other.
-  ship_rule=$(awk '/^8\. Never expose/,/^$/' "$home/data/brief-exposure-no-mistakes/brief.md")
-  scout_rule=$(awk '/^8\. Never expose/,/^$/' "$brief")
-  [ -n "$ship_rule" ] || fail "ship brief emitted no exposure rule to compare"
-  [ "$ship_rule" = "$scout_rule" ] \
-    || fail "ship and scout exposure rules have drifted apart"
-
-  # A secondmate delegates the actual implementation to its own crewmates, so
-  # the rule belongs on the crewmate scaffold, not the charter.
-  FM_SECONDMATE_CHARTER='Supervise the alpha domain.' \
-    FM_HOME="$home" "$ROOT/bin/fm-brief.sh" brief-exposure-mate --secondmate alpha >/dev/null 2>&1 \
-    || fail "fm-brief.sh --secondmate exited non-zero"
-  assert_no_grep "Never expose a listening service" \
-    "$home/data/brief-exposure-mate/brief.md" \
-    "secondmate charter must not inherit the crewmate network-exposure rule"
-
-  pass "fm-brief.sh: every crewmate scaffold forbids default-open network exposure"
-}
-
 # --for-home and --for-root render a brief for a sandbox task's one-task home:
 # every path the worker reads or writes names that home and its code root,
 # because a worker appends to exactly the path its brief names, while the brief
@@ -1588,7 +1523,6 @@ test_branch_prefix_is_refused_where_it_does_not_apply
 test_branch_prefix_value_is_validated
 test_branch_prefix_command_is_shell_safe
 test_crewmate_scaffolds_forbid_pool_administration
-test_crewmate_scaffolds_forbid_default_open_network_exposure
 test_for_home_renders_every_worker_path_for_the_sandbox
 test_sandbox_profile_is_recorded_in_a_sandbox_brief
 test_for_home_flags_are_validated

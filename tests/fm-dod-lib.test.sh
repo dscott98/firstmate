@@ -21,6 +21,44 @@ write_merge_marker() {  # <state> <id> <provider> <host> <path> <number>
   chmod 600 "$1/$2.pr-poll-merge-notified"
 }
 
+assert_worker_exposure_contract() {
+  local output=$1
+  assert_contains "$output" "Never expose a listening service beyond localhost or open a public tunnel without explicit brief authorization" \
+    "worker launch output must require authorization for network exposure"
+  assert_contains "$output" "behind an explicit allowlist or an authenticated/protected tunnel" \
+    "worker launch output must require access restrictions"
+  assert_contains "$output" 'needs-decision [at=<epoch>]: {the port, the tool, and what it serves}' \
+    "worker launch output must escalate unauthorized exposure"
+}
+
+test_worker_role_requires_restricted_network_exposure() {
+  local output
+  output=$(fm_brief_worker_role "$TMP_ROOT/state" exposure-worker) || fail "worker overlay failed"
+  assert_worker_exposure_contract "$output"
+  pass "worker role output requires authorized and restricted network exposure"
+}
+
+test_old_brief_receives_current_exposure_overlay() {
+  local kind body launch output
+  for kind in ship scout; do
+    body="$TMP_ROOT/old-$kind-brief.md"
+    launch="$TMP_ROOT/$kind-launch-brief.md"
+    printf '# Task\nContinue the existing %s task.\n' "$kind" > "$body"
+    {
+      fm_brief_worker_role "$TMP_ROOT/state" "old-$kind" &&
+        printf '\n' &&
+        cat "$body"
+    } > "$launch" || fail "$kind launch overlay failed"
+    output=$(cat "$launch")
+    assert_worker_exposure_contract "$output"
+    assert_contains "$output" "Continue the existing $kind task." \
+      "current overlay must preserve the old task body"
+    assert_equals "$(cat "$body")" "$(tail -n 2 "$launch")" \
+      "old brief must follow the current overlay unchanged"
+  done
+  pass "old ship and scout bodies receive the current exposure contract"
+}
+
 test_scout_done_is_not_gated() {
   local repo wt
   repo="$TMP_ROOT/scout-repo"
@@ -402,6 +440,8 @@ test_pr_based_dod_draft_check_uses_gh_axi() {
   pass "PR-based DoD draft check uses gh-axi"
 }
 
+test_worker_role_requires_restricted_network_exposure
+test_old_brief_receives_current_exposure_overlay
 test_scout_done_is_not_gated
 test_unpushed_ship_done_is_refused
 test_no_mistakes_prevalidation_done_is_not_gated

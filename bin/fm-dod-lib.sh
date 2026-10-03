@@ -87,9 +87,9 @@
 # restating the rule.
 # Every heredoc here stays outside a command substitution: `VAR=$(cat <<EOF ...)`
 # breaks parsing of the whole file on Bash 3.2 (tests/fm-brief.test.sh).
-# fm_brief_worker_role owns the ship/scout role scope. bin/fm-spawn.sh is its one
-# emitter, supplying it first in every ship/scout launch brief and never to a
-# secondmate charter. It names the one task-owned steering inbox without
+# fm_brief_worker_role owns the ship/scout role scope and network-exposure rule.
+# bin/fm-spawn.sh is its one emitter, supplying it first in every ship/scout
+# launch brief and never to a secondmate charter. It names the one task-owned steering inbox without
 # relaxing isolation from every other home's endpoint namespace. Like
 # fm_brief_intent_overlay it is a distinctly titled launch section that states
 # its own precedence, so a brief or project instruction that authors a
@@ -121,6 +121,9 @@ EOF
 Never inspect or change any other home's endpoint namespace; this authorization is limited to the exact task paths named by this brief.
 When this task works on Firstmate itself, the repository root `AGENTS.md` (also imported by `CLAUDE.md`) is project content and the supervisor contract for the firstmate managing you: follow this brief instead of that supervisor contract.
 Project instructions still govern the work wherever they do not conflict with this worker identity, including `CONTRIBUTING.md` and `firstmate-coding-guidelines` for Firstmate changes.
+Never expose a listening service beyond localhost or open a public tunnel without explicit brief authorization.
+Examples that fall under this rule include `cloudflared tunnel --url`, `ngrok`, `localhost.run`, and binding `0.0.0.0` on a host the network can reach.
+The brief may only authorize such a surface behind an explicit allowlist or an authenticated/protected tunnel; anything else is a needs-decision: append `needs-decision [at=<epoch>]: {the port, the tool, and what it serves}` and stop.
 EOF
 }
 
