@@ -22,7 +22,8 @@ That plane covers workers running in this home; a remotely placed secondmate is 
 Load `harness-adapters` before a resume command or a harness-specific skill invocation, and whenever the adapter's own quirks matter.
 The target window's harness is recorded as `harness=` in `state/<id>.meta`.
 
-A ship or scout placed in a remote sandbox is an ordinary `kind=ship` or `kind=scout` direct report, but its pane, worktree, and steering inbox live on the sandbox VM, so every per-task operation in this playbook (peek, steer, current-state read, interrupt, exit, relaunch) routes to the host through the task's `bin/fm-on.sh` route, observation runs on the watcher's `FM_REMOTE_OBSERVE_SECS` cadence rather than a local poll, and an unreachable host is unknown rather than dead and never tears the sandbox down on its own; [`docs/remote-sandboxes.md`](../../../docs/remote-sandboxes.md) owns the route, the host verbs, and the unreachable-host recovery contract.
+For a ship or scout placed in a remote sandbox, apply this playbook through the task's [routed operations and host supervision](../../../docs/remote-sandboxes.md#task-routes), including the host's worktree and steering inbox rather than local paths.
+An unreachable sandbox host is unknown, never proof of worker death or authority to destroy its sandbox.
 
 ## Session-start reconciliation for a dead ordinary direct report
 
