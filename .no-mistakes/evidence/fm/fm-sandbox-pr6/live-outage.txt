@@ -1,0 +1,11 @@
+bin/fm-watch.sh: line 1420: /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3ZQ4QGZQP37YX7605S6KHPE/.fm-live-test.Q1jwdV/state/.sandbox-observe-live-outage/failures: No such file or directory
+check: sandbox live-outage unreachable: 2 consecutive observations of its host fm-lab-unreachable.invalid failed over 2s (SSH exit 255: the host could not be reached); its worker's state is unknown, not dead - check the sandbox and its provider before any recovery
+watcher_exit=0
+
+Persisted wake queue:
+1790994201	1	check	sandbox-unreachable-live-outage-1790994198	check: sandbox live-outage unreachable: 2 consecutive observations of its host fm-lab-unreachable.invalid failed over 2s (SSH exit 255: the host could not be reached); its worker's state is unknown, not dead - check the sandbox and its provider before any recovery
+
+Failure streak:
+2 1790994198
+
+Death markers:

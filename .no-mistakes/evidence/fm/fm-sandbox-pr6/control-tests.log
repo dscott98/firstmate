@@ -1,0 +1,6 @@
+ok - interrupt and exit run on a sandbox task's host, relay its result, and leave the record alone
+ok - relaunch runs on the host, sends a changed brief first, and republishes this home's record from the host
+ok - relaunch refuses, before its host, a note-less, cross-harness, or cross-provider replacement
+ok - a rebooted host proves its endpoint gone, so exit reports it and relaunch re-creates it from the brief
+ok - this home's spawn --relaunch refuses a sandbox task and names fm-control
+ALL TESTS PASSED

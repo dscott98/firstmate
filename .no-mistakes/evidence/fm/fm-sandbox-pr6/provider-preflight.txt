@@ -1,0 +1,1 @@
+refused: no sandbox provider configured at /home/dscott/.no-mistakes/worktrees/a1211da81307/01M3ZQ4QGZQP37YX7605S6KHPE/config/sandbox-provider; sandbox placement is default-off and every sandbox request refuses until an operator writes config/sandbox-provider (docs/remote-sandboxes.md)
