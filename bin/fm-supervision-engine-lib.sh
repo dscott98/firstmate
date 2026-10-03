@@ -398,8 +398,8 @@ fm_supervision_engine_turn() {
     # FM_TEST_SEAM=1 and FM_ENGINE_POLL_STEP use a smaller step so the
     # engine subshell detects exit at the same sub-second cadence the rest
     # of the supervision suite uses.
-    if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_ENGINE_POLL_STEP:-}" ]; then
-      engine_step=$FM_ENGINE_POLL_STEP
+    if [ "${FM_TEST_SEAM:-}" = 1 ] && [ "${FM_ENGINE_POLL_STEP:-}" = 0.05 ]; then
+      engine_step=0.05
       engine_iters=20
     else
       engine_step=0.1
