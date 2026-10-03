@@ -33,11 +33,11 @@ What is wired today:
 - [Task readiness](#task-readiness): the readiness doctor checks a sandbox host against a task profile.
 - [Host-side task control](#host-side-task-control): everything a sandbox host runs for its one task, from provisioning its home to retiring it, and briefs rendered for that home.
 - [Placement](#placement): `bin/fm-spawn.sh --placement sandbox` creates a sandbox, converges and gates it, provisions its home with the task's credentials, launches the task, and records its route.
-- [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, a scout's report arrives before its terminal line, and peek, steering, and current-state reads route to the task's host.
+- [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, scout terminal lines follow the report-fetch policy, and peek, steering, and current-state reads route to the task's host.
 - [Teardown, TTL, and orphans](#teardown-ttl-and-orphans): teardown destroys a placed task's sandbox only behind its landed-work gate, PR registration reads a sandbox ship's heads without its worktree, and session start retries pending destroys, renews TTLs, and reports orphans.
 - [Supervision and lifecycle control](#supervision-and-lifecycle-control): the watcher observes each placed task through its host on its own cadence for stale, dead-record, and unreachable wakes and the steering re-ring ladder; interrupt, exit, and relaunch run on the host, a relaunch republishes the record, and a rebooted host relaunches from the brief on disk; the fleet view shows a placed task's sandbox fields.
 
-Sandbox placement is not for real use until the final stage of the plan lands its real-cluster verification and agent-facing notes.
+Sandbox placement is not for real use until the provider satisfies the adapter contract and real-cluster verification passes.
 A launch that never published its final record still needs operator reconciliation; follow [orphan handling](../.agents/skills/bootstrap-diagnostics/SKILL.md) before removing a sandbox that may hold work.
 
 ## Principles
@@ -98,7 +98,7 @@ The provider command must satisfy the invocation, record framing, ownership-labe
 - Render the brief for the sandbox home with `bin/fm-brief.sh ... --for-home <remote_home> --for-root <remote_root>`, using the values `bin/fm-sandbox.sh config` prints; spawn refuses a brief that does not name that home's status file.
 - `--sandbox-profile <name>` defaults to the provider's default profile.
   Any other profile, such as `open`, needs an explicit captain instruction for that exact task, recorded in its brief with `fm-brief.sh --sandbox-profile <name>`; spawn refuses it otherwise.
-- Claude (pending the PR7 real-host smoke test), second mates, `local-only` ships, backends other than tmux, raw harness commands, and briefs carrying the `--herdr-lab` contract are refused.
+- Claude (pending the real-host smoke test), second mates, `local-only` ships, backends other than tmux, raw harness commands, and briefs carrying the `--herdr-lab` contract are refused.
 - A sandboxed Pi worker needs `--model <provider>/<id>` and a [credential](#credentials) for that provider.
   This home's worker account pins do not apply, because a sandbox's credentials come only from `config/sandbox-credentials`.
 
@@ -139,7 +139,7 @@ The worker appends status lines to its own home's `state/<id>.status` on the san
 - The mirror is the [remote second-mate mirror](remote-secondmates.md#how-remote-lines-are-mirrored) with the task's status log as its source: the same cursor continuity, byte normalization, replay identity, one wake per mirrored line, and continuity-break escalation.
 - This home's copy is the task's authoritative status log, because only it holds the `resolved` lines an answer writes here.
 - A task's lines offer no documents and settle no correlated reply, so a `report=` pointer in them mirrors as written.
-- For a scout, a mirrored `done` or `failed` line first fetches `data/<id>/report.md`, at most 1 MiB, through the path-confined reader into this home's `data/<id>/report.md`, so scout completion reads a local report before the line wakes anyone.
+- For a scout, a mirrored `done` or `failed` line first fetches `data/<id>/report.md`, at most 1 MiB, through the path-confined reader into this home's `data/<id>/report.md`, so a successful fetch makes the report local before the line wakes anyone.
   The shared [document-fetch failure policy](remote-secondmates.md#when-an-offered-document-cannot-be-fetched) applies; a refused scout fetch also removes any older local report so it cannot stand in for the report the terminal line announces.
 
 Peek, steering, and the current-state read route by task id to [host-side task control](#host-side-task-control):

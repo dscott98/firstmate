@@ -188,6 +188,7 @@ Classify the deliverable:
 Resolve every ship task's concrete delivery mode and `yolo` merge posture at intake.
 Pass the mode explicitly to the brief, and pass both values explicitly to the spawn and any scout promotion; each command refuses to guess the values it consumes.
 A current explicit captain instruction wins; otherwise the project's registry entry is the captain's standing posture, and dropping below its rigor needs a reason you can state.
+Resolve every task's placement the same way: it is chosen per task (local worktree or a remote sandbox), recorded with its reason in the backlog note, and passed explicitly to the brief and spawn; an unavailable or refused sandbox is a blocker, never a local fallback, and [`docs/remote-sandboxes.md`](docs/remote-sandboxes.md) owns the contract.
 Resolve the project's registered ship-branch prefix the same way, via `bin/fm-project-mode.sh --branch-prefix <project>`, and pass it explicitly to the brief, ship spawn, and scout promotion as `--branch-prefix` (default `fm/` needs no flag).
 On a `no-mistakes-prod-only` project, product behavior, security, complex changes, Firstmate safety-critical shared code, and any product-facing, mixed, or uncertain work require full `no-mistakes` validation, taking precedence over every lighter-path category.
 Only otherwise do documentation-only changes, internal-only tooling, automation, contributor or operator process, and release or submission work ship `direct-PR`; never infer internal-only from file location or project name.
