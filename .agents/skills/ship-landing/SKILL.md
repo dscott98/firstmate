@@ -21,6 +21,8 @@ A captain instruction to merge is explicit authority; `yolo` is the only standin
 For any custom `state/<id>.check.sh` you write yourself, keep it an ordinary single-link mode-`0700` file, print one line only when firstmate should wake, print nothing otherwise, finish before `FM_CHECK_TIMEOUT`, then bind its current bytes with `bin/fm-check-register.sh <id>` before the watcher may execute it.
 Retire a custom check only through `bin/fm-check-unregister.sh <id>` (or `bin/fm-teardown.sh` for a spawned task); never hand-compose an `rm` with `$STATE`/`$ID`.
 
+For a ship placed in a remote sandbox, the disposable copy lives on the sandbox VM, so the ready signal must reach this home through the host's `head` verb before `bin/fm-pr-check.sh` will register a PR and a landed teardown is allowed to destroy the sandbox; [`docs/remote-sandboxes.md`](../../../docs/remote-sandboxes.md) owns the named-head gate for placed ships, the host-side `retire` that lands the destroy behind its landed-work test, and the record fragments that teardown closes only after the destroy is confirmed.
+
 Tear down a ship task only after landing is confirmed.
 A teardown refusal for uncommitted or unlanded work is a stop-and-investigate result, never an obstacle to bypass.
 Never force teardown without explicit discard authority.
