@@ -46,6 +46,10 @@
 # fm_supervision_host_primary reports when FM_TEST_SEAM=1 and its value is a
 # known harness token; otherwise detection remains real (tests/lib.sh arms
 # the marker for isolated suites).
+# FM_ENGINE_POLL_STEP=0.05 with FM_TEST_SEAM=1 shortens engine exit probes
+# from 0.1 to 0.05 seconds while preserving the one-second snapshot cadence.
+# All other values retain the production interval and descendant cleanup
+# remains active in both modes.
 
 FM_SUPERVISION_ENGINES_VERIFIED='claude'
 
@@ -392,12 +396,8 @@ fm_supervision_engine_turn() {
       fi
     fi
     _fm_engine_snapshot_descendants "$watched" "$ledger"
-    # Between the one-second snapshots the engine's exit is probed at a tenth
-    # of a second: the turn closes promptly when the engine dies while the
-    # process-table scans keep their one-second cadence. Tests with
-    # FM_TEST_SEAM=1 and FM_ENGINE_POLL_STEP use a smaller step so the
-    # engine subshell detects exit at the same sub-second cadence the rest
-    # of the supervision suite uses.
+    # Probe exit between snapshots so turns close promptly without increasing
+    # process-table scans; the header owns the test seam and cadence.
     if [ "${FM_TEST_SEAM:-}" = 1 ] && [ "${FM_ENGINE_POLL_STEP:-}" = 0.05 ]; then
       engine_step=0.05
       engine_iters=20

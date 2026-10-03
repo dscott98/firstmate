@@ -173,11 +173,11 @@
 # FM_TEST_SUPERVISION_HOST_CLOCK names a file holding the park's elapsed
 # seconds, which the park and turn boundary checks read in place of SECONDS
 # only when FM_TEST_SEAM=1; tests/lib.sh arms the marker for isolated suites.
-# FM_SUPERVISION_HOST_POLL_STEP only takes effect when FM_TEST_SEAM=1: in
-# that mode it overrides the 0.5-second await_close and 0.2-second
-# start_successor sleeps so the host responds to test-clock changes and
-# watcher-ready lines at the same sub-second cadence the test already uses
-# elsewhere. Production callers leave the seam unset.
+# FM_SUPERVISION_HOST_POLL_STEP=0.05 only takes effect when FM_TEST_SEAM=1:
+# it shortens await_close exit probes and start_successor readiness sleeps,
+# preserving the outer POLL-cadence identity, readiness, and boundary checks.
+# All other values retain the production sleeps described above and the
+# 0.2-second start_successor sleep.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -545,7 +545,7 @@ await_close() {
     refresh_process "$ARM_PID"
     [ "$READY_PENDING" -eq 0 ] || stream_ready_line
     boundary_reached && return 1
-    # Probe the arm's exit twice a second between POLL-cadence checks, without
+    # Probe the arm's exit between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
     i=$INNER_ITERS
     while [ "$i" -gt 0 ] && fm_pid_alive "$ARM_PID"; do
