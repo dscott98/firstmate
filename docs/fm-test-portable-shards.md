@@ -22,8 +22,7 @@ In particular, run 36664663190's serial 5 finished in 22m15s with an assertion f
 Collect successful per-script measurements for every member before calculating a split.
 
 `tests/fm-supervision-host.test.sh` uses 1171000 ms from PR #21's successful green run (run 37092646056), the slowest successful `FM_TEST_END` mark for the post-fix version across the dscott98 fork's CI samples.
-That post-fix value has only one successful sample; PR #22 (run 37094845324) and the same-PR-supersession cancellation on this branch (run 37122992743) both hit the supersession-timeout channel at 1636s and 1558s respectively, so the runtime stays close enough to the 30-minute job cap that the runner needs the test in its own serial shard.
-PR #22 was a docs-only change, meaning the supervision-host runtime regression was not a regression at all - the test was already wide-variance.
+That post-fix value has only one successful sample, so further green runs must establish its variance and the effect of the test polling seams documented in the host and engine script headers.
 The native-Windows-only `tests/fm-pi-windows-shell-invocation.test.sh` retains its separate 5121 ms measurement from 2026-09-06T21:02Z instead of a portable capability skip.
 The session-start hint retains its pre-optimization maximum until CI measures the shorter fixture-only home-summary bound; do not discount a local speedup from CI packing weights.
 
@@ -68,7 +67,7 @@ Refresh the hints whenever a serial member grows materially or the lane gains sc
 `bin/fm-test-run.sh` owns the per-shard packing, so its `--check-coverage` output is the current account of lane size and coverage rather than a copied inventory.
 Its header and `--help` own the modeled-budget check and output fields; read the current estimates from `--check-coverage` instead of retaining copied lane sums here.
 [`tests/fm-test-run.test.sh`](../tests/fm-test-run.test.sh), in `test_portable_serial_packing_budget_boundary`, verifies acceptance exactly at the budget and refusal one millisecond above it through the executable runner.
-The longest script, `tests/fm-watch-triage.test.sh`, is the indivisible floor for this layout.
+The largest individual hint in `portable_serial_weight_hints` sets the indivisible modeled floor for this layout.
 The estimates use per-file maxima from different runs, not measured rebalanced jobs or an end-to-end latency guarantee.
 The baseline watch-triage samples range from 944375 to 1074843 ms, while each observed completed portable job adds at most 30 seconds beyond its summed scripts in these runs.
 Even so, maxima from five runs do not establish a P95 or guarantee future headroom.
@@ -112,9 +111,9 @@ Its `--list-files` interface exposes partition membership; `tests/fm-lint.test.s
 The workflow uploads each partition's quiet telemetry plus its per-root lifecycle sidecar to distinguish analysis cost, memory use, and host contention.
 No fast mode, path skips, reduced checks, or paid runner provisioning is part of this layout.
 
-The longer-term performance objective remains a complete green run under fifteen minutes including start delay, but the current watch-triage floor alone exceeds that objective.
+The longer-term performance objective remains a complete green run under fifteen minutes including start delay, but the indivisible modeled floor described above exceeds that objective.
 The immediate packing target is the runner's modeled script budget, not a claim that more shards alone can make an indivisible script faster.
-The layout uses fourteen long-lived Linux jobs (nine serial, two parallel, Herdr, two lint), plus short checks and macOS; insufficient shared account capacity can erase the packing gain.
+The workflow owns job counts and matrix expansion; insufficient shared account capacity can erase the packing gain as more shards compete for runners.
 Compare complete before/after runs, preserve cancelled and partial-run evidence, and measure a representative normal-run sample before claiming a P95 improvement.
 The workflow retains per-PR supersession without cancelling main pushes or changing the compliance workflow's event semantics.
 
