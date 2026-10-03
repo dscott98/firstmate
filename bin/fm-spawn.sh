@@ -179,19 +179,16 @@
 #   name from PATH once, probes that concrete path with --help, and launches the
 #   same path. It adds --tui-mode regular only when that help advertises the flag;
 #   a failed or inconclusive probe omits it so older Pi versions remain launchable.
-#   A --secondmate launch of a Firstmate-seeded home (the existing
-#   .fm-secondmate-home marker validate_firstmate_home_for_spawn already requires)
-#   also adds --approve when that help advertises it, so the first unattended
-#   launch does not stall on Pi's "Trust project folder?" dialog for that home
-#   path; --approve is session-scoped to the launch cwd and does not rewrite the
-#   operator's trust.json. Ordinary Pi worker launches never receive --approve;
-#   the fork's `bin/fm-pi-start-lib.sh` provides the receipt gate and a
-#   one-shot trust-dialog Enter selection for those worker launches.
-#   A separate --help probe advertises the flag and the reject flag; spawn refuses
-#   before endpoint creation when neither is available, because an unsupported
-#   launch could park at Pi's folder-trust prompt and be mistaken for productive
-#   work. A missing selected executable also refuses before endpoint creation, and pi-signed
-#   never falls back to pi.
+#   Every managed Pi-family launch (workers, scouts, secondmates) carries the
+#   scoped one-run --approve flag for the launch cwd without rewriting trust.json.
+#   The capability probe refuses launch before endpoint creation when the
+#   executable does not advertise --approve, preventing fm_pi_wait_for_start
+#   from persisting folder trust on ordinary worker launches.
+#   bin/fm-pi-start-lib.sh still supplies the receipt gate and one-shot
+#   trust-dialog Enter selection as a defense-in-depth fallback that the strict
+#   pre-check is designed to avoid needing.
+#   A missing selected executable also refuses before endpoint creation, and
+#   pi-signed never falls back to pi.
 #   Devin is worker-only: --permission-mode dangerous and
 #   --respect-workspace-trust false allow unattended tools in a fresh worktree.
 #   --config points at a private per-task snapshot of the user config with
@@ -409,9 +406,6 @@
 #                  supplies its own trailing space, empty never used)
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
-#     __PIAPPROVE__ optional --approve on a seeded Pi/pi-signed secondmate when
-#                  that executable advertises the flag (empty otherwise; session
-#                  trust for the launch cwd only, never a trust.json rewrite)
 #     __PISTART__  incarnation-specific startup extension in the staged launch directory
 #                  (provided by `bin/fm-pi-start-lib.sh` for every Pi-family launch)
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
@@ -2911,7 +2905,7 @@ launch_template() {
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
-printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIRESUME__'
+    printf '%s' '__PIBIN____PITUIMODE____PIRESUME__ --approve'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ -e __PISTART__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -3192,15 +3186,6 @@ pi | pi-signed)
     PI_TUI_MODE=' --tui-mode regular'
   fi
   LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
-  # Seeded-home signal is .fm-secondmate-home (required by
-  # validate_firstmate_home_for_spawn before any secondmate launch reaches
-  # the pane). Session-only --approve; never expand to a parent path or
-  # rewrite the operator trust store.
-  PI_APPROVE=
-  if [ "$KIND" = secondmate ] && pi_supports_approve "$PI_BIN"; then
-    PI_APPROVE=' --approve'
-  fi
-  LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
 cursor)
