@@ -1,0 +1,2 @@
+tests/fm-supervision-host.test.sh
+fm-test-run: lane 'portable-serial-2of9' asks for 9 portable serial shards but this runner is configured for 10 (see --list-lanes)
