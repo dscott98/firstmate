@@ -63,6 +63,12 @@
 # writing the deduplication marker: normal polls surface a message once, while a
 # crash or marker failure may produce a rare duplicate rather than silently lose
 # a wake.
+# A sandbox task's records live in its host's inbox, so its ladder takes its
+# input from the host instead (fm_task_inbox_due_action_observed): the
+# supervising watcher passes the oldest unacknowledged record and its age that
+# the host's observe reported, keeps the same .ring-state and .escalated in a
+# directory of its own in this home, and rings through the host's ring verb
+# (bin/fm-remote-task-control.sh).
 #
 # Retry ring (fm_task_inbox_mark_retry): only while config/wait-no-turns is
 # present. A fire-and-forget record never enters the ladder, but when
@@ -74,8 +80,8 @@
 # escalates. A waiting worker does not poll its inbox (bin/fm-brief.sh), so
 # without this retry the record could sit unread until a checkpoint. A pending ordinary record's
 # ladder rings the same inbox, so the retry waits behind it, and an
-# acknowledged record drops its mark. The remote steer leg has no watcher
-# ladder and owes no retry.
+# acknowledged record drops its mark. A remote secondmate's steer leg has no
+# watcher ladder, and no remote leg owes a retry.
 #
 # Inbox names containing bytes outside printable ASCII are unsupported. The
 # doorbell refuses them rather than sending terminal control bytes to a pane.
@@ -461,7 +467,7 @@ fm_task_inbox_clear_retry() {  # <state-dir> <task-id> <record-path>
 # An empty inbox also resets the ladder bookkeeping so the next message starts
 # a fresh ladder.
 fm_task_inbox_due_action() {  # <state-dir> <task-id>
-  local dir oldest base now grace max ladder rec_base count last
+  local dir oldest base
   dir=$(fm_task_inbox_dir "$1" "$2")
   if ! oldest=$(fm_task_inbox_oldest_unhandled "$1" "$2"); then
     rm -f "$dir/.ring-state" "$dir/.escalated" 2>/dev/null || true
@@ -479,9 +485,35 @@ fm_task_inbox_due_action() {  # <state-dir> <task-id>
     printf 'quiet'
     return 0
   fi
-  base=${oldest##*/}
+  _fm_task_inbox_ladder_due "$dir" "${oldest##*/}" "$(fm_path_age "$oldest")" "$oldest"
+}
+
+# The same ladder for a sandbox task, whose records live in its host's inbox:
+# the supervising watcher feeds it the oldest unacknowledged record its host's
+# observe reported - by name (NNN.msg), or none - and that record's age on the
+# host's own clock, and keeps this ladder's .ring-state and .escalated in a
+# directory of its own in this home, never a local inbox. It prints quiet,
+# ring <record-name>, or escalate <record-name> <count>; a sandbox task's steers
+# are never fire-and-forget, so it owes no retry ring. Fails for a malformed
+# name or age.
+fm_task_inbox_due_action_observed() {  # <ladder-dir> <oldest-name|none> <oldest-age-secs>
+  local dir=$1 name=$2 age=$3
+  if [ "$name" = none ]; then
+    rm -f "$dir/.ring-state" "$dir/.escalated" 2>/dev/null || true
+    printf 'quiet'
+    return 0
+  fi
+  fm_task_inbox_seq_of "$name" >/dev/null || return 1
+  case "$age" in ''|*[!0-9]*) return 1 ;; esac
+  _fm_task_inbox_ladder_due "$dir" "$name" "$age" "$name"
+}
+
+# The ladder policy both inputs share, for the oldest unhandled record <base>
+# whose age is <age-secs>; <subject> is what a due action names.
+_fm_task_inbox_ladder_due() {  # <ladder-dir> <base> <age-secs> <subject>
+  local dir=$1 base=$2 age=$3 subject=$4 now grace max ladder rec_base count last
   grace=$(fm_task_inbox_grace_secs)
-  if [ "$(fm_path_age "$oldest")" -lt "$grace" ]; then
+  if [ "$age" -lt "$grace" ]; then
     printf 'quiet'
     return 0
   fi
@@ -508,7 +540,7 @@ EOF
   fi
   max=$(fm_task_inbox_ring_max)
   if [ "$count" -ge "$max" ]; then
-    printf 'escalate %s %s' "$oldest" "$count"
+    printf 'escalate %s %s' "$subject" "$count"
     return 0
   fi
   now=$(date +%s)
@@ -516,7 +548,7 @@ EOF
     printf 'quiet'
     return 0
   fi
-  printf 'ring %s' "$oldest"
+  printf 'ring %s' "$subject"
 }
 
 # Advance the ladder after a delivery attempt. A failed ring or a composer-
@@ -527,9 +559,16 @@ EOF
 # the caller must surface the unwritable ladder while the record remains
 # unhandled.
 fm_task_inbox_record_ring() {  # <state-dir> <task-id> <record-path>
-  local dir base ladder rec_base count last
-  dir=$(fm_task_inbox_dir "$1" "$2")
-  base=${3##*/}
+  _fm_task_inbox_ladder_record_ring "$(fm_task_inbox_dir "$1" "$2")" "${3##*/}"
+}
+
+# The same advance for a sandbox task's ladder (fm_task_inbox_due_action_observed).
+fm_task_inbox_record_ring_observed() {  # <ladder-dir> <record-name>
+  _fm_task_inbox_ladder_record_ring "$1" "$2"
+}
+
+_fm_task_inbox_ladder_record_ring() {  # <ladder-dir> <base>
+  local dir=$1 base=$2 ladder rec_base count last
   count=0
   ladder=$(cat "$dir/.ring-state" 2>/dev/null || true)
   IFS=$(printf '\t') read -r rec_base count last <<EOF
@@ -549,10 +588,18 @@ EOF
 # at-least-once recovery: a crash or marker failure can cause a rare duplicate;
 # stuck-crewmate-recovery owns the message from here.
 fm_task_inbox_record_escalated() {  # <state-dir> <task-id> <record-path>
-  local dir
-  dir=$(fm_task_inbox_dir "$1" "$2")
+  _fm_task_inbox_ladder_record_escalated "$(fm_task_inbox_dir "$1" "$2")" "${3##*/}"
+}
+
+# The same marker for a sandbox task's ladder (fm_task_inbox_due_action_observed).
+fm_task_inbox_record_escalated_observed() {  # <ladder-dir> <record-name>
+  _fm_task_inbox_ladder_record_escalated "$1" "$2"
+}
+
+_fm_task_inbox_ladder_record_escalated() {  # <ladder-dir> <base>
+  local dir=$1
   [ -d "$dir" ] || return 0
-  if ! { printf '%s\n' "${3##*/}" > "$dir/.escalated"; } 2>/dev/null; then
+  if ! { printf '%s\n' "$2" > "$dir/.escalated"; } 2>/dev/null; then
     [ -d "$dir" ] || return 0
     return 1
   fi

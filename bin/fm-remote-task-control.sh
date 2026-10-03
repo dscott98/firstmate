@@ -8,6 +8,7 @@
 #   fm-remote-task-control.sh observe <id>
 #   fm-remote-task-control.sh capture <id> [lines]
 #   fm-remote-task-control.sh send <id> <message> <request-id>
+#   fm-remote-task-control.sh ring <id> <NNN.msg>
 #   fm-remote-task-control.sh key <id> <key>
 #   fm-remote-task-control.sh crew-state <id>
 #   fm-remote-task-control.sh head <id>
@@ -92,13 +93,17 @@
 #
 # state prints the endpoint's recovery-grade agent state (bin/fm-backend.sh),
 # missing when the task has no record. observe is one bounded call per watcher
-# cadence and prints now and boot (this host's clock and boot time), agent,
-# busy and busy_source (bin/fm-busy-lib.sh's classification), pane_hash (of the
-# last 40 pane lines, as the watcher hashes them), worktree_write (the newest
-# regular-file mtime in the worktree under the watcher's prune list, depth, and
-# time bound from bin/fm-classify-lib.sh), and inbox_oldest with
-# inbox_oldest_at (the oldest unacknowledged steering record and its mtime); a
-# field that cannot be read is unknown and an absent one none.
+# cadence and prints now and boot (this host's clock and boot time,
+# bin/fm-control-lib.sh), agent, busy and busy_source (bin/fm-busy-lib.sh's
+# classification), pane_hash (of the last 40 pane lines, as the watcher hashes
+# them), worktree_write (the newest regular-file mtime in the worktree under the
+# watcher's prune list, depth, and time bound from bin/fm-classify-lib.sh),
+# inbox_oldest with inbox_oldest_at (the oldest unacknowledged steering record
+# and its mtime), and turn_at (when the worker last completed a turn or showed
+# native-harness progress, the busy-turn bound's clock from
+# bin/fm-classify-lib.sh); a field that cannot be read is unknown and an absent
+# one none. Every time is this host's clock, so the supervising watcher compares
+# them with now rather than with its own clock.
 #
 # capture, send, and key match the secondmate control script: a bounded pane
 # capture, a steer written idempotently into the task's own steering inbox and
@@ -108,6 +113,13 @@
 # lands on its existing record, even one already acknowledged, while an
 # identical steer under a new id is a new record, and an id already keying a
 # different steer is refused.
+#
+# ring is the supervising watcher's re-ring ladder step: it rings the doorbell
+# once more for the named unacknowledged record, with the same endpoint,
+# composer, and liveness guards as send's ring (fm_task_inbox_ring), and prints
+# ring=rang, skipped (the composer visibly holds other text), failed,
+# unavailable (the agent has exited or its endpoint is missing, so nothing was
+# typed), handled (already acknowledged), or absent.
 #
 # crew-state prints crew_state, this host's fm-crew-state.sh line computed with
 # the status log left out - its run-step attribution or its pane fallback -
@@ -121,7 +133,12 @@
 # and status. relaunch keeps the recorded harness, model, or effort given as -,
 # clears a model or effort given as default, takes the progress note fm-control
 # requires as its last argument, and prints the route block from the record the
-# relaunch republished.
+# relaunch republished. exit and relaunch accept this host's boot-time absence
+# proof (FM_CONTROL_BOOT_ABSENCE_PROOF, bin/fm-control-lib.sh): the VM's tmux
+# server dies with a reboot or HA restart while its disk survives, so a host
+# booted after the record's launch proves a missing endpoint gone - exit then
+# reports endpoint-gone, and relaunch re-creates the window in the recorded
+# worktree from the brief on disk.
 #
 # brief-update replaces data/<id>/brief.md with the brief on stdin, because a
 # relaunch reads the brief on disk, and prints brief=updated and brief_sha256.
@@ -153,7 +170,7 @@ TASK_HARNESSES="claude codex opencode pi pi-signed grok kimi cursor gemini muse 
 . "$SCRIPT_DIR/fm-brief-heading-lib.sh"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 validate_id() {
   case "$1" in ''|.|..|*[!A-Za-z0-9._-]*) die "invalid task id: $1" ;; esac
 }
@@ -198,23 +215,6 @@ has_nul() { # <path>
 # The exact hash bin/fm-watch.sh applies to a pane's last 40 lines.
 hash_text() {
   if command -v md5 >/dev/null 2>&1; then md5 -q; else md5sum | cut -d' ' -f1; fi
-}
-
-host_boot_epoch() {
-  local key value raw
-  if [ -r /proc/stat ]; then
-    while read -r key value _; do
-      [ "$key" = btime ] || continue
-      case "$value" in ''|*[!0-9]*) return 1 ;; esac
-      printf '%s\n' "$value"
-      return 0
-    done < /proc/stat
-  fi
-  raw=$(sysctl -n kern.boottime 2>/dev/null) || return 1
-  value=${raw#*sec = }
-  value=${value%%,*}
-  case "$value" in ''|*[!0-9]*) return 1 ;; esac
-  printf '%s\n' "$value"
 }
 
 run_host() { # <script> [args...]; one of this host's scripts, on the task home
@@ -794,10 +794,10 @@ cmd_state() {
 
 cmd_observe() {
   local id=$1 meta now boot agent=missing busy=unknown busy_source=no-record
-  local hash=unknown write=unknown tail40='' verdict oldest oldest_name=none oldest_at=none
+  local hash=unknown write=unknown tail40='' verdict oldest oldest_name=none oldest_at=none turn=unknown
   meta="$TARGET_HOME/state/$id.meta"
   now=$(date +%s)
-  boot=$(host_boot_epoch) || boot=unknown
+  boot=$(fm_control_host_boot_epoch) || boot=unknown
   if [ -e "$meta" ] || [ -L "$meta" ]; then
     if endpoint_load "$id"; then
       agent=$(fm_backend_agent_state "$EP_BACKEND" "$EP_TARGET" 2>/dev/null) || agent=unreadable
@@ -810,6 +810,7 @@ cmd_observe() {
       busy=${verdict%% *}
       busy_source=${verdict#* }
       write=$(worktree_newest_write "$(fm_meta_get "$meta" worktree)")
+      turn=$(file_mtime "$(crew_busy_turn_marker "$TARGET_HOME/state" "$id")") || turn=unknown
     else
       printf 'error: %s\n' "$EP_ERROR" >&2
       agent=unverified
@@ -830,6 +831,7 @@ cmd_observe() {
   printf 'worktree_write=%s\n' "$write"
   printf 'inbox_oldest=%s\n' "$oldest_name"
   printf 'inbox_oldest_at=%s\n' "$oldest_at"
+  printf 'turn_at=%s\n' "${turn:-unknown}"
 }
 
 cmd_capture() {
@@ -870,6 +872,28 @@ cmd_send() {
     2) printf 'notice: doorbell did not reach %s; the steer is durably recorded at %s\n' "$EP_TARGET" "$rec" >&2 ;;
     3) printf 'notice: doorbell not typed because the agent in %s has exited; the steer is durably recorded at %s for recovery\n' "$EP_TARGET" "$rec" >&2 ;;
   esac
+}
+
+cmd_ring() {
+  local id=$1 name=$2 dir result ring_rc=0
+  fm_task_inbox_seq_of "$name" >/dev/null || die "ring needs an inbox record name of the form NNN.msg"
+  endpoint_require "$id"
+  dir=$(fm_task_inbox_dir "$TARGET_HOME/state" "$id")
+  if [ -f "$dir/$name" ] && [ ! -L "$dir/$name" ]; then
+    fm_task_inbox_ring "$EP_BACKEND" "$EP_TARGET" "$dir/$name" "fm-$id" || ring_rc=$?
+    case "$ring_rc" in
+      0) result=rang ;;
+      1) result=skipped ;;
+      3) result=unavailable ;;
+      *) result=failed ;;
+    esac
+  elif [ -f "$dir/handled/$name" ]; then
+    result=handled
+  else
+    result=absent
+  fi
+  printf 'schema=%s\n' "$SCHEMA"
+  printf 'ring=%s\n' "$result"
 }
 
 cmd_key() {
@@ -919,7 +943,7 @@ cmd_control() {
     interrupt|exit)
       [ "$#" -eq 2 ] || usage
       endpoint_require "$id"
-      run_host fm-control.sh "$id" "$action"
+      FM_CONTROL_BOOT_ABSENCE_PROOF=1 run_host fm-control.sh "$id" "$action"
       ;;
     relaunch)
       [ "$#" -eq 6 ] || usage
@@ -946,7 +970,7 @@ cmd_control() {
       [ "$model" = - ] || args+=(--model "$model")
       [ "$effort" = - ] || args+=(--effort "$effort")
       args+=(--note "$note")
-      run_host fm-control.sh "${args[@]}"
+      FM_CONTROL_BOOT_ABSENCE_PROOF=1 run_host fm-control.sh "${args[@]}"
       print_route "$id"
       ;;
     *) usage ;;
@@ -1023,7 +1047,7 @@ case "$VERB" in
     provision_apply "$1"
     exit 0
     ;;
-  launch|state|observe|capture|send|key|crew-state|head|control|brief-update|retire) ;;
+  launch|state|observe|capture|send|ring|key|crew-state|head|control|brief-update|retire) ;;
   *) die "unknown command: $VERB" ;;
 esac
 shift
@@ -1042,12 +1066,15 @@ FM_CONFIG_OVERRIDE="$TARGET_HOME/config"
 . "$SCRIPT_DIR/fm-classify-lib.sh"
 # shellcheck source=bin/fm-busy-lib.sh
 . "$SCRIPT_DIR/fm-busy-lib.sh"
+# shellcheck source=bin/fm-control-lib.sh
+. "$SCRIPT_DIR/fm-control-lib.sh"
 case "$VERB" in
   launch) [ "$#" -eq 1 ] || usage; cmd_launch "$1" ;;
   state) [ "$#" -eq 1 ] || usage; cmd_state "$1" ;;
   observe) [ "$#" -eq 1 ] || usage; cmd_observe "$1" ;;
   capture) [ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage; cmd_capture "$@" ;;
   send) [ "$#" -eq 3 ] || usage; cmd_send "$@" ;;
+  ring) [ "$#" -eq 2 ] || usage; cmd_ring "$@" ;;
   key) [ "$#" -eq 2 ] || usage; cmd_key "$@" ;;
   crew-state) [ "$#" -eq 1 ] || usage; cmd_crew_state "$1" ;;
   head) [ "$#" -eq 1 ] || usage; cmd_head "$1" ;;

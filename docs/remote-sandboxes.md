@@ -4,7 +4,7 @@ This page covers how to configure and operate the provider that runs Firstmate t
 It is for operators who wire a sandbox provider into a firstmate home and for anyone checking the adapter's safety behavior.
 
 Sandbox placement runs an ordinary ship or scout in a one-task Firstmate home on a disposable VM, with the supervising home as its only supervisor.
-Spawn places and launches such a task, its status is mirrored, and teardown destroys its sandbox behind the landed-work gate; lifecycle control and stale-pane supervision are later stages, as [current status](#current-status) lists.
+Spawn places and launches such a task, its status is mirrored, the watcher supervises it and lifecycle control runs through its host, and teardown destroys its sandbox behind the landed-work gate; [current status](#current-status) lists what remains.
 
 ## Find a topic
 
@@ -17,6 +17,7 @@ Spawn places and launches such a task, its status is mirrored, and teardown dest
 | Place a task in a sandbox | [Placement](#placement) |
 | Understand task routes and readiness | [Task routes](#task-routes) and [task readiness](#task-readiness) |
 | Read, steer, or check a placed task | [Status mirror and routed verbs](#status-mirror-and-routed-verbs) |
+| Understand how a placed task is supervised, interrupted, stopped, or relaunched | [Supervision and lifecycle control](#supervision-and-lifecycle-control) |
 | Understand what a sandbox host runs | [Host-side task control](#host-side-task-control) |
 | Tear down a placed task, renew TTLs, or find orphans | [Teardown, TTL, and orphans](#teardown-ttl-and-orphans) |
 | Handle capacity or failures | [Capacity and failures](#capacity-and-failures) |
@@ -34,11 +35,9 @@ What is wired today:
 - [Placement](#placement): `bin/fm-spawn.sh --placement sandbox` creates a sandbox, converges and gates it, provisions its home with the task's credentials, launches the task, and records its route.
 - [Status mirror and routed verbs](#status-mirror-and-routed-verbs): the worker's status lines reach this home's status log and wake Firstmate, a scout's report arrives before its terminal line, and peek, steering, and current-state reads route to the task's host.
 - [Teardown, TTL, and orphans](#teardown-ttl-and-orphans): teardown destroys a placed task's sandbox only behind its landed-work gate, PR registration reads a sandbox ship's heads without its worktree, and session start retries pending destroys, renews TTLs, and reports orphans.
+- [Supervision and lifecycle control](#supervision-and-lifecycle-control): the watcher observes each placed task through its host on its own cadence for stale, dead-record, and unreachable wakes and the steering re-ring ladder; interrupt, exit, and relaunch run on the host, a relaunch republishes the record, and a rebooted host relaunches from the brief on disk; the fleet view shows a placed task's sandbox fields.
 
-Sandbox placement is not for real use until the remaining stages land.
-Lifecycle control arrives in PR6: interrupt, exit, and relaunch with the record republished.
-Until PR6, `fm-control.sh` keeps its explicit named refusal of sandbox tasks.
-Stale-pane and liveness supervision of a placed task arrives in a later stage of the plan.
+Sandbox placement is not for real use until the final stage of the plan lands its real-cluster verification and agent-facing notes.
 A launch that never published its final record still needs operator reconciliation; follow [orphan handling](../.agents/skills/bootstrap-diagnostics/SKILL.md) before removing a sandbox that may hold work.
 
 ## Principles
@@ -123,7 +122,7 @@ A sandbox task's explicit placement and route come from this home's `state/<id>.
   It applies the same transport checks as a second-mate registry route, refuses a code root and home that overlap, and refuses a task id that also names a registry route.
   Second-mate registry routes are unchanged.
 - Peek, steering, and the current-state read route a sandbox task to [host-side task control](#host-side-task-control), as [status mirror and routed verbs](#status-mirror-and-routed-verbs) describes.
-- Teardown takes its [sandbox branch](#teardown-ttl-and-orphans), and until the primary routes the remaining verbs there, lifecycle control refuses a sandbox task record by name.
+- Teardown takes its [sandbox branch](#teardown-ttl-and-orphans), and lifecycle control and the watcher's supervision reach the host as [supervision and lifecycle control](#supervision-and-lifecycle-control) describes.
   Second-mate liveness and the watcher's queue checks skip it.
   None of them treats a sandbox task as a local task or as a remote second mate.
 
@@ -151,7 +150,30 @@ Peek, steering, and the current-state read route by task id to [host-side task c
 - `bin/fm-crew-state.sh <task-id>` combines this home's status fold with the run-step and busy readings `crew-state` reports from the host; [its header](../bin/fm-crew-state.sh) owns the composition.
 - A sandbox task's recorded window, `remote:<task-id>`, names no endpoint here, so peek and steering refuse it.
 
-Turn-ended notifications stay on the host, so mirrored status lines remain the supervision signal until stale-pane supervision lands.
+Turn-ended notifications stay on the host, so mirrored status lines remain the primary supervision signal, which the host's observations [supplement](#supervision-and-lifecycle-control).
+
+## Supervision and lifecycle control
+
+The watcher supervises a placed task through its host's `observe` verb rather than through any local read.
+[The watcher's sandbox observe branch](../bin/fm-watch.sh) owns the cadence, the bookkeeping, and every wake reason below.
+
+- Each placed task is observed once per `FM_REMOTE_OBSERVE_SECS` (default 60) with one call bounded by `FM_REMOTE_OBSERVE_TIMEOUT` (default 20), so remote calls stay off the 15-second poll.
+- An observation feeds the existing supervision rather than a copy of it: its pane hash and busy verdict drive the ordinary stale and wedge logic, its completed-turn or native-progress time drives the busy-turn bound, its newest worktree write drives the wedge timer's write deferral, and its oldest unacknowledged steering record drives the [re-ring ladder](../bin/fm-task-inbox-lib.sh), which rings through the host's `ring` verb.
+- A positive `dead` or `missing` verdict from the host takes the once-per-incarnation dead-record report, keyed on the record's `spawn_gen`, and names whether the host has rebooted since the worker launched.
+- An unreachable host, a host refusal, or a malformed observation is unknown, never stale and never dead: `FM_REMOTE_UNREACHABLE_COUNT` (default 3) consecutive failures queue one keyed `check: sandbox <id> unreachable` wake per failure streak, and observations retain the configured cadence throughout the outage.
+- Lifecycle guards keep a launch or relaunch in flight from being reported as a death; the [watcher's observe branch](../bin/fm-watch.sh) owns deferral and rejection of reads that overlap a lifecycle change.
+- In away mode the supervise daemon preserves confirmed-death recovery reports and retains pending stale tracking while observations are invalid, and rechecks it when current observations return ([its stale read](../bin/fm-supervise-daemon.sh)).
+
+[`bin/fm-control.sh`](../bin/fm-control.sh) runs `interrupt`, `exit`, and `relaunch` for a placed task on its host's own copy of the control plane and relays the result; its header owns the sequence.
+
+- SSH exit 255 is unknown completion, returned unchanged, and nothing on the primary changes.
+- `relaunch` refuses before the host is touched when the note is missing, the harness would change, or a Pi model would name another provider, because a sandbox holds only the credentials it was provisioned with, and it refuses Claude as [placement](#placement) does.
+- `relaunch` first sends this home's brief through the host's `brief-update` when it differs from the brief the host last received, because the replacement is briefed from the brief on the host's disk.
+- After the host relaunches, the primary validates the route block the host confirms and invalidates the predecessor’s cached observation and failure streak under the lifecycle lock, and republishes its own record from it, keeping a `pr=` identity block last.
+- For recovery after a VM reboot or HA restart, follow the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone).
+
+The fleet snapshot gives a placed task's row its remote kind, provider, sandbox name, and profile, the watcher's last observation as the endpoint, and its current state through its host; [the snapshot header](../bin/fm-fleet-snapshot.sh) owns the fields.
+The inactive-outcome reconciliation never reads a sandbox host: it folds the mirrored status log alone and never probes the recorded worktree path ([its header](../bin/fm-inactive-reconcile.sh)).
 
 ## Host-side task control
 
@@ -161,7 +183,8 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
   The same manifest again changes nothing, another task's home or a different manifest is refused, and a failed attempt removes what it created.
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
   Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
-- `state`, `observe`, `capture`, `send`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, and replace its brief.
+- `state`, `observe`, `capture`, `send`, `ring`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, ring that inbox's doorbell again for the watcher's re-ring ladder, and replace its brief.
+- `control` applies the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) on the host before reclaiming a missing endpoint.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
 Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
@@ -213,6 +236,8 @@ bin/fm-test-run.sh tests/fm-remote-task-control.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-spawn.test.sh
 bin/fm-test-run.sh tests/fm-remote-task-lifecycle-e2e.test.sh
 bin/fm-test-run.sh tests/fm-teardown-remote-task.test.sh
+bin/fm-test-run.sh tests/fm-control-remote-task.test.sh
+bin/fm-test-run.sh tests/fm-watch-sandbox-observe.test.sh
 ```
 
 The adapter suite drives every verb against a fake provider, including the refusal paths, the home-tag filtering, the capacity distinction, and argv-only invocation.
@@ -221,7 +246,10 @@ The task control suite drives every host-side verb against a fixture home with f
 The placement suite drives `bin/fm-spawn.sh --placement sandbox` against a fake provider and a fake SSH transport that runs the real host-side control plane with fake tmux, covering the refusal matrix, the record fields, destroy before launch, the hold once launch may have started, SSH exit 255, the mirror armed at publish, and a search of every output, record, log, and argument for planted credential values.
 The lifecycle suite drives a placed ship and scout on the same harness through the real process-event runner: a mirrored decision, a steer that answers it with `--resolve-key`, peek, the composed current state, and a scout report that is local before its terminal line lands.
 The teardown suite drives a placed ship and scout on the same harness through `bin/fm-teardown.sh`: an unlanded refusal that keeps the sandbox, a landed pass that destroys it exactly once with label confirmation and only after the records are gone, SSH exit 255 preserving everything, the scout report and completion gates, `--force`, an identity refusal, a failed destroy that session start later retries, and a backlog close that fails in teardown and again in its replay, which keeps the sandbox until the close lands.
+The lifecycle control suite drives `bin/fm-control.sh` against a placed ship whose host is a real provisioned and launched one-task home reached through a fake SSH transport: interrupt and exit on the host, SSH exit 255, the relaunch refusals, the brief sent only when it changed, the republished record with its `pr=` block last, and a rebooted host whose endpoint `exit` reports gone and `relaunch` re-creates.
+The watcher suite drives a real watcher against a placed task whose transport answers from canned observations: the observe cadence, an observation-driven stale wake, the once-per-incarnation dead-record report, the one unreachable wake per failure streak, no observation while a spawn or control action holds the task, the re-ring ladder through the host, and the write deferral from the host's write field.
 Sandbox PR registration is covered by `tests/fm-pr-check-security.test.sh`, and session start's pending destroys, TTL renewal, and orphan reports by `tests/fm-bootstrap.test.sh`.
+Snapshot rows for placed tasks are covered by `tests/fm-fleet-snapshot-view.test.sh`, and the inactive-outcome reconciliation's sandbox handling by `tests/fm-inactive-reconcile.test.sh`.
 The status mirror's route kind, peek, steering, and the current-state composition are also covered by `tests/fm-remote-reply.test.sh`, `tests/fm-peek-remote.test.sh`, `tests/fm-send-remote-delivery.test.sh`, and `tests/fm-crew-state.test.sh`.
 Brief rendering for a sandbox home and the spawn refusal are covered by `tests/fm-brief.test.sh` and `tests/fm-task-delivery.test.sh`.
 Task route resolution and the task readiness profile are covered by `tests/fm-on.test.sh` and `tests/fm-remote-doctor.test.sh`, part of the [remote second-mate suite](remote-secondmates.md#portable-tests).

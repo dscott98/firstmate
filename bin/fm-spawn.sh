@@ -66,13 +66,11 @@
 #   ADOPTED as-is, while an endpoint PROVEN gone is RE-CREATED in the recorded
 #   worktree and the republished record rebinds the task to it. That proof is
 #   its own step, because a backend's `missing` also covers an endpoint that is
-#   merely unreachable from here - and it is only available on HERDR, which must
-#   still read the recorded pane as gone once that session's server is running
-#   again. A tmux `missing` always refuses: a task record carries no socket
-#   identity for its endpoint, so no read here can tell a destroyed window from
-#   one on a tmux server this process cannot address. An endpoint that turns out
-#   to have survived refuses too. The worktree is reused untouched either way; a
-#   rebind is a recovery, never a teardown. Only a crewmate or scout rebinds: a
+#   merely unreachable from here; fm_control_endpoint_absence_verdict in
+#   bin/fm-control-lib.sh owns the supported proofs and refusal rationale.
+#   An endpoint that turns out to have survived with a live agent refuses too.
+#   The worktree is reused untouched either way; a rebind is a recovery, never
+#   a teardown. Only a crewmate or scout rebinds: a
 #   secondmate whose endpoint is gone is respawned by its own owner
 #   (`--secondmate`, driven by the session-start liveness sweep).
 #   Every fresh ship/scout launch and replacement explicitly enters the recorded
@@ -315,11 +313,12 @@
 #   the task's status mirror (bin/fm-procevent-remote-reply.sh arm), which
 #   copies the worker's host-side status lines into this home's
 #   state/<id>.status; a failed arm keeps the launched task and its record and
-#   names the arm to rerun. Lifecycle control and stale-pane supervision are
-#   later stages (docs/remote-sandboxes.md, "Current status").
+#   names the arm to rerun. Its lifecycle control is bin/fm-control.sh's, which
+#   routes to the host, and the watcher supervises it through the host's observe
+#   (docs/remote-sandboxes.md).
 #   --relaunch keeps the recorded placement: a --placement that differs from it
-#   is refused, and a sandbox task's relaunch is refused until its control plane
-#   routes there.
+#   is refused, and a sandbox task's relaunch is refused here because it runs
+#   on the task's host, through bin/fm-control.sh <id> relaunch.
 # Batch dispatch: pass one or more `id=repo` pairs instead of a single <id> <project>, e.g.
 #     fm-spawn.sh fix-a-k3=projects/foo add-b-q7=projects/bar [--scout]
 #   Each pair re-execs this script in single-task mode, so the single path stays the only
@@ -1577,7 +1576,7 @@ sandbox_write_record() { # <path> <provisional|final>
   {
     echo "window=remote:$ID"
     echo "endpoint_task_id=$ID"
-    [ "$2" != final ] || echo "worktree=$SBX_ROUTE_WORKTREE"
+    [ "$2" != final ] || echo "worktree=$FM_REMOTE_TASK_ROUTE_WORKTREE"
     echo "project=$PROJ_ABS"
     echo "harness=$SBX_HARNESS"
     echo "kind=$KIND"
@@ -1589,15 +1588,15 @@ sandbox_write_record() { # <path> <provisional|final>
     echo "tasktmp="
     echo "model=${MODEL:-default}"
     echo "effort=${EFFORT:-default}"
-    [ "$2" != final ] || echo "spawn_gen=$SBX_ROUTE_SPAWN_GEN"
+    [ "$2" != final ] || echo "spawn_gen=$FM_REMOTE_TASK_ROUTE_SPAWN_GEN"
     echo "placement=sandbox"
     echo "remote_kind=task"
     echo "remote_host=$SANDBOX_ALIAS"
     echo "remote_root=$SBX_REMOTE_ROOT"
     echo "remote_home=$SBX_REMOTE_HOME"
     if [ "$2" = final ]; then
-      echo "remote_backend=$SBX_ROUTE_BACKEND"
-      echo "remote_target=$SBX_ROUTE_TARGET"
+      echo "remote_backend=$FM_REMOTE_TASK_ROUTE_BACKEND"
+      echo "remote_target=$FM_REMOTE_TASK_ROUTE_TARGET"
     fi
     echo "sandbox_provider=$SBX_PROVIDER_NAME"
     echo "sandbox_name=$SANDBOX_NAME"
@@ -1635,100 +1634,6 @@ sandbox_manifest() {
     echo "error: $FM_SANDBOX_CREDENTIAL_ERROR" >&2
     return 1
   }
-}
-
-# The route block the host's launch prints is untrusted input about its own
-# task: every field is checked, as the remote second-mate launch output is.
-sandbox_route_parse() { # <block>; sets SBX_ROUTE_*, or SBX_ROUTE_DEFECT and returns 1
-  local line key value seen=' '
-  SBX_ROUTE_DEFECT=
-  SBX_ROUTE_SCHEMA=
-  SBX_ROUTE_BACKEND=
-  SBX_ROUTE_TARGET=
-  SBX_ROUTE_WORKTREE=
-  SBX_ROUTE_BRANCH=
-  SBX_ROUTE_SPAWN_GEN=
-  SBX_ROUTE_BUSY_GEN=
-  SBX_ROUTE_HARNESS=
-  SBX_ROUTE_MODEL=
-  SBX_ROUTE_EFFORT=
-  while IFS= read -r line; do
-    case "$line" in
-    *=*) ;;
-    *) SBX_ROUTE_DEFECT="a line that is not key=value"; return 1 ;;
-    esac
-    key=${line%%=*}
-    value=${line#*=}
-    case "$seen" in *" $key "*) SBX_ROUTE_DEFECT="field $key appears more than once"; return 1 ;; esac
-    seen="$seen$key "
-    case "$value" in *[[:cntrl:]]*) SBX_ROUTE_DEFECT="field $key holds a control character"; return 1 ;; esac
-    case "$key" in
-    schema) SBX_ROUTE_SCHEMA=$value ;;
-    backend) SBX_ROUTE_BACKEND=$value ;;
-    target) SBX_ROUTE_TARGET=$value ;;
-    worktree) SBX_ROUTE_WORKTREE=$value ;;
-    branch) SBX_ROUTE_BRANCH=$value ;;
-    spawn_gen) SBX_ROUTE_SPAWN_GEN=$value ;;
-    busy_gen) SBX_ROUTE_BUSY_GEN=$value ;;
-    harness) SBX_ROUTE_HARNESS=$value ;;
-    model) SBX_ROUTE_MODEL=$value ;;
-    effort) SBX_ROUTE_EFFORT=$value ;;
-    *) SBX_ROUTE_DEFECT="unknown field '$key'"; return 1 ;;
-    esac
-  done <<EOF
-$1
-EOF
-  for key in schema backend target worktree branch spawn_gen busy_gen harness model effort; do
-    case "$seen" in *" $key "*) ;; *) SBX_ROUTE_DEFECT="field $key is missing"; return 1 ;; esac
-  done
-  [ "$SBX_ROUTE_SCHEMA" = fm-remote-task-control.v1 ] || {
-    SBX_ROUTE_DEFECT="schema '$SBX_ROUTE_SCHEMA', expected fm-remote-task-control.v1"
-    return 1
-  }
-  [ "$SBX_ROUTE_BACKEND" = tmux ] || {
-    SBX_ROUTE_DEFECT="backend '$SBX_ROUTE_BACKEND', expected tmux"
-    return 1
-  }
-  case "$SBX_ROUTE_TARGET" in
-  *[[:space:]]*) SBX_ROUTE_DEFECT="target '$SBX_ROUTE_TARGET' holds whitespace"; return 1 ;;
-  ?*":fm-$ID") ;;
-  *) SBX_ROUTE_DEFECT="target '$SBX_ROUTE_TARGET' is not window fm-$ID"; return 1 ;;
-  esac
-  case "$SBX_ROUTE_WORKTREE" in
-  /?*) ;;
-  *) SBX_ROUTE_DEFECT="worktree '$SBX_ROUTE_WORKTREE' is not an absolute path"; return 1 ;;
-  esac
-  case "/$SBX_ROUTE_WORKTREE/" in
-  */../* | */./*) SBX_ROUTE_DEFECT="worktree '$SBX_ROUTE_WORKTREE' holds a traversal component"; return 1 ;;
-  esac
-  if [ "$KIND" = ship ]; then
-    [ "$SBX_ROUTE_BRANCH" = "$BRANCH" ] || {
-      SBX_ROUTE_DEFECT="branch '$SBX_ROUTE_BRANCH', expected $BRANCH"
-      return 1
-    }
-  elif [ -n "$SBX_ROUTE_BRANCH" ]; then
-    SBX_ROUTE_DEFECT="a scout reported branch '$SBX_ROUTE_BRANCH'"
-    return 1
-  fi
-  case "$SBX_ROUTE_SPAWN_GEN" in
-  '' | *[!A-Za-z0-9.]*) SBX_ROUTE_DEFECT="spawn_gen '$SBX_ROUTE_SPAWN_GEN' is not an incarnation token"; return 1 ;;
-  esac
-  case "$SBX_ROUTE_BUSY_GEN" in
-  *[!A-Za-z0-9.]*) SBX_ROUTE_DEFECT="busy_gen '$SBX_ROUTE_BUSY_GEN' is not a generation token"; return 1 ;;
-  esac
-  [ "$SBX_ROUTE_HARNESS" = "$SBX_HARNESS" ] || {
-    SBX_ROUTE_DEFECT="harness '$SBX_ROUTE_HARNESS', expected $SBX_HARNESS"
-    return 1
-  }
-  [ "$SBX_ROUTE_MODEL" = "${MODEL:-default}" ] || {
-    SBX_ROUTE_DEFECT="model '$SBX_ROUTE_MODEL', expected ${MODEL:-default}"
-    return 1
-  }
-  [ "$SBX_ROUTE_EFFORT" = "${EFFORT:-default}" ] || {
-    SBX_ROUTE_DEFECT="effort '$SBX_ROUTE_EFFORT', expected ${EFFORT:-default}"
-    return 1
-  }
-  return 0
 }
 
 spawn_sandbox_task() {
@@ -2066,8 +1971,10 @@ spawn_sandbox_task() {
     fi
     exit "$rc"
   fi
-  if ! sandbox_route_parse "$out"; then
-    echo "error: task $ID's sandbox launch returned malformed route metadata: $SBX_ROUTE_DEFECT" >&2
+  # The route block is untrusted input about its own task, checked field by
+  # field (bin/fm-remote-route-lib.sh), as the remote second-mate launch output is.
+  if ! fm_remote_route_task_block_parse "$out" "$ID" "$KIND" "${BRANCH:-}" "$SBX_HARNESS" "${MODEL:-default}" "${EFFORT:-default}"; then
+    echo "error: task $ID's sandbox launch returned malformed route metadata: $FM_REMOTE_TASK_ROUTE_DEFECT" >&2
     exit 1
   fi
 
@@ -2106,8 +2013,8 @@ spawn_sandbox_task() {
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: lifecycle control and stale-pane supervision of a sandbox task are later stages; sandbox placement is not for real use until then (docs/remote-sandboxes.md, Current status)" >&2
-  echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$SBX_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
+  echo "notice: sandbox placement is not for real use until its real-cluster verification lands (docs/remote-sandboxes.md, Current status)" >&2
+  echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$FM_REMOTE_TASK_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 
 BACKEND=
@@ -2653,7 +2560,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   }
   # Placement is part of the task's identity, read from its own record
   # (bin/fm-remote-route-lib.sh): a relaunch never moves a task, and a sandbox
-  # task's agent runs on its host, which this relaunch cannot reach yet.
+  # task's agent runs on its host, whose own relaunch bin/fm-control.sh drives.
   if ! fm_remote_route_resolve "$RELAUNCH_META" "$ID"; then
     echo "error: --relaunch refused: $FM_REMOTE_ROUTE_ERROR" >&2
     exit 1
@@ -2665,7 +2572,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
     exit 1
   fi
   if [ "$RELAUNCH_PLACEMENT" = sandbox ]; then
-    echo "error: $(fm_remote_route_unsupported "$ID" relaunch)" >&2
+    echo "error: task $ID runs in a sandbox on $FM_REMOTE_ROUTE_HOST, so its relaunch runs on that host: use bin/fm-control.sh $ID relaunch, which drives the host's own relaunch and republishes this home's record; nothing was changed" >&2
     exit 1
   fi
   fm_backend_validate_task_endpoint "$RELAUNCH_META" "$ID" || exit 1
@@ -2692,18 +2599,8 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # endpoint was DESTROYED" with "the endpoint is UNREACHABLE from here right
   # now", and an unreachable endpoint can still hold the live agent this
   # relaunch would duplicate. So absence is PROVEN before it may rebind, never
-  # inferred from a failed read - and only HERDR can prove it:
-  #   herdr - the recorded session's server is started, and the recorded pane is
-  #           RE-READ through that session's own socket. `dead` means the pane
-  #           survived the restart and is adopted after all; `alive` means the
-  #           agent came back and refuses; only a second `missing` proves the
-  #           pane itself did not survive.
-  #   tmux  - REFUSES, always. A task record carries no socket identity for its
-  #           endpoint, and a server-wide inventory describes only the server
-  #           this process addresses, so no read available here can tell "gone"
-  #           from "on a server I cannot see". A tmux `missing` therefore stays
-  #           as deadlocked as it was before this change - deliberately, and
-  #           with the reason stated rather than guessed past.
+  # inferred from a failed read. fm_control_endpoint_absence_verdict in
+  # bin/fm-control-lib.sh owns the per-backend proofs and refusal rationale.
   # Every transient or self-contradicting read stays `unreadable`/`ambiguous`
   # and refuses as it always did (bin/fm-backend.sh's fm_backend_agent_state
   # owns that vocabulary). The proof itself lives in one place for the whole
@@ -2711,7 +2608,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   # `relaunch` cannot reach two different answers about one endpoint.
   RELAUNCH_STATE=$(fm_backend_agent_state "$BACKEND" "$RELAUNCH_TARGET")
   if [ "$RELAUNCH_STATE" = missing ]; then
-    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET")
+    RELAUNCH_ABSENCE=$(fm_control_endpoint_absence_verdict "$BACKEND" "$RELAUNCH_TARGET" "$RELAUNCH_META")
     case "${RELAUNCH_ABSENCE%%$'\t'*}" in
       gone) RELAUNCH_STATE=missing ;;
       dead) RELAUNCH_STATE=dead ;;
@@ -4345,6 +4242,21 @@ if [ "$RELAUNCH" -eq 1 ]; then
     T=$RELAUNCH_TARGET
     WT_TARGET=$T
     SES=${T%%:*}
+  elif [ "$BACKEND" = tmux ]; then
+    # The recorded endpoint is authoritatively gone, exactly as for the herdr
+    # rebind below. tmux proves that only on a sandbox host that has rebooted
+    # since this incarnation's launch, where its control plane opted in
+    # (fm_control_endpoint_absence_verdict), because no tmux server survives a
+    # reboot. The window is re-created under the RECORDED session's name and
+    # opened directly in the recorded worktree, so the republished record names
+    # the same window and nothing else about the task moves.
+    SES=${RELAUNCH_TARGET%%:*}
+    fm_backend_tmux_session_ensure "$SES" || {
+      echo "error: task $ID's endpoint could not be re-created: its recorded tmux session '$SES' could not be started" >&2
+      exit 1
+    }
+    T="$SES:$W"
+    WT_TARGET=$(fm_backend_tmux_create_task "$SES" "$W" "$WT") || exit 1
   else
     # The recorded endpoint is authoritatively gone, so there is nothing to
     # adopt: create ONE fresh endpoint for the same task, opened directly in the
@@ -4352,11 +4264,10 @@ if [ "$RELAUNCH" -eq 1 ]; then
     # ids) from these values, which is the whole rebind - the task id, brief,
     # worktree, armed poll and status log are untouched.
     #
-    # Herdr is the ONLY backend that reaches here: the gate above rebinds only
-    # on a PROVEN-gone endpoint, and absence is provable only on herdr, whose
-    # every read is scoped to the session the record names
-    # (fm_control_endpoint_absence_verdict owns that argument). tmux and every
-    # secondmate were already refused, so there is no dispatch left to make.
+    # The gate above rebinds only on a PROVEN-gone endpoint, and every
+    # secondmate was already refused (fm_control_endpoint_absence_verdict owns
+    # the proof): herdr proves it through reads scoped to the session the
+    # record names, and tmux, above, only after a sandbox host's reboot.
     #
     # This deliberately uses the FLAT container shape rather than Herdr's
     # presentation projection: projection is a presentation-only layout that is

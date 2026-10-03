@@ -63,7 +63,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-home-seed.sh`        | Transactionally provision a local secondmate home and maintain `data/secondmates.md` |
 | `fm-remote-home-seed.sh` | Register and provision a whole secondmate home on an SSH-reachable host              |
 | `fm-remote-readiness-lib.sh` | Shared remote readiness gate for a named doctor profile: check and, when needed, repair then re-check through `fm-remote-doctor.sh` |
-| `fm-remote-route-lib.sh` | Single owner of remote dispatch: whether a task record is local, a remote second mate, or a sandbox task, which control script serves it, and which route reaches it ([remote-sandboxes.md](remote-sandboxes.md#task-routes)) |
+| `fm-remote-route-lib.sh` | Single owner of remote dispatch: whether a task record is local, a remote second mate, or a sandbox task, which control script serves it, which route reaches it, and the validation of the route block a sandbox host reports ([remote-sandboxes.md](remote-sandboxes.md#task-routes)) |
 | `fm-remote-task-control.sh` | Host-side control plane a sandbox task's one-task home runs: provision from a manifest, launch, observe, steer, control, and retire through the host's own spawn, control, crew-state, and teardown ([remote-sandboxes.md](remote-sandboxes.md#host-side-task-control)) |
 | [`fm-project-origin-lib.sh`](../bin/fm-project-origin-lib.sh) | Accepted origin-form owner shared by both remote provisioning boundaries |
 | `fm-spawn.sh`            | Spawn crewmates, scouts, `id=repo` batches, and secondmates on the resolved harness and runtime backend, or a ship or scout in a sandbox with `--placement sandbox` ([remote-sandboxes.md](remote-sandboxes.md#placement)) |
@@ -96,7 +96,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-gate-refuse-lib.sh`  | Shared gate-context lifecycle boundary for real and lab homes                      |
 | `fm-watch-arm.sh`        | Verified home-scoped watcher arm wrapper with loud cycle endings and bounded lifecycle ledger |
 | `fm-watch-checkpoint.sh` | Run one bounded foreground watcher checkpoint for Codex-style supervision            |
-| `fm-watch.sh`            | Singleton-safe watcher: absorb benign wakes, detect stalled local-secondmate wake queues, and exit on actionable ones |
+| `fm-watch.sh`            | Singleton-safe watcher: absorb benign wakes, detect stalled local-secondmate wake queues, observe sandbox tasks through their hosts, and exit on actionable ones |
 | `fm-inactive-reconcile.sh` | Reconcile long-inactive direct crewmate terminal outcomes without forge access |
 | `fm-afk-contract.sh`     | Own the away-or-quiet record's posture, schema, entry, read-back, archive, and cross-subsystem authority lock |
 | `fm-afk-start.sh`        | Run the common sourceable away-mode daemon entry in the foreground                      |
@@ -129,7 +129,7 @@ The shared no-mistakes gate lifecycle boundary is summarized in [architecture.md
 | `fm-branch-outcome.sh`   | Own the supervision branch's append-only outcome store, cursors, bounded status-coverage indexes, and session-start replay |
 | `fm-lease.sh`            | Claim, release, inspect, and sweep per-task supervision leases                       |
 | `fm-lease-lib.sh`        | One owner of the supervision lease contract and the main-only role-partition guards  |
-| `fm-control.sh`          | Agent lifecycle control plane: allowlisted `interrupt`, `exit`, and transactional `relaunch` verbs for an exact task id ([agent-control.md](agent-control.md)) |
+| `fm-control.sh`          | Agent lifecycle control plane: allowlisted `interrupt`, `exit`, and transactional `relaunch` verbs for an exact task id, run on a sandbox task's host ([agent-control.md](agent-control.md)) |
 | `fm-control-lib.sh`      | One executable owner of the control-plane verb allowlist, per-harness interrupt/exit mechanics, per-backend capability, and the endpoint-absence proof both `exit` and `relaunch` read |
 | `fm-busy-lib.sh`         | Single owner of the semantic busy-state contract: verdicts, source attribution, and per-harness sources |
 | `fm-busy-event.sh`       | The only writer of a task's semantic busy-state record and native-harness progress marker; arms an incarnation and applies lifecycle events |

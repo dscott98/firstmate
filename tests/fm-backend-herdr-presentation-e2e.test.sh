@@ -1295,7 +1295,8 @@ teardown_task "$CROSS_RESTART_ID" "$SECOND_HOME_A" > "$TMP_ROOT/cross-restart-te
 pass "real Herdr lab: secondmate restart binding and reclaim stay isolated to the exact child home and parent"
 
 # Two homes recovering concurrently serialize on the named session lock and
-# each replace only their own exact husk.
+# each replace only their own exact husk. The bounded lock may refuse a resume
+# on a slow runner; retry that refusal after both contenders have finished.
 PRIMARY_WAVE_ID=resume-wave-primary
 BRAVO_WAVE_ID=resume-wave-bravo
 mkdir -p "$HOME_DIR/data/$PRIMARY_WAVE_ID" "$SECOND_HOME_B/data/$BRAVO_WAVE_ID"
@@ -1322,8 +1323,22 @@ spawn_task "$PRIMARY_WAVE_ID" "$HOME_DIR" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/p
 PRIMARY_WAVE_PID=$!
 spawn_task "$BRAVO_WAVE_ID" "$SECOND_HOME_B" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/bravo-wave-resume.out" 2> "$TMP_ROOT/bravo-wave-resume.err" &
 BRAVO_WAVE_PID=$!
-wait "$PRIMARY_WAVE_PID" || fail "concurrent primary recovery failed: $(cat "$TMP_ROOT/primary-wave-resume.err")"
-wait "$BRAVO_WAVE_PID" || fail "concurrent secondmate recovery failed: $(cat "$TMP_ROOT/bravo-wave-resume.err")"
+PRIMARY_WAVE_STATUS=0
+BRAVO_WAVE_STATUS=0
+wait "$PRIMARY_WAVE_PID" || PRIMARY_WAVE_STATUS=$?
+wait "$BRAVO_WAVE_PID" || BRAVO_WAVE_STATUS=$?
+for wave in primary bravo; do
+  if [ "$wave" = primary ]; then
+    wave_status=$PRIMARY_WAVE_STATUS wave_id=$PRIMARY_WAVE_ID wave_home=$HOME_DIR
+  else
+    wave_status=$BRAVO_WAVE_STATUS wave_id=$BRAVO_WAVE_ID wave_home=$SECOND_HOME_B
+  fi
+  [ "$wave_status" -ne 0 ] || continue
+  grep -Fx 'error: herdr presentation recovery could not acquire its session lock; refusing a concurrent resume' "$TMP_ROOT/$wave-wave-resume.err" >/dev/null \
+    || fail "concurrent $wave recovery failed: $(cat "$TMP_ROOT/$wave-wave-resume.err")"
+  spawn_task "$wave_id" "$wave_home" "$RECOVERY_PROJECT_DIR" > "$TMP_ROOT/$wave-wave-resume.out" 2> "$TMP_ROOT/$wave-wave-resume.err" \
+    || fail "$wave recovery retry after lock contention failed: $(cat "$TMP_ROOT/$wave-wave-resume.err")"
+done
 PRIMARY_WAVE_NEW_WT=$(remember_meta_worktree "$PRIMARY_WAVE_META")
 BRAVO_WAVE_NEW_WT=$(remember_meta_worktree "$BRAVO_WAVE_META")
 PRIMARY_WAVE_NEW_PANE=$(grep '^herdr_pane_id=' "$PRIMARY_WAVE_META" | cut -d= -f2-)

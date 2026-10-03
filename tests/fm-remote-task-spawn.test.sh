@@ -567,7 +567,8 @@ test_refusals_happen_before_any_sandbox_exists() {
   cp "$PRIMARY/state/$ID-held.meta" "$CASE/held.meta"
   run_spawn "$ID-held" --relaunch
   [ "$RC" -ne 0 ] || fail "a relaunch of a sandbox task was accepted"
-  assert_contains "$OUT" "relaunch is not supported for a sandbox task in this Firstmate version" "the sandbox relaunch refusal names the reason"
+  assert_contains "$OUT" "so its relaunch runs on that host: use bin/fm-control.sh $ID-held relaunch" \
+    "the sandbox relaunch refusal names the control plane that relaunches it"
   cmp -s "$CASE/held.meta" "$PRIMARY/state/$ID-held.meta" || fail "a refused sandbox relaunch changed its record"
   [ ! -e "$CASE/ssh.log" ] || fail "a refused sandbox relaunch reached the transport"
   pass "fm-spawn --placement sandbox refuses each named case before any sandbox, record, or backlog change"
@@ -583,7 +584,7 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   expect_code 0 "$RC" "a sandbox ship should launch"$'\n'"$OUT"
   assert_contains "$OUT" "spawned $ID harness=pi kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha,minimax" \
     "the success line names the placement, route, sandbox, profile, and credential names"
-  assert_contains "$OUT" "lifecycle control and stale-pane supervision of a sandbox task are later stages" \
+  assert_contains "$OUT" "sandbox placement is not for real use until its real-cluster verification lands" \
     "success states the operational limitation"
   assert_line "adapter=remote-reply" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
     "the status mirror is armed at publish"

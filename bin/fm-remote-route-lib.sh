@@ -49,6 +49,17 @@
 # fm_remote_route_unsupported <task-id> <action>, the one wording for that
 # refusal, instead of treating the record as local or as a remote secondmate.
 #
+# fm_remote_route_task_block_parse <block> <id> <kind> <branch> <harness>
+# <model> <effort> is the one validator of the route block a sandbox host's
+# launch and control relaunch print (bin/fm-remote-task-control.sh owns its
+# fields). The block is untrusted input about its own task, so every field is
+# checked against what the caller expects: schema, tmux, the task's own window,
+# an absolute worktree, the ship's branch (none for a scout), incarnation and
+# generation tokens, and the expected harness, model, and effort. On success it
+# sets FM_REMOTE_TASK_ROUTE_BACKEND, _TARGET, _WORKTREE, _BRANCH, _SPAWN_GEN,
+# _BUSY_GEN, _HARNESS, _MODEL, and _EFFORT; otherwise it returns 1 with
+# FM_REMOTE_TASK_ROUTE_DEFECT naming the defect.
+#
 # fm_remote_route_check_shape <host> <root> <home> owns the transport shape
 # every remote route passes before bin/fm-on.sh encodes it: a safe SSH alias,
 # and an absolute root and home with no control characters, traversal
@@ -245,6 +256,97 @@ fm_remote_route_resolve() { # <meta-file> [<task-id>]
   FM_REMOTE_ROUTE_ROOT=$root
   FM_REMOTE_ROUTE_HOME=$home
   FM_REMOTE_ROUTE_CONTROL=fm-remote-task-control.sh
+  return 0
+}
+
+fm_remote_route_task_block_parse() { # <block> <id> <kind> <branch> <harness> <model> <effort>
+  local block=$1 id=$2 kind=$3 branch=$4 harness=$5 model=$6 effort=$7 line key value seen=' ' schema=''
+  FM_REMOTE_TASK_ROUTE_DEFECT=
+  FM_REMOTE_TASK_ROUTE_BACKEND=
+  FM_REMOTE_TASK_ROUTE_TARGET=
+  FM_REMOTE_TASK_ROUTE_WORKTREE=
+  FM_REMOTE_TASK_ROUTE_BRANCH=
+  FM_REMOTE_TASK_ROUTE_SPAWN_GEN=
+  FM_REMOTE_TASK_ROUTE_BUSY_GEN=
+  FM_REMOTE_TASK_ROUTE_HARNESS=
+  FM_REMOTE_TASK_ROUTE_MODEL=
+  FM_REMOTE_TASK_ROUTE_EFFORT=
+  while IFS= read -r line; do
+    case "$line" in
+      *=*) ;;
+      *) FM_REMOTE_TASK_ROUTE_DEFECT="a line that is not key=value"; return 1 ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$seen" in *" $key "*) FM_REMOTE_TASK_ROUTE_DEFECT="field $key appears more than once"; return 1 ;; esac
+    seen="$seen$key "
+    case "$value" in *[[:cntrl:]]*) FM_REMOTE_TASK_ROUTE_DEFECT="field $key holds a control character"; return 1 ;; esac
+    case "$key" in
+      schema) schema=$value ;;
+      backend) FM_REMOTE_TASK_ROUTE_BACKEND=$value ;;
+      target) FM_REMOTE_TASK_ROUTE_TARGET=$value ;;
+      worktree) FM_REMOTE_TASK_ROUTE_WORKTREE=$value ;;
+      branch) FM_REMOTE_TASK_ROUTE_BRANCH=$value ;;
+      spawn_gen) FM_REMOTE_TASK_ROUTE_SPAWN_GEN=$value ;;
+      busy_gen) FM_REMOTE_TASK_ROUTE_BUSY_GEN=$value ;;
+      harness) FM_REMOTE_TASK_ROUTE_HARNESS=$value ;;
+      model) FM_REMOTE_TASK_ROUTE_MODEL=$value ;;
+      effort) FM_REMOTE_TASK_ROUTE_EFFORT=$value ;;
+      *) FM_REMOTE_TASK_ROUTE_DEFECT="unknown field '$key'"; return 1 ;;
+    esac
+  done <<EOF
+$block
+EOF
+  for key in schema backend target worktree branch spawn_gen busy_gen harness model effort; do
+    case "$seen" in *" $key "*) ;; *) FM_REMOTE_TASK_ROUTE_DEFECT="field $key is missing"; return 1 ;; esac
+  done
+  [ "$schema" = fm-remote-task-control.v1 ] || {
+    FM_REMOTE_TASK_ROUTE_DEFECT="schema '$schema', expected fm-remote-task-control.v1"
+    return 1
+  }
+  [ "$FM_REMOTE_TASK_ROUTE_BACKEND" = tmux ] || {
+    FM_REMOTE_TASK_ROUTE_DEFECT="backend '$FM_REMOTE_TASK_ROUTE_BACKEND', expected tmux"
+    return 1
+  }
+  case "$FM_REMOTE_TASK_ROUTE_TARGET" in
+    *[[:space:]]*) FM_REMOTE_TASK_ROUTE_DEFECT="target '$FM_REMOTE_TASK_ROUTE_TARGET' holds whitespace"; return 1 ;;
+    ?*":fm-$id") ;;
+    *) FM_REMOTE_TASK_ROUTE_DEFECT="target '$FM_REMOTE_TASK_ROUTE_TARGET' is not window fm-$id"; return 1 ;;
+  esac
+  case "$FM_REMOTE_TASK_ROUTE_WORKTREE" in
+    /?*) ;;
+    *) FM_REMOTE_TASK_ROUTE_DEFECT="worktree '$FM_REMOTE_TASK_ROUTE_WORKTREE' is not an absolute path"; return 1 ;;
+  esac
+  case "/$FM_REMOTE_TASK_ROUTE_WORKTREE/" in
+    */../* | */./*) FM_REMOTE_TASK_ROUTE_DEFECT="worktree '$FM_REMOTE_TASK_ROUTE_WORKTREE' holds a traversal component"; return 1 ;;
+  esac
+  if [ "$kind" = ship ]; then
+    [ "$FM_REMOTE_TASK_ROUTE_BRANCH" = "$branch" ] || {
+      FM_REMOTE_TASK_ROUTE_DEFECT="branch '$FM_REMOTE_TASK_ROUTE_BRANCH', expected $branch"
+      return 1
+    }
+  elif [ -n "$FM_REMOTE_TASK_ROUTE_BRANCH" ]; then
+    FM_REMOTE_TASK_ROUTE_DEFECT="a scout reported branch '$FM_REMOTE_TASK_ROUTE_BRANCH'"
+    return 1
+  fi
+  case "$FM_REMOTE_TASK_ROUTE_SPAWN_GEN" in
+    '' | *[!A-Za-z0-9.]*) FM_REMOTE_TASK_ROUTE_DEFECT="spawn_gen '$FM_REMOTE_TASK_ROUTE_SPAWN_GEN' is not an incarnation token"; return 1 ;;
+  esac
+  case "$FM_REMOTE_TASK_ROUTE_BUSY_GEN" in
+    *[!A-Za-z0-9.]*) FM_REMOTE_TASK_ROUTE_DEFECT="busy_gen '$FM_REMOTE_TASK_ROUTE_BUSY_GEN' is not a generation token"; return 1 ;;
+  esac
+  [ "$FM_REMOTE_TASK_ROUTE_HARNESS" = "$harness" ] || {
+    FM_REMOTE_TASK_ROUTE_DEFECT="harness '$FM_REMOTE_TASK_ROUTE_HARNESS', expected $harness"
+    return 1
+  }
+  [ "$FM_REMOTE_TASK_ROUTE_MODEL" = "$model" ] || {
+    FM_REMOTE_TASK_ROUTE_DEFECT="model '$FM_REMOTE_TASK_ROUTE_MODEL', expected $model"
+    return 1
+  }
+  [ "$FM_REMOTE_TASK_ROUTE_EFFORT" = "$effort" ] || {
+    FM_REMOTE_TASK_ROUTE_DEFECT="effort '$FM_REMOTE_TASK_ROUTE_EFFORT', expected $effort"
+    return 1
+  }
   return 0
 }
 

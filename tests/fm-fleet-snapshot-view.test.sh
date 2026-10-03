@@ -831,6 +831,113 @@ test_view_renders_dead_secondmate_agent_status() {
   pass "fleet view renders secondmate agent liveness"
 }
 
+# Sandbox task rows: the route library's remote kind, the provider-facing
+# identity, the watcher's last observation as the cached endpoint, a VM worktree
+# path never probed here, and current state read through the host's bounded
+# crew-state leg. A fake ssh answers that leg per task, and fails (SSH exit 255)
+# for a task with no canned answer.
+write_sandbox_record() {  # <home> <id> <kind>
+  local home=$1 id=$2 kind=$3
+  fm_write_meta "$home/state/$id.meta" "window=remote:$id" "endpoint_task_id=$id" \
+    "worktree=/home/agent/fm-home/projects/alpha-wt" "project=$home/projects/alpha" \
+    "harness=pi" "kind=$kind" "model=minimax/m2" "effort=default" "spawn_gen=s1700000000.1.1" \
+    "placement=sandbox" "remote_kind=task" "remote_host=alias-$id" "remote_root=$ROOT" \
+    "remote_home=/home/agent/fm-home" "remote_backend=tmux" "remote_target=firstmate:fm-$id" \
+    "sandbox_provider=pve-sandbox" "sandbox_name=sbx-home-$id" "sandbox_profile=default"
+}
+
+test_sandbox_task_rows_carry_sandbox_fields() {
+  local home fakebin out view observed
+  home=$(make_home sandbox-rows)
+  write_fixture "$home"
+  fakebin=$(make_fakebin "$home")
+  mkdir -p "$home/sandbox-answers"
+  cat > "$fakebin/fake-ssh" <<SH
+#!/usr/bin/env bash
+while [ "\$#" -gt 0 ]; do
+  case "\$1" in -o) shift 2 ;; --) shift; break ;; *) exit 90 ;; esac
+done
+args=()
+while IFS= read -r -d '' arg; do args+=("\$arg"); done < <(printf '%s' "\$6" | base64 --decode)
+printf '%s %s %s\n' "\${args[0]}" "\${args[1]:-}" "\${args[2]:-}" >> "$home/sandbox-answers/ssh.log"
+answer="$home/sandbox-answers/\${args[1]:-}-\${args[2]:-}"
+[ -f "\$answer" ] || exit 255
+cat "\$answer"
+SH
+  chmod +x "$fakebin/fake-ssh"
+  write_sandbox_record "$home" sbx-ship ship
+  printf 'working [at=1700000100]: rebasing\n' > "$home/state/sbx-ship.status"
+  printf 'schema=fm-remote-task-control.v1\ncrew_state=state: working \302\267 source: run-step \302\267 validating (running)\nbusy=busy\nbusy_source=pi-ext\n' \
+    > "$home/sandbox-answers/crew-state-sbx-ship"
+  observed=1700000300
+  mkdir -p "$home/state/.sandbox-observe-sbx-ship"
+  printf 'schema=fm-remote-task-control.v1\nnow=1700000290\nboot=1699990000\nagent=alive\nbusy=busy\nbusy_source=pi-ext\npane_hash=abc\nworktree_write=none\ninbox_oldest=none\ninbox_oldest_at=none\nturn_at=1700000200\nobserved_at=%s\n' \
+    "$observed" > "$home/state/.sandbox-observe-sbx-ship/last"
+  write_sandbox_record "$home" sbx-gone ship
+  mkdir -p "$home/state/.sandbox-observe-sbx-gone"
+  printf 'agent=missing\nbusy=dead\nbusy_source=endpoint-gone\nboot=1700000250\nobserved_at=%s\n' "$observed" \
+    > "$home/state/.sandbox-observe-sbx-gone/last"
+  write_sandbox_record "$home" sbx-scout scout
+  mkdir -p "$home/state/.sandbox-observe-sbx-scout"
+  printf '2 1700000200\n' > "$home/state/.sandbox-observe-sbx-scout/failures"
+
+  out=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_SSH_BIN="$fakebin/fake-ssh" \
+    FM_SNAPSHOT_NOW_EPOCH=$((observed + 30)) "$SNAPSHOT" --json) || fail "snapshot with sandbox tasks failed: $out"
+  printf '%s' "$out" | jq -e '
+    .tasks[] | select(.id == "sbx-ship")
+    | .remote == {kind:"task",host:"alias-sbx-ship",root:.remote.root,home:"/home/agent/fm-home"}
+      and .sandbox.provider == "pve-sandbox"
+      and .sandbox.name == "sbx-home-sbx-ship"
+      and .sandbox.profile == "default"
+      and .sandbox.unreachable_streak == 0
+      and .sandbox.observation.agent == "alive"
+      and .sandbox.observation.busy == "busy"
+      and .sandbox.observation.age_seconds == 30
+      and .sandbox.observation.observed_at == "2023-11-14T22:18:20Z"
+      and .sandbox.observation.boot == "2023-11-14T19:26:40Z"
+      and .endpoint.target == "firstmate:fm-sbx-ship"
+      and .endpoint.exists == true
+      and .endpoint.agent_alive == "alive"
+      and .endpoint.status == "alive"
+      and .endpoint.freshness == "cached"
+      and .endpoint.observed_at == "2023-11-14T22:18:20Z"
+      and .paths.worktree == {path:"/home/agent/fm-home/projects/alpha-wt",present:null}
+      and .current_state.state == "working"
+      and .current_state.source == "run-step"
+      and (.actions.control | startswith("bin/fm-control.sh sbx-ship"))
+      and .actions.watch == "bin/fm-peek.sh sbx-ship"
+  ' >/dev/null || fail "a sandbox ship row lacks its sandbox fields: $(printf '%s' "$out" | jq -c '.tasks[] | select(.id == "sbx-ship")')"
+  printf '%s' "$out" | jq -e '
+    .tasks[] | select(.id == "sbx-gone")
+    | .endpoint.exists == false and .endpoint.agent_alive == "dead" and .endpoint.status == "absent"
+      and .sandbox.observation.agent == "missing"
+  ' >/dev/null || fail "a sandbox whose host reads the endpoint missing is not shown absent"
+  printf '%s' "$out" | jq -e '
+    .tasks[] | select(.id == "sbx-scout")
+    | .sandbox.observation == null
+      and .sandbox.unreachable_streak == 2
+      and .endpoint.exists == null
+      and .endpoint.freshness == "unobserved"
+      and .endpoint.observed_at == null
+      and .current_state.state == "unknown"
+      and (.current_state.detail | contains("not proof of death"))
+  ' >/dev/null || fail "an unobserved, unreachable sandbox row is not unknown: $(printf '%s' "$out" | jq -c '.tasks[] | select(.id == "sbx-scout")')"
+  printf '%s' "$out" | jq -e '
+    [.tasks[] | select(.id == "ship-task" or .id == "secondmate-task") | .sandbox == null and .remote == null] | all
+  ' >/dev/null || fail "a local row grew sandbox or remote fields"
+  grep -q '^fm-remote-task-control.sh crew-state sbx-ship$' "$home/sandbox-answers/ssh.log" \
+    || fail "the sandbox row's current state did not cross to its host"
+  [ "$(grep -c ' observe ' "$home/sandbox-answers/ssh.log")" -eq 0 ] || fail "the snapshot observed a sandbox itself"
+
+  view=$(PATH="$fakebin:$PATH" FM_HOME="$home" FM_SSH_BIN="$fakebin/fake-ssh" \
+    FM_SNAPSHOT_NOW_EPOCH=$((observed + 30)) "$VIEW")
+  assert_contains "$view" "| sbx-ship | working / run-step | ship | $home/projects/alpha | tmux in sandbox sbx-home-sbx-ship, profile default | alive on alias-sbx-ship, observed 30s ago |" \
+    "the view shows a sandbox row's placement, profile, and observed endpoint"
+  assert_contains "$view" "/home/agent/fm-home/projects/alpha-wt on alias-sbx-ship" "the view places a sandbox worktree on its host"
+  assert_contains "$view" "unobserved on alias-sbx-scout, 2 failed since" "the view shows an unobserved sandbox's failure streak"
+  pass "sandbox task rows carry the route, provider identity, cached observation, and host-read current state"
+}
+
 # A still-open decision must survive a LATER, UNRELATED terminal event on the same
 # append-only stream. This is the fmdev masking bug: last-event-wins read the trailing
 # `done` and reported pending_decision=false while a needs-decision was still open. The
@@ -1170,3 +1277,4 @@ test_scout_reports_include_teardown_reports
 test_backlog_tasks_axi_forms_and_overrides
 test_view_renders_snapshot
 test_view_renders_dead_secondmate_agent_status
+test_sandbox_task_rows_carry_sandbox_fields

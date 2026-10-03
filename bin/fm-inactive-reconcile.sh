@@ -85,6 +85,12 @@
 #
 # The scan reads only durable local state and fm-crew-state.sh; it never invokes
 # gh, gh-axi, curl, fm-pr-check.sh, fm-pr-poll.sh, or a state *.check.sh.
+# It is remote-aware through bin/fm-remote-route-lib.sh: a sandbox task's
+# worktree is on its VM and its host is never read from this poll-path scan,
+# so its ship done gate gets no local worktree (a recorded PR must carry it)
+# and its current state is fm-crew-state.sh's fold of this home's mirrored
+# status log alone (FM_CREW_STATE_LOCAL_FOLD=1), while a record whose
+# placement is malformed is never probed locally either.
 set -u
 export LC_ALL=C
 
@@ -106,6 +112,8 @@ CREW_STATE_BIN="${FM_INACTIVE_CREW_STATE_BIN:-$SCRIPT_DIR/fm-crew-state.sh}"
 . "$SCRIPT_DIR/fm-timeout-lib.sh"
 # shellcheck source=bin/fm-dod-lib.sh
 . "$SCRIPT_DIR/fm-dod-lib.sh"
+# shellcheck source=bin/fm-remote-route-lib.sh
+. "$SCRIPT_DIR/fm-remote-route-lib.sh"
 
 FM_INACTIVE_RECONCILE_SECS=${FM_INACTIVE_RECONCILE_SECS:-900}
 case "$FM_INACTIVE_RECONCILE_SECS" in
@@ -307,6 +315,20 @@ meta_field() {
   grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- || true
 }
 
+# The child's worktree when it is local, and nothing when its placement puts it
+# on another host or is malformed (bin/fm-remote-route-lib.sh), so the done gate
+# never probes a path that names no local copy.
+child_local_worktree() { # <meta> <id>
+  fm_remote_route_resolve "$1" "$2" || return 0
+  [ "$FM_REMOTE_ROUTE_KIND" = none ] || return 0
+  meta_field "$1" worktree
+}
+
+# 0 iff the child's record names a sandbox task, whose host this scan never reads.
+child_is_sandbox_task() { # <meta> <id>
+  fm_remote_route_resolve "$1" "$2" && [ "$FM_REMOTE_ROUTE_KIND" = task ]
+}
+
 meta_incarnation() { # <meta>
   local meta=$1 incarnation identity
   incarnation=$(meta_field "$meta" spawn_gen)
@@ -423,7 +445,7 @@ report_child_ledger_locked() { # <id> <meta>
   if [ "$state" = "done" ] && [ ! -f "$(record_path "$fingerprint" reported)" ] \
     && [ ! -f "$(record_path "$fingerprint" pending)" ] \
     && ! fm_dod_accept_ship_done "$(meta_field "$meta" kind)" "$(meta_field "$meta" mode)" \
-      "$(meta_field "$meta" worktree)" "$(meta_field "$meta" project)" "$last" \
+      "$(child_local_worktree "$meta" "$id")" "$(meta_field "$meta" project)" "$last" \
       "$STATE" "$id" "$meta" >/dev/null; then
     return 0
   fi
@@ -496,7 +518,7 @@ report_child() { # <id>
 }
 
 reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeout>
-  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line state pr incarnation fingerprint outcome_key payload kind state_rc=0
+  local id=$1 meta=$2 self=${3:-} timeout=$4 status turn last age state_line state pr incarnation fingerprint outcome_key payload kind state_rc=0 local_fold
   [ -f "$meta" ] && [ ! -L "$meta" ] || return 0
   kind=$(meta_field "$meta" kind)
   [ "$kind" = secondmate ] && return 0
@@ -511,8 +533,10 @@ reconcile_direct_child_locked() { # <id> <meta> <secondmate-id-or-empty> <timeou
   fi
   age=$(last_activity_age "$meta" "$status" "$turn")
   [ "$age" -ge "$FM_INACTIVE_RECONCILE_SECS" ] || return 0
+  local_fold=0
+  ! child_is_sandbox_task "$meta" "$id" || local_fold=1
   state_line=$(fm_run_timed "$timeout" env FM_HOME="$FM_HOME" FM_STATE_OVERRIDE="$STATE" FM_CREW_STATE_NO_FORGE=1 \
-    "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
+    FM_CREW_STATE_LOCAL_FOLD="$local_fold" "$CREW_STATE_BIN" "$id" 2>/dev/null) || state_rc=$?
   [ "$state_rc" -ne 124 ] || return 3
   last=$(last_status_line "$status")
   if [ -n "$self" ]; then

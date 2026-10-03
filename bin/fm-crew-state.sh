@@ -40,9 +40,13 @@
 #      (fm-remote-task-control.sh) supplies only the run-step or pane reading
 #      it computed without its own log, plus its busy verdict, and steps 3-4
 #      below reconcile those with the local fold (the sandbox arm's comment
-#      owns the mapping). A record whose placement is malformed reports
-#      unknown · none with the route library's reason and is never probed
-#      locally.
+#      owns the mapping). With FM_CREW_STATE_LOCAL_FOLD=1 the host is not
+#      read at all and the sandbox arm answers from the local fold alone, for
+#      a caller that must not make a remote call: the watcher's poll-path
+#      inactive scan (bin/fm-inactive-reconcile.sh) and its background
+#      home-summary refresh (bin/fm-fleet-snapshot.sh). A record whose
+#      placement is malformed reports unknown · none with the route library's
+#      reason and is never probed locally.
 #   2. Matching no-mistakes run for this crew's branch AND current code identity,
 #      active or terminal (from `axi status`, or the coarse `no-mistakes runs`
 #      fallback)? Branch name alone is not enough: a historical run on a reused
@@ -1038,6 +1042,20 @@ EOF
   esac
   [ "${#SANDBOX_DETAIL}" -le 300 ] || SANDBOX_DETAIL="${SANDBOX_DETAIL:0:297}..."
 }
+
+# The local fold alone, with no host read: FM_CREW_STATE_LOCAL_FOLD=1's answer.
+# A ship's done still passes the named-head gate only through a recorded PR.
+if [ -n "$SANDBOX_HOST" ] && [ "${FM_CREW_STATE_LOCAL_FOLD:-0}" = 1 ]; then
+  SANDBOX_NOTE="sandbox host $SANDBOX_HOST, not read"
+  if [ -n "$LOG_VERB" ]; then
+    [ "$LOG_VERB" != "done" ] || sandbox_emit_status_done
+    LOG_STATE=$(map_log_state "$LOG_LINE")
+    if [ "$LOG_STATE" != unknown ]; then
+      emit "$LOG_STATE" status-log "$(status_line_note "$LOG_LINE")${SEP}$SANDBOX_NOTE"
+    fi
+  fi
+  emit unknown none "no current-state source read${SEP}$SANDBOX_NOTE"
+fi
 
 if [ -n "$SANDBOX_HOST" ]; then
   SANDBOX_NOTE="sandbox host $SANDBOX_HOST"

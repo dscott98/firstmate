@@ -35,14 +35,22 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
     elif $t.endpoint.exists then "present"
     else "absent" end;
   def endpoint_of($t):
-    if $t.kind == "secondmate" then "\(endpoint_exists($t)) / \($t.endpoint.agent_alive)"
+    if $t.sandbox != null then
+      (if $t.sandbox.observation == null then "unobserved on \($t.remote.host)"
+       else "\($t.endpoint.status) on \($t.remote.host), observed \($t.sandbox.observation.age_seconds // "?")s ago" end)
+      + (if ($t.sandbox.unreachable_streak // 0) > 0 then ", \($t.sandbox.unreachable_streak) failed since" else "" end)
+    elif $t.kind == "secondmate" then "\(endpoint_exists($t)) / \($t.endpoint.agent_alive)"
     else endpoint_exists($t) end;
+  def backend_of($t):
+    if $t.sandbox != null then "\($t.backend) in sandbox \(dash($t.sandbox.name)), profile \(dash($t.sandbox.profile))"
+    else $t.backend end;
   def artifact($t):
     if $t.pr.url != null then $t.pr.url
     elif $t.paths.report.present then $t.paths.report.path
     else "-" end;
   def path_of($t):
-    if $t.paths.home.present then $t.paths.home.path
+    if $t.sandbox != null and $t.paths.worktree.path != null then "\($t.paths.worktree.path) on \($t.remote.host)"
+    elif $t.paths.home.present then $t.paths.home.path
     elif $t.paths.home.path != null then $t.paths.home.path + " (absent)"
     elif $t.paths.worktree.present then $t.paths.worktree.path
     elif $t.paths.worktree.path != null then $t.paths.worktree.path + " (absent)"
@@ -51,7 +59,7 @@ printf '%s\n' "$SNAPSHOT" | jq -r '
     if $t.kind == "secondmate" then "\($t.actions.send) - \($t.actions.watch)"
     else $t.actions.watch end;
   def task_row($t):
-    "| \($t.id) | \($t.current_state.state) / \($t.current_state.source) | \($t.kind) | \(dash($t.backlog.repo // $t.project)) | \($t.backend) | \(endpoint_of($t)) | \(artifact($t)) | \(path_of($t)) | \(action_of($t)) |";
+    "| \($t.id) | \($t.current_state.state) / \($t.current_state.source) | \($t.kind) | \(dash($t.backlog.repo // $t.project)) | \(backend_of($t)) | \(endpoint_of($t)) | \(artifact($t)) | \(path_of($t)) | \(action_of($t)) |";
   def blocker($r):
     if ($r.blocked_by // "") == "" then "-"
     elif ($r.blocked_reason // "") == "" then $r.blocked_by

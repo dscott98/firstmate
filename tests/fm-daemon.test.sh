@@ -1380,6 +1380,93 @@ test_housekeeping_captain_held_stale_marker_transitions_to_pause() {
   pass "housekeeping moves a captain hold's existing stale marker to pause before wedge escalation"
 }
 
+# A sandbox task's pane lives on its host, so the daemon ages its stale marker
+# against the watcher's last observation of it rather than a local capture: an
+# idle observation escalates as a possible wedge, a busy one clears the marker,
+# and a task the watcher never observed is unreadable, never a local read.
+test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
+  local dir state fakebin key case_name verdict observed agent reason pending recovered
+  for case_name in idle busy unobserved failed expired failed-busy expired-busy dead missing; do
+    dir=$(make_supercase "sandbox-stale-$case_name")
+    state="$dir/state"; fakebin="$dir/fakebin"
+    fm_write_meta "$state/sbx.meta" "window=remote:sbx" "endpoint_task_id=sbx" \
+      "worktree=/home/agent/fm-home/projects/alpha-wt" "project=/primary/projects/alpha" \
+      "harness=pi" "kind=ship" "mode=direct-PR" "yolo=off" "spawn_gen=s1700000000.1.1" \
+      "placement=sandbox" "remote_kind=task" "remote_host=alias-sbx" "remote_root=/opt/firstmate" \
+      "remote_home=/home/agent/fm-home"
+    printf 'working: rebasing\n' > "$state/sbx.status"
+    if [ "$case_name" != unobserved ]; then
+      mkdir -p "$state/.sandbox-observe-sbx"
+      verdict=$case_name
+      agent=alive
+      observed=$(date +%s)
+      case "$case_name" in
+        failed*|expired*) verdict=idle ;;
+        dead|missing) verdict=dead; agent=$case_name ;;
+      esac
+      printf 'schema=fm-remote-task-control.v1\nagent=%s\nbusy=%s\nbusy_source=pi-ext\npane_hash=aaaa\nobserved_at=%s\n' \
+        "$agent" "$verdict" "$observed" > "$state/.sandbox-observe-sbx/last"
+    fi
+    key=sbx
+    case "$case_name" in
+      failed*|expired*)
+        FM_STATE_OVERRIDE="$state" FM_ESCALATE_BATCH_SECS=999999 handle_wake "stale: remote:sbx" "$state"
+        assert_present "$state/.subsuper-stale-$key" "an idle sandbox starts pending stale tracking"
+        [ ! -s "$state/.subsuper-escalations" ] || fail "the initial idle wake escalated"
+        case "$case_name" in
+          failed*) printf '1 %s\n' "$observed" > "$state/.sandbox-observe-sbx/failures" ;;
+          expired*) printf 'agent=alive\nbusy=idle\npane_hash=aaaa\nobserved_at=%s\n' "$(( observed - 141 ))" > "$state/.sandbox-observe-sbx/last" ;;
+        esac
+        ;;
+    esac
+    pending=$(( $(date +%s) - 5000 ))
+    echo "$pending" > "$state/.subsuper-stale-$key"
+    printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> %q\nexit 1\n' "$dir/local-tmux.log" > "$fakebin/tmux"
+    chmod +x "$fakebin/tmux"
+    PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=240 housekeeping "$state"
+    case "$case_name" in
+      idle)
+        grep -F 'stale persisted' "$state/.subsuper-escalations" 2>/dev/null | grep -F 'remote:sbx' >/dev/null \
+          || fail "an idle observed sandbox pane was not escalated: $(cat "$state/.subsuper-escalations" 2>/dev/null)"
+        ;;
+      busy|dead|missing)
+        [ ! -s "$state/.subsuper-escalations" ] || fail "a $case_name sandbox pane was escalated"
+        [ ! -e "$state/.subsuper-stale-$key" ] || fail "a $case_name sandbox pane kept its stale marker"
+        ;;
+    esac
+    case "$case_name" in
+      unobserved|failed*|expired*)
+        [ ! -s "$state/.subsuper-escalations" ] || fail "an invalid observation escalated"
+        assert_equals "$pending" "$(cat "$state/.subsuper-stale-$key")" "an invalid observation preserves the pending stale age"
+        recovered=idle
+        case "$case_name" in *-busy) recovered=busy ;; esac
+        mkdir -p "$state/.sandbox-observe-sbx"
+        rm -f "$state/.sandbox-observe-sbx/failures"
+        printf 'agent=alive\nbusy=%s\npane_hash=aaaa\nobserved_at=%s\n' "$recovered" "$(date +%s)" > "$state/.sandbox-observe-sbx/last"
+        PATH="$fakebin:$PATH" FM_STATE_OVERRIDE="$state" FM_STALE_ESCALATE_SECS=240 housekeeping "$state"
+        assert_absent "$state/.subsuper-stale-$key" "a current observation resolves the pending stale marker"
+        if [ "$recovered" = idle ]; then
+          assert_grep 'stale persisted' "$state/.subsuper-escalations" "unchanged idle recovery escalates without another wake"
+        else
+          [ ! -s "$state/.subsuper-escalations" ] || fail "busy recovery escalated"
+        fi
+        ;;
+    esac
+    case "$case_name" in
+      dead|missing)
+        reason="stale: remote:sbx (agent $case_name on sandbox host alias-sbx - recover with bin/fm-control.sh sbx relaunch)"
+        FM_STATE_OVERRIDE="$state" FM_ESCALATE_BATCH_SECS=999999 handle_wake "$reason" "$state"
+        assert_equals "${reason#stale: }" "$(cat "$state/.subsuper-escalations")" "the confirmed death retains its recovery reason"
+        assert_absent "$state/.subsuper-stale-$key" "confirmed death must not start wedge aging"
+        ;;
+    esac
+    if [ -s "$dir/local-tmux.log" ] && grep -q 'remote:sbx' "$dir/local-tmux.log"; then
+      fail "the daemon read a sandbox task's pane locally: $(cat "$dir/local-tmux.log")"
+    fi
+  done
+  pass "housekeeping ages a sandbox stale marker from the watcher's observation, never a local capture"
+}
+
 test_housekeeping_pause_marker_transitions_to_clear() {
   local dir state fakebin win pane key
   dir=$(make_supercase paused-to-stale)
@@ -3178,6 +3265,7 @@ test_housekeeping_declared_time_controls_pause_recheck
 test_housekeeping_paused_unpaused_cleared
 test_housekeeping_captain_held_resolved_cleared
 test_housekeeping_stale_marker_transitions_to_pause
+test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation
 test_housekeeping_captain_held_stale_marker_transitions_to_pause
 test_housekeeping_pause_marker_transitions_to_clear
 test_housekeeping_herdr_persistent_stale_resolves_meta
