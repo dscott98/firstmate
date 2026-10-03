@@ -1198,6 +1198,7 @@ _oldest_line_age() {  # <buf> -> seconds since the oldest buffered item first ar
 #     Never silently defer forever.
 #  2) stale recheck: for each pending stale marker past STALE_ESCALATE_SECS,
 #     re-peek the pane; still idle -> escalate (wedge); resumed -> clear marker.
+#     Invalid sandbox observations defer the recheck and retain its pending marker.
 #  2b) pause re-surface: for each declared-wait marker past PAUSE_RESURFACE_SECS,
 #     re-peek; gone -> clear; still declaring the wait, on an idle OR a busy pane
 #     -> escalate a recheck digest naming which human the wait is on, and reset
@@ -1261,7 +1262,13 @@ housekeeping() {  # <state>
     stale_window_is_busy "$win" "$state"
     case "$?" in
       0) rm -f "$marker" ;;
-      2) rm -f "$marker" ;;
+      2)
+        if fm_remote_route_resolve "$state/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ] \
+          && ! sandbox_observation_current "$state" "$task"; then
+          continue
+        fi
+        rm -f "$marker"
+        ;;
       *) if escalate_add "$state" "stale persisted ${age}s (possible wedge): $win"; then
            stale_marker_remove "$win" "$state"
          fi ;;

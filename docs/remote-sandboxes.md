@@ -162,7 +162,7 @@ The watcher supervises a placed task through its host's `observe` verb rather th
 - A positive `dead` or `missing` verdict from the host takes the once-per-incarnation dead-record report, keyed on the record's `spawn_gen`, and names whether the host has rebooted since the worker launched.
 - An unreachable host, a host refusal, or a malformed observation is unknown, never stale and never dead: `FM_REMOTE_UNREACHABLE_COUNT` (default 3) consecutive failures queue one keyed `check: sandbox <id> unreachable` wake per failure streak, and observations retain the configured cadence throughout the outage.
 - No observation runs while a control action, its teardown, or the spawn still placing the task holds it, so a relaunch in flight or a launch still under way is never reported as a death.
-- In away mode the supervise daemon preserves confirmed-death recovery reports and ages other stale wakes only against current observations of surviving endpoints ([its stale read](../bin/fm-supervise-daemon.sh)).
+- In away mode the supervise daemon preserves confirmed-death recovery reports and retains pending stale tracking while observations are invalid, and rechecks it when current observations return ([its stale read](../bin/fm-supervise-daemon.sh)).
 
 [`bin/fm-control.sh`](../bin/fm-control.sh) runs `interrupt`, `exit`, and `relaunch` for a placed task on its host's own copy of the control plane and relays the result; its header owns the sequence.
 
