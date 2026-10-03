@@ -180,13 +180,16 @@
 #   same path. It adds --tui-mode regular only when that help advertises the flag;
 #   a failed or inconclusive TUI probe omits it, provided the required approval
 #   capability check below succeeds.
-#   Every canonical Pi-family launch also carries Pi's scoped one-run --approve flag, which
-#   trusts project-local resources for that launch only and leaves global trust
-#   defaults untouched. A separate --help probe must advertise --approve or spawn
-#   refuses before endpoint creation, because an unsupported launch could park
-#   at Pi's folder-trust prompt and be mistaken for productive work. A missing
-#   selected executable also refuses before endpoint creation, and pi-signed
-#   never falls back to pi.
+#   Every managed Pi-family launch (workers, scouts, secondmates) carries the
+#   scoped one-run --approve flag for the launch cwd without rewriting trust.json.
+#   The capability probe refuses launch before endpoint creation when the
+#   executable does not advertise --approve, preventing fm_pi_wait_for_start
+#   from persisting folder trust on ordinary worker launches.
+#   bin/fm-pi-start-lib.sh still supplies the receipt gate and one-shot
+#   trust-dialog Enter selection as a defense-in-depth fallback that the strict
+#   pre-check is designed to avoid needing.
+#   A missing selected executable also refuses before endpoint creation, and
+#   pi-signed never falls back to pi.
 #   Devin is worker-only: --permission-mode dangerous and
 #   --respect-workspace-trust false allow unattended tools in a fresh worktree.
 #   --config points at a private per-task snapshot of the user config with
@@ -404,8 +407,8 @@
 #                  supplies its own trailing space, empty never used)
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
-#                  (Pi-family launches always add the separately verified --approve)
 #     __PISTART__  incarnation-specific startup extension in the staged launch directory
+#                  (provided by `bin/fm-pi-start-lib.sh` for every Pi-family launch)
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
 #                  Pi replacement on the session the endpoint's runtime already
 #                  reports (relaunch_resume_args below owns it; it supplies its
@@ -2740,14 +2743,15 @@ pi_supports_tui_mode() {
   printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
 }
 
-# --approve is the one-run project-local resource approval that prevents the
-# interactive folder-trust prompt without persisting a global trust decision.
-# Unlike the optional TUI-mode cosmetic, it is required: launching a Pi that
-# does not advertise it could report success while the pane is still blocked.
+# Same help-probe shape as pi_supports_tui_mode for the session-scoped project
+# trust flag. A seeded secondmate home carries tracked .pi/extensions that gate
+# Pi behind "Trust project folder?" on first launch; --approve trusts that
+# launch cwd for the run without rewriting ~/.pi/agent/trust.json.
+# Pi prints "--approve, -a"; allow comma (and any non-token char) after the name.
 pi_supports_approve() {
   local executable=$1 help
   help=$("$executable" --help 2>&1) || return 1
-  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--approve([[:space:]=,]|$)'
+  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--approve([^[:alnum:]_-]|$)'
 }
 
 # omp pre-launch model validation. `omp models --json` (omp 18.1.11) prints

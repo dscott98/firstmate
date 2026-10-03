@@ -30,11 +30,12 @@ The router's Detection section owns how launch markers and ancestry select betwe
 Keep the instructions as one positional argument.
 Multiple positional arguments become separate queued messages; the spawn template already preserves the one-argument shape.
 
-A project trust dialog can appear in a not-yet-trusted directory containing Pi project resources, including a clean worktree.
+A project trust dialog can appear in a not-yet-trusted directory containing Pi project resources, including a clean worktree and a freshly seeded secondmate home.
 Managed launches prevent it through the scoped one-run project-resource approval and compatibility contract in `../../../bin/fm-spawn.sh --help`; do not persist folder trust as a routine spawn step.
 `../../../bin/fm-pi-start-lib.sh` additionally owns startup proof - and one-shot per-folder trust selection if a dialog ever renders anyway - for worker, secondmate, and replacement launches.
 A manually answered decision persists per path in `~/.pi/agent/trust.json`, or in the pinned root's `trust.json` under a worker account pin, so later spawns in the same pooled slot under that root skip it.
 For a manually launched primary, follow [README setup](../../../../../README.md#install-and-launch).
+For unattended seeded-secondmate launches, [runtime verification](../../../../../docs/verification/runtime-backends.md#pi-seeded-secondmate-project-trust) owns the regression evidence for the capability-gated approval mechanics.
 
 ## Worker turn-end extension
 
