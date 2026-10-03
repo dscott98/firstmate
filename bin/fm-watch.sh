@@ -1205,7 +1205,9 @@ secondmate_liveness_tick() {
 # <id> unreachable` wake for that streak; its next good observation ends the streak.
 # No observation runs while a lifecycle action holds the task -
 # a control action, its teardown, or the spawn still placing it - so a relaunch
-# in flight or a launch still under way is never reported as a death.
+# in flight or a launch still under way is never reported as a death. A read
+# that overlaps a lifecycle lock or a changed spawn_gen is discarded before
+# advancing the cadence, failure streak, ladder, or classification.
 # Bookkeeping lives in state/.sandbox-observe-<id>/: tick (the cadence marker),
 # last (the newest valid observation plus observed_at on this home's clock,
 # which bin/fm-fleet-snapshot.sh reads), failures and alerted (the streak), and

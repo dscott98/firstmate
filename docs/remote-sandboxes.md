@@ -158,10 +158,10 @@ The watcher supervises a placed task through its host's `observe` verb rather th
 [The watcher's sandbox observe branch](../bin/fm-watch.sh) owns the cadence, the bookkeeping, and every wake reason below.
 
 - Each placed task is observed once per `FM_REMOTE_OBSERVE_SECS` (default 60) with one call bounded by `FM_REMOTE_OBSERVE_TIMEOUT` (default 20), so remote calls stay off the 15-second poll.
-- An observation feeds the existing supervision rather than a copy of it: its pane hash and busy verdict drive the ordinary stale and wedge logic, its completed-turn time drives the busy-turn bound, its newest worktree write drives the wedge timer's write deferral, and its oldest unacknowledged steering record drives the [re-ring ladder](../bin/fm-task-inbox-lib.sh), which rings through the host's `ring` verb.
+- An observation feeds the existing supervision rather than a copy of it: its pane hash and busy verdict drive the ordinary stale and wedge logic, its completed-turn or native-progress time drives the busy-turn bound, its newest worktree write drives the wedge timer's write deferral, and its oldest unacknowledged steering record drives the [re-ring ladder](../bin/fm-task-inbox-lib.sh), which rings through the host's `ring` verb.
 - A positive `dead` or `missing` verdict from the host takes the once-per-incarnation dead-record report, keyed on the record's `spawn_gen`, and names whether the host has rebooted since the worker launched.
 - An unreachable host, a host refusal, or a malformed observation is unknown, never stale and never dead: `FM_REMOTE_UNREACHABLE_COUNT` (default 3) consecutive failures queue one keyed `check: sandbox <id> unreachable` wake per failure streak, and observations retain the configured cadence throughout the outage.
-- No observation runs while a control action, its teardown, or the spawn still placing the task holds it, so a relaunch in flight or a launch still under way is never reported as a death.
+- Lifecycle guards keep a launch or relaunch in flight from being reported as a death; the [watcher's observe branch](../bin/fm-watch.sh) owns deferral and rejection of reads that overlap a lifecycle change.
 - In away mode the supervise daemon preserves confirmed-death recovery reports and retains pending stale tracking while observations are invalid, and rechecks it when current observations return ([its stale read](../bin/fm-supervise-daemon.sh)).
 
 [`bin/fm-control.sh`](../bin/fm-control.sh) runs `interrupt`, `exit`, and `relaunch` for a placed task on its host's own copy of the control plane and relays the result; its header owns the sequence.
@@ -170,7 +170,7 @@ The watcher supervises a placed task through its host's `observe` verb rather th
 - `relaunch` refuses before the host is touched when the note is missing, the harness would change, or a Pi model would name another provider, because a sandbox holds only the credentials it was provisioned with, and it refuses Claude as [placement](#placement) does.
 - `relaunch` first sends this home's brief through the host's `brief-update` when it differs from the brief the host last received, because the replacement is briefed from the brief on the host's disk.
 - After the host relaunches, the primary validates the route block the host confirms and invalidates the predecessor’s cached observation and failure streak under the lifecycle lock, and republishes its own record from it, keeping a `pr=` identity block last.
-- After a VM reboot or HA restart, the watcher's dead-record report says so, and `relaunch` recovers the task from the brief on disk, as [host-side task control](#host-side-task-control) describes.
+- For recovery after a VM reboot or HA restart, follow the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone).
 
 The fleet snapshot gives a placed task's row its remote kind, provider, sandbox name, and profile, the watcher's last observation as the endpoint, and its current state through its host; [the snapshot header](../bin/fm-fleet-snapshot.sh) owns the fields.
 The inactive-outcome reconciliation never reads a sandbox host: it folds the mirrored status log alone and never probes the recorded worktree path ([its header](../bin/fm-inactive-reconcile.sh)).
@@ -184,7 +184,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 - `launch`, `control`, `crew-state`, and `retire` run the host's own spawn, control plane, current-state read, and teardown, so the landed-work test that guards a local cleanup guards a sandbox's too.
   Host-side retirement supports ships only; scouts are refused because their completion gate belongs to the supervising home.
 - `state`, `observe`, `capture`, `send`, `ring`, `key`, `head`, and `brief-update` read the endpoint, steer it through its durable inbox keyed by the primary's request id, ring that inbox's doorbell again for the watcher's re-ring ladder, and replace its brief.
-- `control` accepts the host's own reboot as proof that a tmux endpoint is gone, because a VM's tmux server dies with a reboot or HA restart while its disk survives: a host booted after the task record's launch lets `exit` report the endpoint gone and `relaunch` re-create the window in the recorded worktree.
+- `control` applies the [control plane's absence proof](agent-control.md#reclaiming-a-task-whose-endpoint-is-gone) on the host before reclaiming a missing endpoint.
 - The task home's backlog is manual, because the task's backlog item lives in the supervising home.
 
 Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.

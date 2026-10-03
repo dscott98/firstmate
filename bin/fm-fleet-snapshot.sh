@@ -64,10 +64,11 @@
 #     fm-classify-lib.sh's authoritative status_open_decisions fold and reconciled
 #     against current_state; hints.pending_decision and hints.blocked_event are
 #     booleans derived from that set.
-#     endpoint.exists is the cheap local backend endpoint-presence read.
-#     endpoint.agent_alive is populated for local secondmates only, where it is
-#     useful return-channel supervision data; remote secondmates use "unknown"
-#     without a probe, and other tasks use "not_checked".
+#     For local tasks, endpoint.exists is the cheap backend endpoint-presence
+#     read, and endpoint.agent_alive is populated for secondmates only, where
+#     it is useful return-channel supervision data; other local tasks use
+#     "not_checked". Remote secondmates use "unknown" without a probe; sandbox
+#     endpoint fields use the observation described below.
 #     remote is null for a local record and {kind,host,root,home} for one that
 #     records a remote host, kind being secondmate, task, or invalid as
 #     bin/fm-remote-route-lib.sh resolves it; an invalid one reports its
@@ -660,7 +661,7 @@ snapshot_task_generation_is_current() {  # <captured-meta> <id>
 # The observation the watcher last recorded for sandbox task <id>
 # (bin/fm-watch.sh's sandbox_observe_check owns state/.sandbox-observe-<id>/),
 # copied beside the task's other observations with its failure streak. The
-# snapshot never probes a sandbox itself.
+# endpoint capture never probes a sandbox itself.
 snapshot_capture_sandbox_observation() {  # <id> <destination>
   local dir="$STATE/.sandbox-observe-$1" streak='' destination=$2 key value
   : > "$destination" || return 1
