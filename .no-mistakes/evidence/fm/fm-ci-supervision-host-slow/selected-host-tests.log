@@ -1,0 +1,15 @@
+ok - host: dialog a turn never completed with its report (a park boundary, a stopped turn, no report) reaches the next turn
+case=test_undelivered_dialog_is_fed_again_on_the_next_turn elapsed=101s
+ok - host: an attended wake whose mirror is missing, cannot be read (at the feed or at the prompt), or holds a malformed entry reaches main before any engine turn, and the cursor stays put
+case=test_attended_wake_with_an_unreadable_mirror_reaches_main elapsed=42s
+ok - host: attended, two engine errors latch the session, main keeps every close unchanged in the cooldown, a failed probe doubles it up to its cap, and a routine probe's recovery stays in the ledger, off main
+case=test_attended_latch_keeps_closes_on_main_and_records_recovery_off_main elapsed=56s
+ok - host: two engine errors latch the session, main keeps every away wake in the cooldown, a failed probe doubles it up to its cap, and a report recovers it silently
+case=test_latch_trips_after_two_engine_errors_then_probes_and_recovers elapsed=46s
+ok - host: an attended close in a latched session reaches main as the arm printed it and leaves the latch as it was, and a home that opted out with off never reads it
+case=test_latch_keeps_attended_closes_on_main_and_skips_unopted_homes elapsed=25s
+ok - host: an engine turn is bounded, and tool processes outside its process group are reaped
+case=test_engine_turn_is_bounded_and_its_descendants_reaped elapsed=11s
+real 283.50
+user 173.79
+sys 320.51

@@ -1,0 +1,6 @@
+ok - host: parked child-exit sampling uses ordinary half-second sleeps
+marker=0 requested=0.05 observed_host_sleep=0.5
+ok - host: parked child-exit sampling uses ordinary half-second sleeps
+marker=1 requested=0.01 observed_host_sleep=0.5
+ok - host: parked child-exit sampling uses ordinary half-second sleeps
+marker=1 requested=bogus observed_host_sleep=0.5
