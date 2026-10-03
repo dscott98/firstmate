@@ -75,8 +75,15 @@ printf '%s %s\n' "${args[0]}" "${args[1]:-}" >> "$d/ssh.log"
 [ ! -e "$d/down" ] || { echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255; }
 case "${args[1]:-}" in
   observe)
+    if [ -e "$d/lock-during-observe" ]; then
+      mkdir -p "$FM_STATE_OVERRIDE/.control-${args[2]}.lock"
+      cat "$d/lock-during-observe" > "$FM_STATE_OVERRIDE/.control-${args[2]}.lock/pid"
+    fi
     n=$(( $(cat "$d/observe-count" 2>/dev/null || echo 0) + 1 ))
     printf '%s\n' "$n" > "$d/observe-count"
+    if [ -e "$d/generation-during-observe" ]; then
+      sed -i.bak "s/^spawn_gen=.*/spawn_gen=s9999999999.$n.1/" "$FM_STATE_OVERRIDE/${args[2]}.meta"
+    fi
     hash=$(cat "$d/hash" 2>/dev/null || printf 'aaaa')
     [ ! -e "$d/churn" ] || hash="$hash$n"
     sed -e "s/@NOW@/$(date +%s)/g" -e "s/@HASH@/$hash/g" "$d/observe"
@@ -125,7 +132,7 @@ watch_start() {
   env -u FM_ROOT_OVERRIDE PATH="$FAKEBIN:$PATH" FM_HOME="$HOME_DIR" FM_STATE_OVERRIDE="$STATE" \
     FM_CONFIG_OVERRIDE="$HOME_DIR/config" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_SSH_BIN="$FAKEBIN/fake-ssh" FM_FAKE_SANDBOX_DIR="$CASE/host" \
-    FM_CREW_STATE_BIN="$FAKEBIN/fm-crew-state.sh" FM_WATCH_HANDLING_SUCCESSOR=1 \
+    FM_CREW_STATE_BIN="${FM_TEST_CREW_STATE_BIN:-$FAKEBIN/fm-crew-state.sh}" FM_WATCH_HANDLING_SUCCESSOR=1 \
     FM_POLL=1 FM_SIGNAL_GRACE=1 FM_CHECK_INTERVAL=999999 FM_HEARTBEAT=999999 \
     FM_SECONDMATE_LIVENESS_SECS=99999999 FM_REMOTE_OBSERVE_SECS="${FM_TEST_OBSERVE_SECS:-1}" \
     FM_REMOTE_UNREACHABLE_COUNT="${FM_TEST_UNREACHABLE_COUNT:-2}" \
@@ -228,10 +235,12 @@ test_observation_rides_its_own_cadence() {
 test_an_unchanging_observed_pane_surfaces_as_stale() {
   new_case stale
   observe_as alive idle
-  watch_round exit || fail "an idle, unchanging sandbox pane never surfaced: $(cat "$CASE/watch.out")"
+  FM_TEST_CREW_STATE_BIN="$ROOT/bin/fm-crew-state.sh" watch_round exit || fail "an idle, unchanging sandbox pane never surfaced: $(cat "$CASE/watch.out")"
   assert_contains "$(cat "$CASE/watch.out")" "stale: $WINDOW" "the wake names the sandbox window"
   [ "$(stale_wakes)" -eq 1 ] || fail "the stale pane queued $(stale_wakes) wakes instead of one"
   [ "$(host_calls observe)" -ge 3 ] || fail "staleness was decided on fewer than three observations"
+  [ "$(wc -l < "$CASE/host/ssh.log")" -eq "$(host_calls observe)" ] \
+    || fail "stale classification made extra remote calls: $(cat "$CASE/host/ssh.log")"
   assert_equals aaaa "$(cat "$STATE/.hash-$KEY")" "the observed pane hash is what the stale loop tracks"
   assert_no_local_reads "the stale path"
   pass "an idle sandbox worker whose observed pane stops changing surfaces as an ordinary stale wake"
@@ -296,8 +305,26 @@ test_no_observation_while_a_lifecycle_action_holds_the_task() {
 
 # --- an unreachable host is unknown --------------------------------------------
 
+test_observation_discarded_when_lifecycle_changes() {
+  local change
+  for change in lock generation; do
+    new_case "racing-$change"
+    observe_as missing dead
+    printf '%s\n' "$$" > "$CASE/host/$change-during-observe"
+    FM_TEST_OBSERVE_SECS=60 watch_round run 4 \
+      || fail "an observation crossing a lifecycle change woke the watcher"
+    [ "$(host_calls observe)" -ge 1 ] || fail "the lifecycle race never observed the host"
+    assert_absent "$STATE/.sandbox-observe-$ID/last" "discarded observation was published"
+    assert_absent "$STATE/.sandbox-observe-$ID/failures" "discarded observation changed failures"
+    assert_absent "$STATE/.dead-reported-$KEY" "discarded observation reported death"
+    assert_equals 0 "$(stale_wakes)" "discarded observation queued a stale wake"
+    assert_absent "$STATE/.sandbox-observe-$ID/tick" "discarded observation advanced cadence"
+  done
+  pass "observations crossing lifecycle locks or incarnation changes are discarded"
+}
+
 test_an_unreachable_host_is_reported_once_per_streak() {
-  local out first_key
+  local out first_key calls
   new_case unreachable
   observe_as alive busy
   : > "$CASE/host/down"
@@ -314,8 +341,12 @@ test_an_unreachable_host_is_reported_once_per_streak() {
   ack_stopped_cycle "$STATE" || fail "could not acknowledge the unreachable wake"
 
   # The same streak never alerts again, though its host is still observed.
-  watch_observes 1 || fail "a continuing streak woke the watcher again: $(cat "$CASE/watch.out")"
+  calls=$(host_calls observe)
+  fm_touch_epoch "$(( $(date +%s) - 120 ))" "$STATE/.sandbox-observe-$ID/tick"
+  FM_TEST_OBSERVE_SECS=60 watch_observes 1 || fail "a continuing streak woke the watcher again: $(cat "$CASE/watch.out")"
   [ "$(check_wakes "sandbox-unreachable-$ID-")" -eq 0 ] || fail "a continuing streak queued another wake"
+
+  [ "$(host_calls observe)" -eq "$(( calls + 1 ))" ] || fail "the outage slowed the configured cadence"
 
   # A good observation ends the streak; a later outage is a new one.
   rm -f "$CASE/host/down" "$STATE/.sandbox-observe-$ID/tick"
@@ -386,6 +417,7 @@ test_observation_rides_its_own_cadence
 test_an_unchanging_observed_pane_surfaces_as_stale
 test_a_gone_agent_is_reported_once_per_incarnation
 test_no_observation_while_a_lifecycle_action_holds_the_task
+test_observation_discarded_when_lifecycle_changes
 test_an_unreachable_host_is_reported_once_per_streak
 test_the_ladder_rings_through_the_host_and_escalates
 test_the_wedge_timer_reads_the_hosts_worktree_writes

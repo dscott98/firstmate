@@ -744,6 +744,7 @@ stale_window_is_busy() {  # <window> <state>
   local win=$1 state=$2 backend harness label task tail40 verdict
   task=$(window_to_task "$win" "$state")
   if fm_remote_route_resolve "$state/$task.meta" "$task" && [ "$FM_REMOTE_ROUTE_KIND" = task ]; then
+    sandbox_observation_current "$state" "$task" || return 2
     verdict=$(sandbox_observation_field "$state" "$task" busy) || return 2
     [ "$verdict" = busy ]
     return

@@ -1202,9 +1202,8 @@ secondmate_liveness_tick() {
 # Transport loss, a host refusal, or a malformed observation is unknown, never
 # stale and never dead. Each failure extends the task's streak, and the
 # REMOTE_UNREACHABLE_COUNT-th consecutive one queues one keyed `check: sandbox
-# <id> unreachable` wake for that streak; a host that keeps failing after it is
-# observed every fifth cadence until it answers, and its next good observation
-# ends the streak. No observation runs while a lifecycle action holds the task -
+# <id> unreachable` wake for that streak; its next good observation ends the streak.
+# No observation runs while a lifecycle action holds the task -
 # a control action, its teardown, or the spawn still placing it - so a relaunch
 # in flight or a launch still under way is never reported as a death.
 # Bookkeeping lives in state/.sandbox-observe-<id>/: tick (the cadence marker),
@@ -1233,6 +1232,18 @@ OBS_BLOCK=
 # holds; the stale loop's endpoint reads take that observation instead.
 window_observed() { [ -n "$OBS_WINDOW" ] && [ "$OBS_WINDOW" = "$1" ]; }
 window_observed_task() { [ -n "$OBS_WINDOW" ] && [ "$OBS_TASK" = "$1" ]; }
+
+crew_state_read() {
+  if window_observed_task "$1"; then
+    if [ "$OBS_BUSY" = busy ]; then
+      printf 'state: working · source: pane · observed busy\n'
+    else
+      FM_CREW_STATE_LOCAL_FOLD=1 "$FM_CREW_STATE_BIN" "$@"
+    fi
+  else
+    "$FM_CREW_STATE_BIN" "$@"
+  fi
+}
 
 # The recovery-grade agent state of <window>: the observed one for a sandbox
 # window, else the backend's own read, unreadable when that read fails.
@@ -1412,18 +1423,6 @@ sandbox_observe_streak() {  # <dir>
   printf '%s %s' "$count" "$since"
 }
 
-# The cadence for <dir>'s task: every REMOTE_OBSERVE_SECS, and every fifth one
-# once its host has failed often enough to be reported unreachable.
-sandbox_observe_interval() {  # <dir>
-  local streak
-  streak=$(sandbox_observe_streak "$1")
-  if [ "${streak%% *}" -ge "$REMOTE_UNREACHABLE_COUNT" ]; then
-    printf '%s' $(( REMOTE_OBSERVE_SECS * 5 ))
-  else
-    printf '%s' "$REMOTE_OBSERVE_SECS"
-  fi
-}
-
 # One failed observation: extend the streak and, at REMOTE_UNREACHABLE_COUNT,
 # queue the streak's one keyed unreachable wake. Never stale, never dead.
 sandbox_observe_failed() {  # <task> <dir> <host> <why>
@@ -1577,19 +1576,25 @@ sandbox_dead_record() {  # <window> <task>
 # classify for this window this poll (not due, deferred, failed, handled as a
 # dead record, or no pane hash).
 sandbox_observe_check() {  # <window> <task>
-  local w=$1 task=$2 dir host
+  local w=$1 task=$2 dir host spawn_gen read_rc=0
   OBS_WINDOW=
   host=$FM_REMOTE_ROUTE_HOST
   dir="$STATE/.sandbox-observe-$task"
   [ ! -L "$dir" ] || return 1
-  [ "$(age_of "$dir/tick")" -ge "$(sandbox_observe_interval "$dir")" ] || return 1
+  [ "$(age_of "$dir/tick")" -ge "$REMOTE_OBSERVE_SECS" ] || return 1
   if task_lifecycle_in_progress "$task"; then
     triage_log "sandbox $task observation deferred: a lifecycle action holds it"
     return 1
   fi
   [ -d "$dir" ] || mkdir -p "$dir" 2>/dev/null || return 1
+  spawn_gen=$(fm_meta_get "$STATE/$task.meta" spawn_gen)
+  sandbox_remote_read "$task" observe "$task" || read_rc=$?
+  if task_lifecycle_in_progress "$task" \
+    || [ "$spawn_gen" != "$(fm_meta_get "$STATE/$task.meta" spawn_gen)" ]; then
+    return 1
+  fi
   touch "$dir/tick" || return 1
-  if ! sandbox_remote_read "$task" observe "$task"; then
+  if [ "$read_rc" -ne 0 ]; then
     sandbox_observe_failed "$task" "$dir" "$host" "$SBX_READ_FAILURE" || return 1
     return 1
   fi

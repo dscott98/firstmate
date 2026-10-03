@@ -1385,8 +1385,8 @@ test_housekeeping_captain_held_stale_marker_transitions_to_pause() {
 # idle observation escalates as a possible wedge, a busy one clears the marker,
 # and a task the watcher never observed is unreadable, never a local read.
 test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
-  local dir state fakebin key case_name
-  for case_name in idle busy unobserved; do
+  local dir state fakebin key case_name verdict observed
+  for case_name in idle busy unobserved failed expired; do
     dir=$(make_supercase "sandbox-stale-$case_name")
     state="$dir/state"; fakebin="$dir/fakebin"
     fm_write_meta "$state/sbx.meta" "window=remote:sbx" "endpoint_task_id=sbx" \
@@ -1397,8 +1397,14 @@ test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
     printf 'working: rebasing\n' > "$state/sbx.status"
     if [ "$case_name" != unobserved ]; then
       mkdir -p "$state/.sandbox-observe-sbx"
+      verdict=$case_name
+      observed=$(date +%s)
+      case "$case_name" in
+        failed) verdict=idle; printf '1 %s\n' "$observed" > "$state/.sandbox-observe-sbx/failures" ;;
+        expired) verdict=idle; observed=$(( observed - 141 )) ;;
+      esac
       printf 'schema=fm-remote-task-control.v1\nagent=alive\nbusy=%s\nbusy_source=pi-ext\nobserved_at=%s\n' \
-        "$case_name" "$(date +%s)" > "$state/.sandbox-observe-sbx/last"
+        "$verdict" "$observed" > "$state/.sandbox-observe-sbx/last"
     fi
     key=sbx
     echo $(( $(date +%s) - 5000 )) > "$state/.subsuper-stale-$key"
@@ -1410,7 +1416,7 @@ test_housekeeping_ages_a_sandbox_stale_marker_from_its_observation() {
         grep -F 'stale persisted' "$state/.subsuper-escalations" 2>/dev/null | grep -F 'remote:sbx' >/dev/null \
           || fail "an idle observed sandbox pane was not escalated: $(cat "$state/.subsuper-escalations" 2>/dev/null)"
         ;;
-      busy|unobserved)
+      busy|unobserved|failed|expired)
         [ ! -s "$state/.subsuper-escalations" ] || fail "a $case_name sandbox pane was escalated"
         [ ! -e "$state/.subsuper-stale-$key" ] || fail "a $case_name sandbox pane kept its stale marker"
         ;;

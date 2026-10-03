@@ -2481,10 +2481,14 @@ status_span_has_actionable() {  # <status-file> <start-offset>
 # NOT a pure read: fm-crew-state.sh may make a bounded no-mistakes call, so callers
 # run it only on no-verb signal and first-sighting stale paths, never every wake.
 # FM_CREW_STATE_BIN lets tests stub the verdict.
+crew_state_read() {
+  "$FM_CREW_STATE_BIN" "$@"
+}
+
 crew_absorb_class() {  # <id>
   local id=$1 line state src
   [ -n "$id" ] || { printf 'none'; return; }
-  line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null) || true
+  line=$(crew_state_read "$id" 2>/dev/null) || true
   case "$line" in state:*) ;; *) printf 'none'; return ;; esac
   state=${line#state: }; state=${state%% *}
   if [ "$state" = paused ]; then printf 'paused'; return; fi
@@ -2546,7 +2550,7 @@ FM_GATE_HUMAN_DECISION='ask-user: authority decision'
 crew_gate_awaits_human_decision() {  # <id> -> <run-id> on stdout
   local id=$1 line state src rest part human='' run=''
   [ -n "$id" ] || return 1
-  line=$("$FM_CREW_STATE_BIN" "$id" 2>/dev/null) || true
+  line=$(crew_state_read "$id" 2>/dev/null) || true
   case "$line" in state:*) ;; *) return 1 ;; esac
   state=${line#state: }; state=${state%% *}
   [ "$state" = parked ] || return 1
@@ -2682,6 +2686,22 @@ sandbox_observation_field() {  # <state> <id> <key>
     esac
   done < "$file"
   return 1
+}
+
+sandbox_observation_current() {
+  local state=$1 id=$2 failures=0 _since observed now cadence timeout
+  if [ -e "$state/.sandbox-observe-$id/failures" ]; then
+    read -r failures _since < "$state/.sandbox-observe-$id/failures" || return 1
+    [ "$failures" = 0 ] || return 1
+  fi
+  observed=$(sandbox_observation_field "$state" "$id" observed_at) || return 1
+  case "$observed" in ''|*[!0-9]*) return 1 ;; esac
+  cadence=${FM_REMOTE_OBSERVE_SECS:-60}
+  timeout=${FM_REMOTE_OBSERVE_TIMEOUT:-20}
+  case "$cadence" in ''|*[!0-9]*|0) cadence=60 ;; esac
+  case "$timeout" in ''|*[!0-9]*|0) timeout=20 ;; esac
+  now=$(date +%s)
+  [ "$observed" -le "$now" ] && [ "$(( now - observed ))" -le "$(( 2 * cadence + timeout ))" ]
 }
 
 # 0 (benign/absorb) if EVERY task referenced by a no-verb "signal:" wake is provably
