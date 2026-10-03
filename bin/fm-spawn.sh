@@ -178,14 +178,19 @@
 #   new adapters. For pi and pi-signed, fm-spawn resolves the selected executable
 #   name from PATH once, probes that concrete path with --help, and launches the
 #   same path. It adds --tui-mode regular only when that help advertises the flag;
-#   a failed or inconclusive TUI probe omits it, provided the required approval
-#   capability check below succeeds.
-#   Every canonical Pi-family launch also carries Pi's scoped one-run --approve flag, which
-#   trusts project-local resources for that launch only and leaves global trust
-#   defaults untouched. A separate --help probe must advertise --approve or spawn
-#   refuses before endpoint creation, because an unsupported launch could park
-#   at Pi's folder-trust prompt and be mistaken for productive work. A missing
-#   selected executable also refuses before endpoint creation, and pi-signed
+#   a failed or inconclusive probe omits it so older Pi versions remain launchable.
+#   A --secondmate launch of a Firstmate-seeded home (the existing
+#   .fm-secondmate-home marker validate_firstmate_home_for_spawn already requires)
+#   also adds --approve when that help advertises it, so the first unattended
+#   launch does not stall on Pi's "Trust project folder?" dialog for that home
+#   path; --approve is session-scoped to the launch cwd and does not rewrite the
+#   operator's trust.json. Ordinary Pi worker launches never receive --approve;
+#   the fork's `bin/fm-pi-start-lib.sh` provides the receipt gate and a
+#   one-shot trust-dialog Enter selection for those worker launches.
+#   A separate --help probe advertises the flag and the reject flag; spawn refuses
+#   before endpoint creation when neither is available, because an unsupported
+#   launch could park at Pi's folder-trust prompt and be mistaken for productive
+#   work. A missing selected executable also refuses before endpoint creation, and pi-signed
 #   never falls back to pi.
 #   Devin is worker-only: --permission-mode dangerous and
 #   --respect-workspace-trust false allow unattended tools in a fresh worktree.
@@ -404,8 +409,11 @@
 #                  supplies its own trailing space, empty never used)
 #     __PIBIN__    quoted concrete Pi-family executable path resolved from PATH
 #     __PITUIMODE__ optional --tui-mode regular when that executable advertises it
-#                  (Pi-family launches always add the separately verified --approve)
+#     __PIAPPROVE__ optional --approve on a seeded Pi/pi-signed secondmate when
+#                  that executable advertises the flag (empty otherwise; session
+#                  trust for the launch cwd only, never a trust.json rewrite)
 #     __PISTART__  incarnation-specific startup extension in the staged launch directory
+#                  (provided by `bin/fm-pi-start-lib.sh` for every Pi-family launch)
 #     __PIRESUME__ optional relaunch-only `--session <reference>` that keeps a
 #                  Pi replacement on the session the endpoint's runtime already
 #                  reports (relaunch_resume_args below owns it; it supplies its
@@ -2740,14 +2748,15 @@ pi_supports_tui_mode() {
   printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--tui-mode([[:space:]=]|$)'
 }
 
-# --approve is the one-run project-local resource approval that prevents the
-# interactive folder-trust prompt without persisting a global trust decision.
-# Unlike the optional TUI-mode cosmetic, it is required: launching a Pi that
-# does not advertise it could report success while the pane is still blocked.
+# Same help-probe shape as pi_supports_tui_mode for the session-scoped project
+# trust flag. A seeded secondmate home carries tracked .pi/extensions that gate
+# Pi behind "Trust project folder?" on first launch; --approve trusts that
+# launch cwd for the run without rewriting ~/.pi/agent/trust.json.
+# Pi prints "--approve, -a"; allow comma (and any non-token char) after the name.
 pi_supports_approve() {
   local executable=$1 help
   help=$("$executable" --help 2>&1) || return 1
-  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--approve([[:space:]=,]|$)'
+  printf '%s\n' "$help" | grep -Eq -- '(^|[[:space:]])--approve([^[:alnum:]_-]|$)'
 }
 
 # omp pre-launch model validation. `omp models --json` (omp 18.1.11) prints
@@ -2902,7 +2911,7 @@ launch_template() {
     ;;
   opencode) printf '%s' 'OPENCODE_CONFIG_CONTENT='\''{"permission":{"*":"allow"}__EFFORTFLAG__}'\'' opencode __MODELFLAG__--prompt "$(__OPINPUT__ encode launch-brief < __BRIEF__)"' ;;
   pi | pi-signed)
-    printf '%s' '__PIBIN____PITUIMODE____PIRESUME__ --approve'
+printf '%s' '__PIBIN____PITUIMODE____PIAPPROVE____PIRESUME__'
     if [ "$kind" = secondmate ]; then
       printf '%s' ' __MODELFLAG____EFFORTFLAG__-e __PITURNEND__ -e __PIWATCH__ -e __PISTART__ "$(__OPINPUT__ encode launch-brief < __BRIEF__)"'
     else
@@ -3183,6 +3192,15 @@ pi | pi-signed)
     PI_TUI_MODE=' --tui-mode regular'
   fi
   LAUNCH=${LAUNCH//__PITUIMODE__/$PI_TUI_MODE}
+  # Seeded-home signal is .fm-secondmate-home (required by
+  # validate_firstmate_home_for_spawn before any secondmate launch reaches
+  # the pane). Session-only --approve; never expand to a parent path or
+  # rewrite the operator trust store.
+  PI_APPROVE=
+  if [ "$KIND" = secondmate ] && pi_supports_approve "$PI_BIN"; then
+    PI_APPROVE=' --approve'
+  fi
+  LAUNCH=${LAUNCH//__PIAPPROVE__/$PI_APPROVE}
   LAUNCH="FM_PI_HARNESS=$HARNESS $LAUNCH"
   ;;
 cursor)

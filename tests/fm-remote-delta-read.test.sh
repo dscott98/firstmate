@@ -129,6 +129,8 @@ pass 'a same-size in-place rewrite breaks continuity as prefix-changed'
 # fractions. The sleep shim rewrites the real log after the first snapshot has
 # completed, so this exercises the stat gate and real prefix hashing without
 # requiring the scheduler to fit setup and capture inside one wall-clock second.
+# (Fork race-fix 7009ef18 keeps the real stat + real prefix-hashing path active
+# instead of mocking shasum, so a scheduler stall cannot defeat the test.)
 TRANSITION_SHIM="$TMP_ROOT/transition-shim"
 mkdir -p "$TRANSITION_SHIM"
 REAL_STAT=$(command -v stat)
