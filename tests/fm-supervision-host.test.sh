@@ -1791,7 +1791,10 @@ SH
   echo 0 > "$home/park-clock"
   # The park bound sits past every wall-clock check below, so a host that
   # ignored the test clock could never reach a boundary inside this case.
-  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" FM_SUPERVISION_HOST_PARK_SECONDS=120 FM_SUPERVISION_HOST_TURN_TIMEOUT=20 FM_SUPERVISION_ENGINE_GRACE=1 start_session "$home"
+  # The test clock drives every park exit; this bound is only a wall-clock
+  # safety net if FM_TEST_SEAM were ever unset, so it can sit below the
+  # test's longest iteration without affecting normal execution.
+  FM_TEST_SUPERVISION_HOST_CLOCK="$home/park-clock" FM_SUPERVISION_HOST_PARK_SECONDS=60 FM_SUPERVISION_HOST_POLL_STEP=0.05 FM_ENGINE_POLL_STEP=0.05 FM_ENGINE_SKIP_SNAPSHOT=1 FM_SUPERVISION_HOST_TURN_TIMEOUT=20 FM_SUPERVISION_ENGINE_GRACE=1 start_session "$home"
   park_again "$home"
   append_status "$home" 'first'
   wait_until 250 handled_at_least "$home" 1 || fail "mirror boundary: the first wake was not handled: $(cat "$home/state/.supervision-host.log")"
@@ -1865,7 +1868,7 @@ test_attended_wake_with_an_unreadable_mirror_reaches_main() {
   home=$(make_home attended-bad-mirror attended)
   mirror="$home/state/.host-mirror.jsonl"
   printf '{"hook_event_name":"UserPromptSubmit","prompt_id":"p1","prompt":"keep the export worker on low effort"}' > "$home/mirror-seed.1"
-  start_session "$home"
+  FM_SUPERVISION_HOST_POLL_STEP=0.05 start_session "$home"
   park_again "$home"
   append_status "$home" 'first'
   wait_until 250 handled_at_least "$home" 1 || fail "bad mirror: the first wake was not handled: $(cat "$home/state/.supervision-host.log")"
@@ -1926,7 +1929,7 @@ test_attended_latch_keeps_closes_on_main_and_records_recovery_off_main() {
   local home handled
   home=$(make_home attended-latch attended)
   echo fail > "$home/stub-mode"
-  start_session "$home"
+  FM_SUPERVISION_HOST_POLL_STEP=0.05 start_session "$home"
   park_again "$home"
   append_status "$home" 'first'
   wait_until 250 host_exited "$home" || fail "latch: the first engine error did not hand the wake back"
@@ -2644,7 +2647,7 @@ end_cooldown() {  # <home> [seconds]
 # Two consecutive engine errors in one main session: the second trips the latch.
 trip_latch() {  # <home>
   echo fail > "$1/stub-mode"
-  start_session "$1"
+  FM_SUPERVISION_HOST_POLL_STEP=0.05 start_session "$1"
   park_again "$1"
   append_status "$1" 'first'
   wait_until 250 host_exited "$1" || fail "latch: the first engine error did not hand the wake back"

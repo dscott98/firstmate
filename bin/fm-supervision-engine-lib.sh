@@ -374,6 +374,15 @@ fm_supervision_engine_turn() {
       ;;
   esac
   ledger=$(mktemp "$STATE/.supervision-host-descendants.XXXXXX") || return 127
+  # Tests with FM_TEST_SEAM=1 and FM_ENGINE_SKIP_SNAPSHOT=1 skip the per-second
+  # process-table snapshot: the stub engine never spawns a descendant tree
+  # worth reaping, so the ps scan is wasted work that also slows the per-turn
+  # wait. Production callers leave the seam unset, so the snapshot still
+  # runs as before.
+  engine_skip_snapshot=0
+  if [ "${FM_TEST_SEAM:-}" = 1 ] && [ "${FM_ENGINE_SKIP_SNAPSHOT:-}" = 1 ]; then
+    engine_skip_snapshot=1
+  fi
   (
     cd "$FM_ROOT" || exit 127
     fm_exec_timed "$timeout" "$grace" "$bin" "${args[@]}"
@@ -391,13 +400,23 @@ fm_supervision_engine_turn() {
         recorded=$identity
       fi
     fi
-    _fm_engine_snapshot_descendants "$watched" "$ledger"
+    [ "$engine_skip_snapshot" = 1 ] || _fm_engine_snapshot_descendants "$watched" "$ledger"
     # Between the one-second snapshots the engine's exit is probed at a tenth
     # of a second: the turn closes promptly when the engine dies while the
-    # process-table scans keep their one-second cadence.
+    # process-table scans keep their one-second cadence. Tests with
+    # FM_TEST_SEAM=1 and FM_ENGINE_POLL_STEP use a smaller step so the
+    # engine subshell detects exit at the same sub-second cadence the rest
+    # of the supervision suite uses.
+    if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_ENGINE_POLL_STEP:-}" ]; then
+      engine_step=$FM_ENGINE_POLL_STEP
+      engine_iters=20
+    else
+      engine_step=0.1
+      engine_iters=10
+    fi
     i=0
-    while [ "$i" -lt 10 ] && fm_pid_alive "$watched"; do
-      sleep 0.1
+    while [ "$i" -lt "$engine_iters" ] && fm_pid_alive "$watched"; do
+      sleep "$engine_step"
       i=$((i + 1))
     done
   done

@@ -173,6 +173,11 @@
 # FM_TEST_SUPERVISION_HOST_CLOCK names a file holding the park's elapsed
 # seconds, which the park and turn boundary checks read in place of SECONDS
 # only when FM_TEST_SEAM=1; tests/lib.sh arms the marker for isolated suites.
+# FM_SUPERVISION_HOST_POLL_STEP only takes effect when FM_TEST_SEAM=1: in
+# that mode it overrides the 0.5-second await_close and 0.2-second
+# start_successor sleeps so the host responds to test-clock changes and
+# watcher-ready lines at the same sub-second cadence the test already uses
+# elsewhere. Production callers leave the seam unset.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -219,6 +224,18 @@ TURN_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_TURN_TIMEOUT:-}" 1200)
 ROTATE_TURNS=$(numeric_or "${FM_SUPERVISION_HOST_ROTATE_TURNS:-}" 20)
 READY_TIMEOUT=$(numeric_or "${FM_SUPERVISION_HOST_READY_TIMEOUT:-}" 25)
 POLL=$(numeric_or "${FM_SUPERVISION_HOST_POLL:-}" 1)
+# In test mode only, a tighter inner step makes await_close detect test-clock
+# boundary changes and start_successor detect a ready successor at the same
+# sub-second cadence the rest of the suite uses. Production callers leave
+# FM_TEST_SEAM unset so the production 0.5s / 0.2s sleeps are unchanged.
+if [ "${FM_TEST_SEAM:-}" = 1 ] && [ -n "${FM_SUPERVISION_HOST_POLL_STEP:-}" ]; then
+  INNER_STEP=$FM_SUPERVISION_HOST_POLL_STEP
+else
+  INNER_STEP=0.5
+fi
+case "$INNER_STEP" in
+  *[!0-9.]*) INNER_STEP=0.5 ;;
+esac
 COOLDOWN=$FM_SUPERVISION_HOST_COOLDOWN
 COOLDOWN_MAX=3600
 AUTOARM_GEN=${FM_SUPERVISION_HOST_AUTOARM_GEN:-}
@@ -534,9 +551,11 @@ await_close() {
     boundary_reached && return 1
     # Probe the arm's exit twice a second between POLL-cadence checks, without
     # changing the outer identity refresh, readiness, or boundary cadence.
+    # The inner step is the production 0.5s, or the test seam value when
+    # FM_TEST_SEAM=1 and FM_SUPERVISION_HOST_POLL_STEP are both set.
     i=$((POLL * 2))
     while [ "$i" -gt 0 ] && fm_pid_alive "$ARM_PID"; do
-      sleep 0.5
+      sleep "$INNER_STEP"
       i=$((i - 1))
     done
   done
@@ -667,7 +686,9 @@ start_successor() {  # <predecessor-arm-pid>
     fi
     fm_pid_alive "$SUCCESSOR_PID" || return 1
     [ "$(date +%s)" -lt "$deadline" ] || return 1
-    sleep 0.2
+    # Successor-ready probe uses the same test seam as await_close so the
+    # next park is ready at the same cadence the rest of the suite uses.
+    sleep "$INNER_STEP"
   done
 }
 
