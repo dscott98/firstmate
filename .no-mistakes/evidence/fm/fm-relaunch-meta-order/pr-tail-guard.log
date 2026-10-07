@@ -1,0 +1,3 @@
+Original PR poll authenticates.
+Foreign control_relaunch_tx after the PR block is rejected.
+Foreign traceparent after the PR block is rejected.

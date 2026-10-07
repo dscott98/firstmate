@@ -1,0 +1,15 @@
+{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","focused":true,"foreground_cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","pane_id":"w1:p1","revision":0,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_65d43bf4fe0d41","workspace_id":"w1"},"tab":{"agent_status":"unknown","focused":true,"label":"1","number":1,"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},"type":"workspace_created","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,"label":"meta-order","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}}
+viewer attached to fm-lab-meta-order-proof (pid 3537681)
+{"error":{"code":"agent_not_ready","message":"agent meta-proof is blocked during startup and is not ready for prompts"},"id":"cli:agent:start"}
+dscott@panthro:~/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS$ codex -c fea
+tures.hooks=false
+
+  ✨ Update available! 0.155.1 -> 0.156.1
+
+  Release notes: https://github.com/openai/codex/releases/latest
+
+› 1. Update now (runs `npm install -g @openai/codex`)
+  2. Skip
+  3. Skip until next version
+
+  Press enter to continue

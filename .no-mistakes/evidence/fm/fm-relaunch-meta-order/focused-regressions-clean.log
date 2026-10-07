@@ -1,0 +1,4 @@
+ok - fm-control relaunch: an armed PR poll keeps authenticating with tracing off
+ok - fm-control relaunch: an armed PR poll keeps authenticating with tracing on
+ok - fm-control relaunch: delivery and concurrent task metadata publication serialize
+ok - fm-control relaunch: disabling tracing clears metadata and pane context

@@ -1,0 +1,20 @@
+{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","focused":true,"foreground_cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","pane_id":"w1:p1","revision":0,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_65d43c03f03421","workspace_id":"w1"},"tab":{"agent_status":"unknown","focused":true,"label":"1","number":1,"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},"type":"workspace_created","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,"label":"meta-order","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}}
+viewer attached to fm-lab-meta-order-proof (pid 3544144)
+{"id":"cli:agent:start","result":{"agent":{"agent":"codex","agent_status":"idle","cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","focused":true,"foreground_cwd":"/home/dscott/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS","interactive_ready":true,"name":"meta-proof","pane_id":"w1:p1","revision":2,"state_change_seq":1,"tab_id":"w1:t1","terminal_id":"term_65d43c03f03421","terminal_title":"01M4BQ1W7KYSSYHJ133MG...","terminal_title_stripped":"01M4BQ1W7KYSSYHJ133MG...","workspace_id":"w1"},"argv":["codex","-c","features.hooks=false","-c","check_for_update_on_startup=false"],"type":"agent_started"}}
+dscott@panthro:~/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS$ codex -c fea
+tures.hooks=false -c check_for_update_on_startup=false
+╭────────────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.155.1)                             │
+│                                                        │
+│ model:     gpt-6-astra   /model to change              │
+│ directory: ~/…/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS │
+╰────────────────────────────────────────────────────────╯
+
+  Tip: New Use /fast to enable our fastest inference with increased plan usage.
+
+• You have 2 usage limit resets available. Run /usage to use one.
+
+
+› Ask Codex to do anything
+
+  gpt-6-astra default · ~/.no-mistakes/worktrees/a1211da81307/01M4BQ1W7KYSSYHJ133MG4NQZS
