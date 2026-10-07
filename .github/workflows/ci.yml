@@ -115,8 +115,7 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          # Temporary pin: Pi 1.0.1 broke fm-calm-pi-extension.test.sh stock HTML rendering (grep/find HTML disappeared under /export calm.html); pin until upstream CI catches up or Pi 1.0.2 lands.
-          npm install -g '@earendil-works/pi-coding-agent@1.0.0'
+          npm install -g @earendil-works/pi-coding-agent
           npm ls -g --depth 0 @earendil-works/pi-coding-agent
       - name: Run portable parallel shard 1
         run: |
@@ -220,8 +219,7 @@ jobs:
       - name: Install the Pi package for the Pi extension tests
         run: |
           set -eu
-          # Temporary pin: Pi 1.0.1 broke fm-calm-pi-extension.test.sh stock HTML rendering (grep/find HTML disappeared under /export calm.html); pin until upstream CI catches up or Pi 1.0.2 lands.
-          npm install -g '@earendil-works/pi-coding-agent@1.0.0'
+          npm install -g @earendil-works/pi-coding-agent
           npm ls -g --depth 0 @earendil-works/pi-coding-agent
       - name: Run portable serial shard ${{ matrix.shard }}
         env:
