@@ -564,7 +564,7 @@ gh_auth_store() {
 }
 
 provision_apply() { # <id>
-  local id=$1 marker owner digest name dest foreign helper
+  local id=$1 marker owner digest name dest foreign helper gate_repo
   local -a git_auth=()
   PROVISION_LOCK="$PROVISION_LOCK_ROOT/.remote-task-provision-$(printf '%s' "$TARGET_HOME" | cksum | awk '{print $1}').lock"
   fm_lock_acquire_wait "$PROVISION_LOCK"
