@@ -79,6 +79,7 @@ After the Pi path passed end to end, the same spawn with `--harness claude` refu
 error: Claude in sandboxes waits for the PR7 real-host smoke test
 ```
 
+The output above is from the verified revision; the current spawn refusal points to the unsupported credential destination instead.
 The [placement limits](../remote-sandboxes.md#placement) own Claude's continued exclusion after the Pi smoke run.
 
 ## Findings the run produced

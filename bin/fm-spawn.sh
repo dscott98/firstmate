@@ -1687,7 +1687,7 @@ spawn_sandbox_task() {
   fi
   case "$SBX_HARNESS" in
   claude)
-    echo "error: Claude in sandboxes waits for the PR7 real-host smoke test" >&2
+    echo "error: Claude in sandboxes requires a credential design in config/sandbox-credentials, which currently refuses a Claude destination" >&2
     exit 1
     ;;
   codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
@@ -2017,7 +2017,7 @@ spawn_sandbox_task() {
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: sandbox placement is not for real use until its real-cluster verification lands (docs/remote-sandboxes.md, Current status)" >&2
+  echo "notice: sandbox placement real-cluster verification is recorded in docs/verification/remote-sandboxes.md" >&2
   echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$FM_REMOTE_TASK_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 

@@ -364,9 +364,9 @@ fm_remote_route_resolve "$META" "$ID" \
 #
 # relaunch runs as one primary-side sequence around that host transaction:
 #   1. Refuse, before the host is touched, anything the sandbox cannot run: a
-#      missing --note, a different harness, Claude (pending the PR7 real-host
-#      smoke test), and for a Pi harness a model whose provider differs from
-#      the recorded one - a sandbox holds only the credentials it was
+#      missing --note, a different harness, Claude (see the placement limits
+#      in docs/remote-sandboxes.md), and for a Pi harness a model whose provider
+#      differs from the recorded one - a sandbox holds only the credentials it was
 #      provisioned with, so a replacement it cannot authenticate would only
 #      stop the running agent.
 #   2. Send this home's data/<id>/brief.md through the host's brief-update when
