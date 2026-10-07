@@ -406,7 +406,7 @@ sandbox_relaunch() {
   [ "$NOTE_SET" = 1 ] && [ -n "$NOTE" ] \
     || die "relaunch of a $kind task requires --note (or --note-file): the replacement worker inherits the local copy but none of the conversation, so it must be told what happened"
   [ "$harness" != claude ] \
-    || die "Claude in sandboxes waits for the PR7 real-host smoke test, so task $ID's sandbox cannot run a Claude replacement; nothing was changed"
+    || die "Claude in sandboxes requires a credential design in config/sandbox-credentials, which currently refuses a Claude destination, so task $ID's sandbox cannot run a Claude replacement; nothing was changed"
   if [ "$HARNESS_SET" = 1 ] && [ "$NEW_HARNESS" != "$harness" ]; then
     die "task $ID's sandbox was provisioned with credentials for harness $harness only, so it cannot relaunch onto $NEW_HARNESS; nothing was changed"
   fi
