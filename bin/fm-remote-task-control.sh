@@ -81,6 +81,10 @@
 # and gh configuration. gh is required when a GitHub token is supplied.
 # The clone and its worktrees use the absolute gh auth git-credential helper,
 # scoped to https://github.com, with the same helper passed to the clone.
+# A no-mistakes ship's gate repository - the bare repository no-mistakes init
+# creates under the account and names as the clone's "no-mistakes" remote -
+# receives the same helper, because the pipeline fetches the trusted default
+# branch through it and a private origin needs the task's token there too.
 # No token enters argv, URLs, Git config, the launch environment, or output.
 # state/task-provision.journal records steps and credential names only.
 #
@@ -558,7 +562,7 @@ gh_auth_store() {
 }
 
 provision_apply() { # <id>
-  local id=$1 marker owner digest name dest foreign helper
+  local id=$1 marker owner digest name dest foreign helper gate_repo
   local -a git_auth=()
   PROVISION_LOCK="$PROVISION_LOCK_ROOT/.remote-task-provision-$(printf '%s' "$TARGET_HOME" | cksum | awk '{print $1}').lock"
   fm_lock_acquire_wait "$PROVISION_LOCK"
@@ -630,6 +634,15 @@ provision_apply() { # <id>
     (cd "$dest" && no-mistakes init >/dev/null && no-mistakes doctor >/dev/null) \
       || die "no-mistakes initialization failed for project $P_FIELD_project"
     journal "no-mistakes-init project=$P_FIELD_project"
+    if provision_has gh_token_b64; then
+      gate_repo=$(git -C "$dest" remote get-url no-mistakes) \
+        || die "could not resolve project $P_FIELD_project's no-mistakes gate repository"
+      if ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "" \
+        || ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "$helper"; then
+        die "could not configure GitHub authentication for project $P_FIELD_project's no-mistakes gate repository"
+      fi
+      journal "no-mistakes-gate project=$P_FIELD_project"
+    fi
   fi
 
   {

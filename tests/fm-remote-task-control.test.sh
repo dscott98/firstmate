@@ -53,7 +53,13 @@ cat > "$FAKEBIN/no-mistakes" <<'SH'
 #!/usr/bin/env bash
 [ "${FM_FAKE_NM_FAIL:-0}" != 1 ] || { echo "fake no-mistakes failure" >&2; exit 1; }
 case "${1:-}" in
-  init) touch .no-mistakes-init ;;
+  init)
+    touch .no-mistakes-init
+    gate="$HOME/.no-mistakes/repos/gate-$(printf '%s' "$PWD" | cksum | cut -d' ' -f1).git"
+    mkdir -p "$HOME/.no-mistakes/repos"
+    git init --quiet --bare "$gate"
+    git remote add no-mistakes "$gate"
+    ;;
   doctor) touch .no-mistakes-doctor ;;
 esac
 exit 0
@@ -327,6 +333,11 @@ test_provision_builds_a_private_marked_home() {
     "an inherited allowlist is unchanged"
   assert_equals "$ORIGIN_URL" "$(git -C "$TASK_HOME/projects/alpha" remote get-url origin)" "the project is cloned from its origin"
   assert_present "$TASK_HOME/projects/alpha/.no-mistakes-init" "a no-mistakes ship initializes no-mistakes in its clone"
+  gate_repo=$(git -C "$TASK_HOME/projects/alpha" remote get-url no-mistakes 2>/dev/null || true)
+  assert_equals 2 "$(git -C "$gate_repo" config --local --get-all credential.https://github.com.helper 2>/dev/null | wc -l | tr -d ' ')" \
+    "the no-mistakes gate repository resets and sets the absolute gh credential helper"
+  assert_contains "$(git -C "$gate_repo" config --local --get-all credential.https://github.com.helper 2>/dev/null)" \
+    "!$FAKEBIN/gh auth git-credential" "the gate repository's helper is the absolute gh helper"
 
   assert_absent "$TASK_HOME/config/credentials.env" "no environment credential file is created"
   assert_equals 600 "$(mode_of "$ACCOUNT_HOME/.config/gh/hosts.yml")" "the gh credential store is mode 0600"
@@ -342,6 +353,7 @@ test_provision_builds_a_private_marked_home() {
   assert_grep 'credential gh_token=gh/github.com' "$TASK_HOME/state/task-provision.journal" "the journal names the token's file"
   assert_grep 'credential pi_auth providers=minimax' "$TASK_HOME/state/task-provision.journal" "the journal names the Pi providers"
   assert_grep 'no-mistakes-init project=alpha' "$TASK_HOME/state/task-provision.journal" "the journal records no-mistakes init"
+  assert_grep 'no-mistakes-gate project=alpha' "$TASK_HOME/state/task-provision.journal" "the journal records the gate repository's credential helper"
   assert_grep 'complete' "$TASK_HOME/state/task-provision.journal" "the journal records completion"
   assert_no_secret_files "the provisioned home" "$TASK_HOME"
   assert_secret_only_in "the account home" "$ACCOUNT_HOME" "$ACCOUNT_HOME/.pi/agent/auth.json" "$ACCOUNT_HOME/.config/gh/hosts.yml"
@@ -359,6 +371,20 @@ test_provision_builds_a_private_marked_home() {
   assert_line "$TASK_HOME/.fm-task-home" kind=scout "a scout home records its kind"
   assert_no_line_prefix "$TASK_HOME/.fm-task-home" mode= "a scout records no delivery mode"
   assert_absent "$TASK_HOME/projects/alpha/.no-mistakes-init" "a scout never initializes no-mistakes"
+
+  # A no-mistakes ship without a GitHub token provisions with no gate-repository
+  # helper, because there is no token for it to serve.
+  new_case provision-no-token-gate
+  write_manifest "$CASE/manifest" ship pi no-mistakes
+  grep -v '^gh_token_b64=' "$CASE/manifest" > "$CASE/manifest.notoken" && mv "$CASE/manifest.notoken" "$CASE/manifest"
+  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
+  expect_code 0 "$rc" "a no-mistakes ship without a GitHub token should provision"$'\n'"$out"
+  gate_repo=$(git -C "$TASK_HOME/projects/alpha" remote get-url no-mistakes 2>/dev/null || true)
+  [ -n "$gate_repo" ] || fail "the fake no-mistakes init did not name its gate repository"
+  assert_equals "" "$(git -C "$gate_repo" config --local --get-all credential.https://github.com.helper 2>/dev/null)" \
+    "a provision without a GitHub token configures no gate-repository helper"
+  assert_no_grep 'no-mistakes-gate' "$TASK_HOME/state/task-provision.journal" "the journal records no gate step without a token"
+
   pass "provision builds a private home, writes the 0600 credentials, and marks the home last"
 }
 

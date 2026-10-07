@@ -25,8 +25,9 @@
 #   status-append command naming any status file but
 #   <selected-home>/state/<task-id>.status (bin/fm-brief-heading-lib.sh's
 #   local and remote status validators), so the brief's reporting path agrees
-#   with where the worker runs. Sandbox status mirroring is still deferred
-#   (docs/remote-sandboxes.md, "Current status").
+#   with where the worker runs; a sandbox-rendered brief names the sandbox
+#   home's status file, and spawn arms that task's status mirror at publish
+#   (docs/remote-sandboxes.md, "Status mirror and routed verbs").
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
@@ -284,7 +285,7 @@
 #   view. Before anything exists it refuses, each by name, --secondmate, --mode
 #   local-only, a task id too long to name its status mirror's process-event
 #   source, an explicit --backend other than tmux, a raw or unverified
-#   harness, Claude pending the PR7 real-host smoke test, a Pi harness whose
+#   harness, Claude without sandbox credential support, a Pi harness whose
 #   --model names no provider or no credential for it, a brief carrying the --herdr-lab isolation contract or not naming the
 #   sandbox home's status file, an unregistered project or one with no clonable
 #   origin, an existing task record, a missing or invalid config/sandbox-provider
@@ -1686,7 +1687,7 @@ spawn_sandbox_task() {
   fi
   case "$SBX_HARNESS" in
   claude)
-    echo "error: Claude in sandboxes waits for the PR7 real-host smoke test" >&2
+    echo "error: Claude in sandboxes requires a credential design in config/sandbox-credentials, which currently refuses a Claude destination" >&2
     exit 1
     ;;
   codex | opencode | pi | pi-signed | grok | kimi | cursor | gemini | muse | rovo | omp | agy | devin) ;;
@@ -2016,7 +2017,7 @@ spawn_sandbox_task() {
   spawn_delivery=
   [ "$KIND" != ship ] || spawn_delivery=" mode=$MODE yolo=$YOLO"
   credentials=${FM_SANDBOX_CREDENTIAL_NAMES// /,}
-  echo "notice: sandbox placement is not for real use until its real-cluster verification lands (docs/remote-sandboxes.md, Current status)" >&2
+  echo "notice: sandbox placement real-cluster verification is recorded in docs/verification/remote-sandboxes.md" >&2
   echo "spawned $ID harness=$SBX_HARNESS kind=$KIND$spawn_delivery window=remote:$ID worktree=$FM_REMOTE_TASK_ROUTE_WORKTREE placement=sandbox remote=$SANDBOX_ALIAS sandbox=$SANDBOX_NAME profile=$SBX_PROFILE credentials=${credentials:-none}"
 }
 

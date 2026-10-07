@@ -466,7 +466,7 @@ test_refusals_happen_before_any_sandbox_exists() {
   sandbox_brief --mode direct-PR
 
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness claude --placement sandbox
-  assert_refused_before_any_sandbox "Claude" "Claude in sandboxes waits for the PR7 real-host smoke test"
+  assert_refused_before_any_sandbox "Claude" "Claude in sandboxes requires a credential design in config/sandbox-credentials, which currently refuses a Claude destination"
 
   git -C "$PRIMARY/projects/alpha" remote set-url origin "https://user:$GH_SECRET@github.com/org/repo.git"
   run_spawn "$ID" "$PRIMARY/projects/alpha" --mode direct-PR --yolo off --harness pi --model minimax/m2 --placement sandbox
@@ -584,8 +584,8 @@ test_ship_launches_in_a_sandbox_and_records_its_route() {
   expect_code 0 "$RC" "a sandbox ship should launch"$'\n'"$OUT"
   assert_contains "$OUT" "spawned $ID harness=pi kind=ship mode=direct-PR yolo=off window=remote:$ID worktree=$HOST_DIR/wt placement=sandbox remote=alias-$ID sandbox=sbx-$ID profile=default credentials=gh-alpha,minimax" \
     "the success line names the placement, route, sandbox, profile, and credential names"
-  assert_contains "$OUT" "sandbox placement is not for real use until its real-cluster verification lands" \
-    "success states the operational limitation"
+  assert_contains "$OUT" "sandbox placement real-cluster verification is recorded in docs/verification/remote-sandboxes.md" \
+    "success points to the real-cluster verification record"
   assert_line "adapter=remote-reply" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
     "the status mirror is armed at publish"
   assert_line "$CODE_ROOT/bin/fm-procevent-remote-reply.sh" "$PRIMARY/state/procevent/remote-reply-$ID.source" \
