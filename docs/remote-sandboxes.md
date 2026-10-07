@@ -37,7 +37,7 @@ What is wired today:
 - [Teardown, TTL, and orphans](#teardown-ttl-and-orphans): teardown destroys a placed task's sandbox only behind its landed-work gate, PR registration reads a sandbox ship's heads without its worktree, and session start retries pending destroys, renews TTLs, and reports orphans.
 - [Supervision and lifecycle control](#supervision-and-lifecycle-control): the watcher observes each placed task through its host on its own cadence for stale, dead-record, and unreachable wakes and the steering re-ring ladder; interrupt, exit, and relaunch run on the host, a relaunch republishes the record, and a rebooted host relaunches from the brief on disk; the fleet view shows a placed task's sandbox fields.
 
-Sandbox placement is not for real use until the provider satisfies the adapter contract and real-cluster verification passes.
+Real-cluster verification has passed for the reference provider on a full task lifecycle; [the verification record](verification/remote-sandboxes.md) owns its scope.
 A launch that never published its final record still needs operator reconciliation; follow [orphan handling](../.agents/skills/bootstrap-diagnostics/SKILL.md) before removing a sandbox that may hold work.
 
 ## Principles
@@ -190,7 +190,7 @@ A sandbox host runs [`bin/fm-remote-task-control.sh`](../bin/fm-remote-task-cont
 Credentials are written only on the host: Pi entries into the account's `~/.pi/agent/auth.json` and the GitHub token into the account's gh credential store for github.com, each mode 0600.
 Provision requires gh when a GitHub token is supplied, passes the token to `gh auth login --insecure-storage --with-token` on stdin, and restores the previous gh configuration if provisioning fails.
 Storing the repository token in gh deliberately replaces passing `GH_TOKEN`: gh and git authenticate with the stored token exactly as they would with `GH_TOKEN`.
-Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees; the token never enters command arguments or the launch environment.
+Git uses the absolute `gh auth git-credential` helper scoped to HTTPS github.com for the clone and its worktrees, and a no-mistakes ship's gate repository receives the same helper so the pipeline can fetch a private origin's trusted default branch through it; the token never enters command arguments or the launch environment.
 
 Use the remote-rendered brief described under [placement](#placement); [the brief header](../bin/fm-brief.sh) owns its path substitution contract.
 A sandbox brief must be self-contained, because the sandbox cannot read the supervising home's reports.
@@ -253,4 +253,4 @@ Snapshot rows for placed tasks are covered by `tests/fm-fleet-snapshot-view.test
 The status mirror's route kind, peek, steering, and the current-state composition are also covered by `tests/fm-remote-reply.test.sh`, `tests/fm-peek-remote.test.sh`, `tests/fm-send-remote-delivery.test.sh`, and `tests/fm-crew-state.test.sh`.
 Brief rendering for a sandbox home and the spawn refusal are covered by `tests/fm-brief.test.sh` and `tests/fm-task-delivery.test.sh`.
 Task route resolution and the task readiness profile are covered by `tests/fm-on.test.sh` and `tests/fm-remote-doctor.test.sh`, part of the [remote second-mate suite](remote-secondmates.md#portable-tests).
-A real-cluster smoke run lands with the final stage of the plan.
+The real-cluster smoke run behind these guarantees is recorded in [the sandbox verification record](verification/remote-sandboxes.md).

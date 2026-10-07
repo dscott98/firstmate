@@ -25,8 +25,9 @@
 #   status-append command naming any status file but
 #   <selected-home>/state/<task-id>.status (bin/fm-brief-heading-lib.sh's
 #   local and remote status validators), so the brief's reporting path agrees
-#   with where the worker runs. Sandbox status mirroring is still deferred
-#   (docs/remote-sandboxes.md, "Current status").
+#   with where the worker runs; a sandbox-rendered brief names the sandbox
+#   home's status file, and spawn arms that task's status mirror at publish
+#   (docs/remote-sandboxes.md, "Status mirror and routed verbs").
 #   Every ship or scout spawn renders `launch-brief.md`; for a no-mistakes ship
 #   it also carries the current `--intent` contract and the extracted captain
 #   intent. A legacy mixed Task is accepted there only under bin/fm-dod-lib.sh's
