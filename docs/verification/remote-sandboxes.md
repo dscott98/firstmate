@@ -1,7 +1,5 @@
 # Remote task sandbox verification
 
-Audience: maintainer verification.
-
 This record contains the real-cluster evidence for the sandbox placement guarantees in [the operator guide](../remote-sandboxes.md).
 The guide owns current setup, safety boundaries, and limits.
 Task chronology, the disposable repository, and the full delivery transcript stay in the private task evidence.
@@ -81,7 +79,7 @@ After the Pi path passed end to end, the same spawn with `--harness claude` refu
 error: Claude in sandboxes waits for the PR7 real-host smoke test
 ```
 
-Claude stays unavailable in sandboxes until a credential design for it lands in `config/sandbox-credentials`, which today refuses a Claude destination by contract.
+The [placement limits](../remote-sandboxes.md#placement) own Claude's continued exclusion after the Pi smoke run.
 
 ## Findings the run produced
 

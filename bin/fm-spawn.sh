@@ -285,7 +285,7 @@
 #   view. Before anything exists it refuses, each by name, --secondmate, --mode
 #   local-only, a task id too long to name its status mirror's process-event
 #   source, an explicit --backend other than tmux, a raw or unverified
-#   harness, Claude pending the PR7 real-host smoke test, a Pi harness whose
+#   harness, Claude without sandbox credential support, a Pi harness whose
 #   --model names no provider or no credential for it, a brief carrying the --herdr-lab isolation contract or not naming the
 #   sandbox home's status file, an unregistered project or one with no clonable
 #   origin, an existing task record, a missing or invalid config/sandbox-provider
