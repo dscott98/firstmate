@@ -523,9 +523,11 @@ test_relaunch_preserves_durable_task_metadata() {
 }
 
 test_relaunch_keeps_an_armed_pr_poll_authenticating() {
-  local dir meta template out rc
-  dir=$(new_case armed-pr-poll rl78)
+  local dir meta template out rc trace_mode=$1
+  dir=$(new_case "armed-pr-poll-$trace_mode" rl78)
   add_ship_task "$dir" rl78 claude
+  printf '%s\n' "$$" > "$dir/home/state/.lock"
+  printf '%s %s\n' "$$" "$trace_mode" > "$dir/home/state/.trace-context-effective"
   meta="$dir/home/state/rl78.meta"
   template="$ROOT/bin/fm-pr-poll.sh"
   # Seed the record the way bin/fm-pr-check.sh really arms it: pr= and, when
@@ -552,11 +554,15 @@ test_relaunch_keeps_an_armed_pr_poll_authenticating() {
   expect_code 0 "$rc" "a relaunch of a PR-armed task should succeed"$'\n'"$out"
   [ -n "$(meta_field "$dir" rl78 control_relaunch_tx)" ] \
     || fail "the relaunch transaction marker must still be recorded"
+  if [ "$trace_mode" = on ]; then
+    fm_trace_context_valid "$(meta_field "$dir" rl78 traceparent)" \
+      || fail "the relaunched record must contain a valid trace carrier"
+  fi
   fm_pr_metadata_identity_parse "$meta" \
     || fail "the relaunched record's PR identity block no longer parses"
   fm_pr_poll_artifacts_valid "$dir/home/state" rl78 "$template" \
-    || fail "relaunch broke the armed PR poll: control_relaunch_tx landed after pr= and the identity tail was rejected"
-  pass "fm-control relaunch: an armed PR poll keeps authenticating after relaunch"
+    || fail "relaunch broke the armed PR poll: the identity tail was rejected"
+  pass "fm-control relaunch: an armed PR poll keeps authenticating with tracing $trace_mode"
 }
 
 test_relaunch_serializes_concurrent_durable_metadata_publication() {
@@ -2469,7 +2475,8 @@ test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
-test_relaunch_keeps_an_armed_pr_poll_authenticating
+test_relaunch_keeps_an_armed_pr_poll_authenticating off
+test_relaunch_keeps_an_armed_pr_poll_authenticating on
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
 test_relaunch_appends_the_progress_note_to_the_instructions
