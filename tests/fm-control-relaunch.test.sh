@@ -24,6 +24,8 @@ set -u
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-control-lib.sh"
 # shellcheck source=/dev/null
+. "$ROOT/bin/fm-pr-lib.sh"
+# shellcheck source=/dev/null
 . "$ROOT/bin/fm-trace-context-lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/bin/fm-tasks-axi-lib.sh"
@@ -518,6 +520,49 @@ test_relaunch_preserves_durable_task_metadata() {
   [ "$(meta_field "$dir" rl19 decisions_reviewed)" = 1 ] \
     || fail "the task decision state must survive relaunch"
   pass "fm-control relaunch: durable task metadata survives replacement launch publication"
+}
+
+test_relaunch_keeps_an_armed_pr_poll_authenticating() {
+  local dir meta template out rc trace_mode=$1
+  dir=$(new_case "armed-pr-poll-$trace_mode" rl78)
+  add_ship_task "$dir" rl78 claude
+  printf '%s\n' "$$" > "$dir/home/state/.lock"
+  printf '%s %s\n' "$$" "$trace_mode" > "$dir/home/state/.trace-context-effective"
+  meta="$dir/home/state/rl78.meta"
+  template="$ROOT/bin/fm-pr-poll.sh"
+  # Seed the record the way bin/fm-pr-check.sh really arms it: pr= and, when
+  # a forge head was readable, pr_head= land as the LAST lines, then the poll
+  # artifacts are published through the same fm_pr_poll_prepare /
+  # fm_pr_poll_publish_prepared pair fm-pr-check.sh uses. The identity parse
+  # treats any other key after pr= as invalid, so a relaunch that appends its
+  # control_relaunch_tx marker after the preserved block rejects the armed
+  # poll and the watcher stops waiting for the merge.
+  {
+    printf '%s\n' 'pr=https://github.com/example/repo/pull/78'
+    printf '%s\n' 'pr_head=0123456789abcdef0123456789abcdef01234567'
+  } >> "$meta"
+  fm_pr_poll_prepare "$dir/home/state" rl78 github \
+    https://github.com/example/repo/pull/78 github.com example/repo 78 \
+    "$template" \
+    || fail "could not prepare the armed PR poll fixture"
+  fm_pr_poll_publish_prepared \
+    || fail "could not publish the armed PR poll fixture"
+  fm_pr_poll_artifacts_valid "$dir/home/state" rl78 "$template" \
+    || fail "the armed PR poll fixture did not authenticate before the relaunch"
+
+  out=$(run_control "$dir" rl78 relaunch --note "keep waiting on the PR"); rc=$?
+  expect_code 0 "$rc" "a relaunch of a PR-armed task should succeed"$'\n'"$out"
+  [ -n "$(meta_field "$dir" rl78 control_relaunch_tx)" ] \
+    || fail "the relaunch transaction marker must still be recorded"
+  if [ "$trace_mode" = on ]; then
+    fm_trace_context_valid "$(meta_field "$dir" rl78 traceparent)" \
+      || fail "the relaunched record must contain a valid trace carrier"
+  fi
+  fm_pr_metadata_identity_parse "$meta" \
+    || fail "the relaunched record's PR identity block no longer parses"
+  fm_pr_poll_artifacts_valid "$dir/home/state" rl78 "$template" \
+    || fail "relaunch broke the armed PR poll: the identity tail was rejected"
+  pass "fm-control relaunch: an armed PR poll keeps authenticating with tracing $trace_mode"
 }
 
 test_relaunch_serializes_concurrent_durable_metadata_publication() {
@@ -2430,6 +2475,8 @@ test_relaunch_refuses_before_exit_when_the_composer_holds_pending_text
 test_relaunch_refuses_before_exit_when_the_composer_state_is_unproven
 test_relaunch_from_linked_home_preserves_recorded_worktree
 test_relaunch_preserves_durable_task_metadata
+test_relaunch_keeps_an_armed_pr_poll_authenticating off
+test_relaunch_keeps_an_armed_pr_poll_authenticating on
 test_relaunch_serializes_concurrent_durable_metadata_publication
 test_disabled_relaunch_clears_prior_trace_context
 test_relaunch_appends_the_progress_note_to_the_instructions
