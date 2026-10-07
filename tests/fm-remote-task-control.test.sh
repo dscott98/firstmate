@@ -55,7 +55,6 @@ cat > "$FAKEBIN/no-mistakes" <<'SH'
 case "${1:-}" in
   init)
     touch .no-mistakes-init
-    [ "${FM_FAKE_NM_NOREMOTE:-0}" = 1 ] && exit 0
     gate="$HOME/.no-mistakes/repos/gate-$(printf '%s' "$PWD" | cksum | cut -d' ' -f1).git"
     mkdir -p "$HOME/.no-mistakes/repos"
     git init --quiet --bare "$gate"
@@ -386,16 +385,6 @@ test_provision_builds_a_private_marked_home() {
     "a provision without a GitHub token configures no gate-repository helper"
   assert_no_grep 'no-mistakes-gate' "$TASK_HOME/state/task-provision.journal" "the journal records no gate step without a token"
 
-  # An init that leaves no no-mistakes remote skips the gate step rather than failing.
-  new_case provision-gate-no-remote
-  write_manifest "$CASE/manifest" ship pi no-mistakes
-  FM_FAKE_NM_NOREMOTE=1
-  export FM_FAKE_NM_NOREMOTE
-  out=$(run_control provision "$ID" < "$CASE/manifest" 2>&1); rc=$?
-  unset FM_FAKE_NM_NOREMOTE
-  expect_code 0 "$rc" "a no-mistakes init without a gate remote should still provision"$'\n'"$out"
-  assert_grep 'no-mistakes-gate project=alpha absent=no-remote' "$TASK_HOME/state/task-provision.journal" \
-    "the journal records the skipped gate step"
   pass "provision builds a private home, writes the 0600 credentials, and marks the home last"
 }
 

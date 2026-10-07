@@ -85,6 +85,6 @@ Claude stays unavailable in sandboxes until a credential design for it lands in 
 
 ## Findings the run produced
 
-Provisioning originally wired the absolute `gh auth git-credential` helper into the project clone but not into the no-mistakes gate repository, so a no-mistakes ship of a private repository failed its first pipeline run at the trusted-default-branch fetch; `bin/fm-remote-task-control.sh` now configures the gate repository with the same helper, and `tests/fm-remote-task-control.test.sh` covers the configuration, its absence without a token, and the skip when an init leaves no gate remote.
+Provisioning originally wired the absolute `gh auth git-credential` helper into the project clone but not into the no-mistakes gate repository, so a no-mistakes ship of a private repository failed its first pipeline run at the trusted-default-branch fetch; `bin/fm-remote-task-control.sh` now configures the gate repository with the same helper, and `tests/fm-remote-task-control.test.sh` covers the configuration and its absence without a token.
 
 Two environment observations are operational facts rather than firstmate defects: a no-mistakes run against a repository with no CI waits at the ci step until the trusted default branch declares `no_ci: true` (the disposable repository's owner seeded that declaration on `main`), and a scratch home whose state directory carries group or other write bits fails the status-mirror arm after launch with the arm named for rerun, because the process-event state root must be private.

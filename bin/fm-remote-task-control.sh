@@ -84,9 +84,7 @@
 # A no-mistakes ship's gate repository - the bare repository no-mistakes init
 # creates under the account and names as the clone's "no-mistakes" remote -
 # receives the same helper, because the pipeline fetches the trusted default
-# branch through it and a private origin needs the task's token there too; a
-# clone whose init left no such remote skips the step (journaled) rather than
-# failing, and the pipeline surfaces any resulting fetch refusal itself.
+# branch through it and a private origin needs the task's token there too.
 # No token enters argv, URLs, Git config, the launch environment, or output.
 # state/task-provision.journal records steps and credential names only.
 #
@@ -637,16 +635,13 @@ provision_apply() { # <id>
       || die "no-mistakes initialization failed for project $P_FIELD_project"
     journal "no-mistakes-init project=$P_FIELD_project"
     if provision_has gh_token_b64; then
-      gate_repo=$(git -C "$dest" remote get-url no-mistakes 2>/dev/null || true)
-      if [ -n "$gate_repo" ]; then
-        if ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "" \
-          || ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "$helper"; then
-          die "could not configure GitHub authentication for project $P_FIELD_project's no-mistakes gate repository"
-        fi
-        journal "no-mistakes-gate project=$P_FIELD_project"
-      else
-        journal "no-mistakes-gate project=$P_FIELD_project absent=no-remote"
+      gate_repo=$(git -C "$dest" remote get-url no-mistakes) \
+        || die "could not resolve project $P_FIELD_project's no-mistakes gate repository"
+      if ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "" \
+        || ! git -C "$gate_repo" config --local --add credential.https://github.com.helper "$helper"; then
+        die "could not configure GitHub authentication for project $P_FIELD_project's no-mistakes gate repository"
       fi
+      journal "no-mistakes-gate project=$P_FIELD_project"
     fi
   fi
 
